@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 
-from filesystem import file_target
+from filesystem import read_text_file
 
 
 def process_identity(pid: int) -> str:
@@ -30,7 +30,7 @@ def view(arguments: list[str]) -> int:
     rex, server, session, origin, bat, root, filename = arguments
     exit_code = 1
     try:
-        target = file_target(root, filename)
+        target, content = read_text_file(root, filename)
         env = dict(os.environ)
         env["BAT_PAGER"] = "less --RAW-CONTROL-CHARS"
         env["LESSHISTFILE"] = "-"
@@ -41,10 +41,13 @@ def view(arguments: list[str]) -> int:
                 "--paging=always",
                 "--color=always",
                 "--style=numbers,header",
-                "--",
+                "--file-name",
                 target["path"],
+                "--",
+                "-",
             ],
             env=env,
+            input=content,
             check=False,
         ).returncode
         if exit_code:
@@ -54,16 +57,34 @@ def view(arguments: list[str]) -> int:
     finally:
         if exit_code and sys.stdin.isatty():
             input("Press Enter to return to the project terminal: ")
-        focused = subprocess.run(
-            [rex, "-S", server, "--autostart=false", "focus", "-s", session, origin],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if focused.returncode:
+        focus_error: str | None = None
+        try:
+            focused = subprocess.run(
+                [
+                    rex,
+                    "-S",
+                    server,
+                    "--autostart=false",
+                    "focus",
+                    "-s",
+                    session,
+                    origin,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if focused.returncode:
+                focus_error = (
+                    f"Rex exited {focused.returncode}: {focused.stderr.strip()}"
+                )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            focus_error = f"{type(error).__name__}: {error}"
+        if focus_error is not None:
             print(
-                "Origin no longer available; unrelated panes left intact",
+                f"Cannot return focus to the project terminal: {focus_error}. "
+                "Unrelated panes left intact",
                 file=sys.stderr,
             )
             if sys.stdin.isatty():

@@ -18,11 +18,13 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
 from typing import cast
 from urllib.parse import unquote
 
@@ -402,12 +404,18 @@ def _loader(paths: _Paths) -> bytes:
     )
 
 
-def _without_loader(data: bytes, loader: bytes) -> bytes:
+def _without_loader(
+    data: bytes, loader: bytes, *, remove_separator: bool = False
+) -> bytes:
     if data.count(_BEGIN) != 1 or data.count(_END) != 1 or data.count(loader) != 1:
         raise RuntimeError(
             "RexDeck loader changed or is ambiguous; preserve it for manual reconciliation"
         )
-    return data.replace(loader, b"", 1)
+    prefix, _, tail = data.partition(loader)
+    # A separator still belongs to the user's config when a later statement needs it.
+    if remove_separator and not tail and prefix.endswith(b"\n"):
+        prefix = prefix[:-1]
+    return prefix + tail
 
 
 def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
@@ -632,18 +640,45 @@ def _seed(
     return _json({"plugins": result})
 
 
+@contextmanager
+def _defer_sigint() -> Iterator[None]:
+    """Finish a short ownership handoff or recovery before delivering Ctrl-C."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    interrupted = False
+
+    def defer(_signum: int, _frame: FrameType | None) -> None:
+        nonlocal interrupted
+        interrupted = True
+
+    previous = signal.signal(signal.SIGINT, defer)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+        if interrupted and callable(previous):
+            previous(signal.SIGINT, None)
+
+
 def _rollback(changes: list[_Change]) -> list[str]:
     conflicts: list[str] = []
     for change in reversed(changes):
         try:
             current = _file(change.path)
+            # Changes are registered before writing, including a write that raised
+            # after its atomic replacement. An unchanged attempt needs no undo.
+            if current == change.before:
+                continue
             if change.loader and current.data is not None and change.after is not None:
                 before_data = change.before.data or b""
                 if change.after.startswith(before_data):
                     added = change.after[len(before_data) :]
-                    if current.data.count(added) != 1:
-                        raise RuntimeError(f"Rollback loader conflict: {change.path}")
-                    restored = current.data.replace(added, b"", 1)
+                    restored = _without_loader(
+                        current.data,
+                        added.removeprefix(b"\n"),
+                        remove_separator=added.startswith(b"\n"),
+                    )
                 elif current.data.startswith(change.after):
                     restored = before_data + current.data[len(change.after) :]
                 else:
@@ -678,22 +713,28 @@ def _apply_changes(
         for change in planned:
             if paths.selected.resolve(strict=True) != paths.config:
                 raise RuntimeError("Selected Rex config symlink changed during setup")
-            _replace(change.path, change.before, change.after)
             applied.append(change)
+            _replace(change.path, change.before, change.after)
         _check(setup)
         _reload(setup)
-        _replace(paths.receipt, receipt_before, _json(receipt))
-    except (RuntimeError, OSError) as exc:
-        conflicts = _rollback(applied)
-        try:
-            _reload(setup)
-        except RuntimeError as reload_error:
-            conflicts.append(f"Rollback config reload failed: {reload_error}")
+        publication = _Change(paths.receipt, receipt_before, _json(receipt))
+        applied.append(publication)
+        _replace(publication.path, publication.before, publication.after)
+    except (RuntimeError, OSError, KeyboardInterrupt) as exc:
+        with _defer_sigint():
+            conflicts = _rollback(applied)
+            try:
+                _reload(setup)
+            except RuntimeError as reload_error:
+                conflicts.append(f"Rollback config reload failed: {reload_error}")
         suffix = (
             f"; recovery needs judgment: {'; '.join(conflicts)}"
             if conflicts
             else "; owned changes rolled back"
         )
+        if isinstance(exc, KeyboardInterrupt):
+            exc.add_note(f"Apply cancelled{suffix}")
+            raise
         raise RuntimeError(f"Apply failed: {exc}{suffix}") from exc
 
 
@@ -1084,35 +1125,43 @@ def _start(setup: Setup) -> dict[str, object]:
     argv = [str(runtime.hub), "-config", str(paths.hub), "-sdk", str(runtime.sdk)]
     if setup.real_server:
         argv.append("-real-server")
-    try:
-        with (paths.workspace / "process.log").open("ab") as log:
-            child = subprocess.Popen(
-                argv,
-                env=_env(setup),
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=log,
-                start_new_session=True,
-            )
-    except OSError as exc:
-        raise RuntimeError(f"Cannot start the prepared hub: {exc}") from exc
-    try:
-        identity = _process(child.pid)
-        if identity is None or not identity.endswith(" ".join(argv)):
-            raise RuntimeError(
-                f"Started hub identity could not be captured: PID {child.pid}"
-            )
-        receipt["launch"] = {"pid": child.pid, "identity": identity, "argv": argv}
-        _replace(paths.receipt, receipt_before, _json(receipt))
-    except RuntimeError:
-        child.terminate()
+    # SIGINT may land inside Popen after the detached child exists but before
+    # Python assigns its handle. Defer it until ownership or exact-child cleanup.
+    with _defer_sigint():
         try:
-            child.wait(timeout=_STOP_WAIT)
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"Launch receipt failed and child {child.pid} did not terminate; inspect process.log"
-            ) from exc
-        raise
+            with (paths.workspace / "process.log").open("ab") as log:
+                child = subprocess.Popen(
+                    argv,
+                    env=_env(setup),
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=log,
+                    start_new_session=True,
+                )
+        except OSError as exc:
+            raise RuntimeError(f"Cannot start the prepared hub: {exc}") from exc
+        try:
+            identity = _process(child.pid)
+            if identity is None or not identity.endswith(" ".join(argv)):
+                raise RuntimeError(
+                    f"Started hub identity could not be captured: PID {child.pid}"
+                )
+            receipt["launch"] = {"pid": child.pid, "identity": identity, "argv": argv}
+            _replace(paths.receipt, receipt_before, _json(receipt))
+        except (RuntimeError, OSError, KeyboardInterrupt) as exc:
+            try:
+                child.terminate()
+                child.wait(timeout=_STOP_WAIT)
+            except (OSError, subprocess.TimeoutExpired) as cleanup_error:
+                message = (
+                    f"Launch receipt failed and child {child.pid} did not terminate; "
+                    "inspect process.log"
+                )
+                if isinstance(exc, KeyboardInterrupt):
+                    exc.add_note(message)
+                    raise exc from cleanup_error
+                raise RuntimeError(message) from cleanup_error
+            raise
     receipt_before = _file(paths.receipt)
     deadline = time.monotonic() + _START_WAIT
     while time.monotonic() < deadline:
@@ -1254,21 +1303,26 @@ def _disable(setup: Setup) -> dict[str, object]:
             for path in (paths.hub, paths.palette)
             if _file(path).data is not None
         ]
+        conflicts = [
+            f"Disabled setup retains changed artifact: {path}" for path in stale
+        ]
+        if receipt.get("conflicts") != conflicts:
+            receipt["conflicts"] = conflicts
+            _replace(paths.receipt, receipt_before, _json(receipt))
         return {
             "state": "conflict" if stale else "disabled",
             "server": setup.server,
-            "conflicts": [
-                f"Disabled setup retains changed artifact: {path}" for path in stale
-            ],
+            "conflicts": conflicts,
         }
     current = _file(paths.config)
     assert current.data is not None
     loader = _loader(paths)
     try:
-        restored = _without_loader(current.data, loader)
-        separator = receipt.get("loader_separator")
-        if separator == "\n" and current.data.count(b"\n" + loader) == 1:
-            restored = current.data.replace(b"\n" + loader, b"", 1)
+        restored = _without_loader(
+            current.data,
+            loader,
+            remove_separator=receipt.get("loader_separator") == "\n",
+        )
     except RuntimeError as exc:
         return {"state": "conflict", "server": setup.server, "conflicts": [str(exc)]}
     palette = _file(paths.palette)
@@ -1298,20 +1352,26 @@ def _disable(setup: Setup) -> dict[str, object]:
         for change in changes:
             if paths.selected.resolve(strict=True) != paths.config:
                 raise RuntimeError("Selected Rex config symlink changed during disable")
-            _replace(change.path, change.before, change.after)
             applied.append(change)
+            _replace(change.path, change.before, change.after)
         _check(setup)
         _reload(setup)
         receipt["enabled"] = False
         receipt["launch"] = None
         receipt["conflicts"] = conflicts
-        _replace(paths.receipt, receipt_before, _json(receipt))
-    except (RuntimeError, OSError) as exc:
-        recovery = _rollback(applied)
-        try:
-            _reload(setup)
-        except RuntimeError as reload_error:
-            recovery.append(str(reload_error))
+        publication = _Change(paths.receipt, receipt_before, _json(receipt))
+        applied.append(publication)
+        _replace(publication.path, publication.before, publication.after)
+    except (RuntimeError, OSError, KeyboardInterrupt) as exc:
+        with _defer_sigint():
+            recovery = _rollback(applied)
+            try:
+                _reload(setup)
+            except RuntimeError as reload_error:
+                recovery.append(str(reload_error))
+        if isinstance(exc, KeyboardInterrupt):
+            exc.add_note(f"Disable cancelled; rollback conflicts: {recovery}")
+            raise
         raise RuntimeError(
             f"Disable failed: {exc}; rollback conflicts: {recovery}"
         ) from exc

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sqlite3
 import stat
 import subprocess
@@ -281,7 +282,7 @@ class LifecycleTests(unittest.TestCase):
             if first:
                 first = False
                 self.target.write_bytes(
-                    self.target.read_bytes() + b"-- concurrent user edit\n"
+                    self.target.read_bytes() + b"later_setting = true\n"
                 )
                 raise RuntimeError("reload refused")
 
@@ -289,9 +290,73 @@ class LifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "reload refused"):
             self.apply()
         self.assertEqual(
-            self.target.read_bytes(), self.original + b"-- concurrent user edit\n"
+            self.target.read_bytes(), self.original + b"\nlater_setting = true\n"
         )
         self.assertTrue(self.config.is_symlink())
+
+    def test_cancelled_first_apply_undoes_every_committed_write_and_receipt(
+        self,
+    ) -> None:
+        artifacts = (
+            self.workspace / "hub.json",
+            self.root / "rexdeck_palette.lua",
+            self.target,
+            self.selected_file(),
+            self.workspace / "setup.json",
+        )
+        original_replace = life._replace
+        for interrupted_path in artifacts:
+            with self.subTest(path=interrupted_path):
+                fired = False
+
+                def interrupted(
+                    path: Path,
+                    before: life._File,
+                    after: bytes | None,
+                    *,
+                    mode: int | None = None,
+                ) -> None:
+                    nonlocal fired
+                    original_replace(path, before, after, mode=mode)
+                    if path == interrupted_path and not fired:
+                        fired = True
+                        raise KeyboardInterrupt
+
+                with patch.object(life, "_replace", side_effect=interrupted):
+                    with self.assertRaises(KeyboardInterrupt):
+                        self.apply()
+                self.assertEqual(self.target.read_bytes(), self.original)
+                self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
+                for artifact in artifacts:
+                    if artifact != self.target:
+                        self.assertFalse(artifact.exists())
+                self.assertEqual(life.status(self.setup)["state"], "disabled")
+                self.assertFalse(life.inspect_setup(self.setup)["owned"])
+        self.apply()
+
+    def test_cancelled_apply_reload_preserves_later_unrelated_statement(self) -> None:
+        first = True
+
+        def cancelled_reload() -> None:
+            nonlocal first
+            if first:
+                first = False
+                self.target.write_bytes(
+                    self.target.read_bytes() + b"later_setting = true\n"
+                )
+                raise KeyboardInterrupt
+
+        self.on_reload = cancelled_reload
+        with self.assertRaises(KeyboardInterrupt):
+            self.apply()
+        self.assertEqual(
+            self.target.read_bytes(), self.original + b"\nlater_setting = true\n"
+        )
+        self.assertFalse((self.workspace / "setup.json").exists())
+        self.assertFalse((self.workspace / "hub.json").exists())
+        self.assertFalse((self.root / "rexdeck_palette.lua").exists())
+        self.assertFalse(self.selected_file().exists())
+        self.apply()
 
     def test_partial_write_failure_removes_only_completed_owned_artifacts(self) -> None:
         original_replace = life._replace
@@ -335,20 +400,109 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(palette.read_bytes(), b"-- user file\n")
         self.assertEqual(self.target.read_bytes(), self.original)
 
-    def test_disable_restores_exact_original_and_preserves_manager_data(self) -> None:
+    def test_disable_preserves_later_statement_and_manager_data(self) -> None:
         self.apply()
         selected = self.selected_file().read_bytes()
-        unrelated = b"-- later user setting\n"
+        unrelated = b"later_setting = true\n"
         self.target.write_bytes(self.target.read_bytes() + unrelated)
         result = life.disable(self.setup)
         self.assertEqual(result["state"], "disabled")
-        self.assertEqual(self.target.read_bytes(), self.original + unrelated)
+        self.assertEqual(self.target.read_bytes(), self.original + b"\n" + unrelated)
         self.assertTrue(self.config.is_symlink())
         self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
         self.assertEqual(self.selected_file().read_bytes(), selected)
         self.assertFalse((self.root / "rexdeck_palette.lua").exists())
         self.assertFalse((self.workspace / "hub.json").exists())
         self.assertEqual(life.status(self.setup)["state"], "disabled")
+
+    def test_repeated_disable_persists_cleared_conflicts_without_recreating_files(
+        self,
+    ) -> None:
+        self.apply()
+        selected = self.selected_file().read_bytes()
+        palette = self.root / "rexdeck_palette.lua"
+        palette.write_bytes(b"-- operator edit\n")
+        self.assertEqual(life.disable(self.setup)["state"], "conflict")
+        self.assertEqual(life.status(self.setup)["state"], "conflict")
+        palette.unlink()
+        self.assertEqual(life.disable(self.setup)["state"], "disabled")
+        self.assertEqual(life.status(self.setup)["state"], "disabled")
+        self.assertEqual(self.read_receipt()["conflicts"], [])
+        self.assertFalse(palette.exists())
+        self.assertFalse((self.workspace / "hub.json").exists())
+        self.assertEqual(self.selected_file().read_bytes(), selected)
+        receipt_path = self.workspace / "setup.json"
+        before = receipt_path.stat()
+        self.assertEqual(life.disable(self.setup)["state"], "disabled")
+        after = receipt_path.stat()
+        self.assertEqual(
+            (after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns)
+        )
+
+    def test_cancelled_disable_restores_each_committed_write_and_enabled_receipt(
+        self,
+    ) -> None:
+        self.apply()
+        artifacts = (
+            self.target,
+            self.root / "rexdeck_palette.lua",
+            self.workspace / "hub.json",
+            self.workspace / "setup.json",
+            self.selected_file(),
+        )
+        baseline = {path: life._file(path) for path in artifacts}
+        original_replace = life._replace
+        for interrupted_path in artifacts[:-1]:
+            with self.subTest(path=interrupted_path):
+                fired = False
+
+                def interrupted(
+                    path: Path,
+                    before: life._File,
+                    after: bytes | None,
+                    *,
+                    mode: int | None = None,
+                ) -> None:
+                    nonlocal fired
+                    original_replace(path, before, after, mode=mode)
+                    if path == interrupted_path and not fired:
+                        fired = True
+                        raise KeyboardInterrupt
+
+                with patch.object(life, "_replace", side_effect=interrupted):
+                    with self.assertRaises(KeyboardInterrupt):
+                        life.disable(self.setup)
+                self.assertEqual(
+                    {path: life._file(path) for path in artifacts}, baseline
+                )
+                self.assertEqual(life.status(self.setup)["state"], "stopped")
+        self.assertEqual(life.disable(self.setup)["state"], "disabled")
+        self.assertEqual(self.target.read_bytes(), self.original)
+
+    def test_cancelled_disable_reload_preserves_concurrent_config_tail(self) -> None:
+        self.apply()
+        enabled_config = self.target.read_bytes()
+        first = True
+
+        def cancelled_reload() -> None:
+            nonlocal first
+            if first:
+                first = False
+                self.target.write_bytes(
+                    self.target.read_bytes() + b"\nlater_setting = true\n"
+                )
+                raise KeyboardInterrupt
+
+        self.on_reload = cancelled_reload
+        with self.assertRaises(KeyboardInterrupt):
+            life.disable(self.setup)
+        self.assertEqual(
+            self.target.read_bytes(), enabled_config + b"\nlater_setting = true\n"
+        )
+        self.assertEqual(self.read_receipt()["enabled"], True)
+        self.assertTrue((self.workspace / "hub.json").exists())
+        self.assertTrue((self.root / "rexdeck_palette.lua").exists())
+        self.assertEqual(life.status(self.setup)["state"], "stopped")
 
     def test_disable_waits_for_owned_stop_then_removes_upstream_stop_header(
         self,
@@ -571,6 +725,48 @@ class LifecycleTests(unittest.TestCase):
         argv = cast(list[str], call.args[0])
         self.assertNotIn("-real-server", argv)
         self.assertEqual(self.read_receipt()["real_server"], False)
+
+    def test_start_sigint_inside_spawn_publishes_ownership_before_cancelling(
+        self,
+    ) -> None:
+        self.apply()
+        child = Mock(pid=1234)
+        child.poll.return_value = None
+
+        def launch(argv: list[str], **_kwargs: object) -> Mock:
+            self.process_identity = "Sat Nov  7 12:00:00 2026 " + " ".join(argv)
+            signal.raise_signal(signal.SIGINT)
+            return child
+
+        previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+        try:
+            with patch.object(subprocess, "Popen", side_effect=launch):
+                with self.assertRaises(KeyboardInterrupt):
+                    life.start(self.setup)
+        finally:
+            signal.signal(signal.SIGINT, previous)
+        self.assertEqual(life.status(self.setup)["state"], "starting")
+        self.assertIsNotNone(self.read_receipt()["launch"])
+        child.terminate.assert_not_called()
+
+    def test_start_cancelled_identity_capture_cleans_up_only_new_child(self) -> None:
+        self.apply()
+        child = Mock(pid=1234)
+
+        def launch(argv: list[str], **_kwargs: object) -> Mock:
+            self.process_identity = "Sat Nov  7 12:00:00 2026 " + " ".join(argv)
+            return child
+
+        with (
+            patch.object(subprocess, "Popen", side_effect=launch),
+            patch.object(life, "_process", side_effect=KeyboardInterrupt),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                life.start(self.setup)
+        child.terminate.assert_called_once()
+        child.wait.assert_called_once()
+        self.assertIsNone(self.read_receipt()["launch"])
+        self.assertEqual(life.status(self.setup)["state"], "stopped")
 
     def test_start_missing_prepared_runtime_never_launches_or_reseeds(self) -> None:
         self.apply()

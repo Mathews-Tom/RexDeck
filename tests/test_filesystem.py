@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import errno
 import io
 import json
 import os
 import socket
+import subprocess
+import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 from urllib.parse import quote
@@ -101,19 +104,31 @@ def test_renamed_and_missing_origin_are_errors(project: Path) -> None:
         filesystem.list_directory(str(project))
 
 
-def test_nonregular_and_unreadable_targets(project: Path) -> None:
+def test_nonregular_targets(project: Path) -> None:
     fifo = project / "fifo"
     os.mkfifo(fifo)
     with pytest.raises(filesystem.BoundaryError):
         filesystem.file_target(str(project), str(fifo))
+
+
+def test_denied_open_is_reported(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     target = project / "unreadable.txt"
     target.write_text("secret", encoding="utf-8")
-    target.chmod(0)
-    try:
-        with pytest.raises(PermissionError):
-            filesystem.file_target(str(project), str(target))
-    finally:
-        target.chmod(0o600)
+
+    def denied_open(path: str | os.PathLike[str], flags: int) -> int:
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), os.fspath(path))
+
+    monkeypatch.setattr(os, "open", denied_open)
+    output = io.StringIO()
+    with redirect_stdout(output):
+        code = filesystem.main(["file", str(project), str(target)])
+    result = json.loads(output.getvalue())
+    assert code == 1 and result["ok"] is False
+    assert "PermissionError" in result["error"]
+    assert str(target) in result["error"]
+    assert "path" not in result
 
 
 def test_directory_payload_refuses_without_partial_rows(project: Path) -> None:
@@ -127,6 +142,54 @@ def test_directory_payload_refuses_without_partial_rows(project: Path) -> None:
     assert "entries" not in result
     assert len(output.getvalue().encode()) < filesystem.MAX_HELPER_BYTES
     assert len(list(project.iterdir())) == 400
+
+
+def test_success_stdout_at_exact_helper_budget(project: Path) -> None:
+    names: list[str] = []
+    # Each ASCII filename byte contributes three encoded bytes (id, name, path).
+    for count in range(1, 200):
+        candidates = [f"{i:04d}" for i in range(count)]
+        entries = [
+            {
+                "id": str(project / name),
+                "name": name,
+                "path": str(project / name),
+                "kind": "file",
+            }
+            for name in candidates
+        ]
+        size = len(
+            filesystem.encoded(
+                {
+                    "ok": True,
+                    "root": str(project),
+                    "path": str(project),
+                    "entries": entries,
+                }
+            )
+        )
+        remaining, remainder = divmod(filesystem.MAX_HELPER_BYTES - size, 3)
+        if remainder or not 0 <= remaining <= count * 251:
+            continue
+        for i in range(count):
+            extra = min(remaining, 251)
+            candidates[i] += "x" * extra
+            remaining -= extra
+        names = candidates
+        break
+    assert names, "Could not construct the exact encoded-byte boundary"
+    for name in names:
+        (project / name).touch()
+    result = subprocess.run(
+        [sys.executable, filesystem.__file__, "list", str(project)],
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert len(result.stdout) == filesystem.MAX_HELPER_BYTES
+    reply = json.loads(result.stdout)
+    assert reply["ok"] is True
+    assert {entry["name"] for entry in reply["entries"]} == set(names)
 
 
 @pytest.mark.parametrize(
@@ -148,6 +211,24 @@ def test_text_byte_limit_and_utf8_chunk_boundary(project: Path) -> None:
     assert filesystem.file_target(str(project), str(target))["path"] == str(target)
     with target.open("ab") as stream:
         stream.write(b"x")
+    with pytest.raises(filesystem.BoundaryError):
+        filesystem.file_target(str(project), str(target))
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [b"\x00binary", "changed".encode("utf-16"), b"x" * (filesystem.MAX_TEXT_BYTES + 1)],
+)
+def test_validated_snapshot_survives_file_changes(
+    project: Path, replacement: bytes
+) -> None:
+    target = project / "snapshot.py"
+    original = b"x" * (65536 - 1) + "東京\n".encode()
+    target.write_bytes(original)
+    metadata, content = filesystem.read_text_file(str(project), str(target))
+    target.write_bytes(replacement)
+    assert content == original
+    assert metadata == {"ok": True, "root": str(project), "path": str(target)}
     with pytest.raises(filesystem.BoundaryError):
         filesystem.file_target(str(project), str(target))
 

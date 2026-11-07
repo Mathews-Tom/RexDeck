@@ -33,7 +33,7 @@ Setup seeds one managed absolute local Files source and upstream `lazyrex` home.
 
 From a project terminal, open the native palette and choose **LazyRex: Rexdeck Files**. **LazyRex: Plugins…** opens the unchanged manager. Tab/Shift+Tab selects; Enter opens; Esc closes the browser. Arrows scroll the upstream terminal renderer; they do not select entries.
 
-The browser captures the invoking pane and directory. Directory names end in `/`; Parent, Refresh, project-root recovery and Return retain explicit navigation. File paths remain structured identities even when display text is clipped or control characters are escaped. Binary/non-UTF-8 content and text above 2 MiB are refused. UTF-8 code and Markdown open as source in independent `bat`/`less` previews. Large directories receive a bounded refusal rather than a partial listing; reduce the directory or navigate back.
+The browser captures the invoking pane and directory. Directory names end in `/`; Parent, Refresh, project-root recovery and Return retain explicit navigation. File paths remain structured identities even when display text is clipped or control characters are escaped. Binary/non-UTF-8 content and text above 2 MiB are refused. UTF-8 code and Markdown open as source in independent `bat`/`less` previews, using a bounded snapshot of the validated bytes rather than reopening a changing pathname. Large directories receive a bounded refusal rather than a partial listing; reduce the directory or navigate back.
 
 Pager `q` returns to the captured origin. Preview errors and an unavailable origin remain visible until Enter acknowledges them. Closing the browser leaves previews running. Different origins retain independent previews. Replacement closes only a still-matching owned child-process generation; uncertain/replaced panes are left alone. Orderly restart resets browser navigation to its captured root and does not sweep independent previews.
 
@@ -41,7 +41,7 @@ Plugins execute as your OS user, not in a sandbox. Root confinement is a trusted
 
 ## Stop and remove
 
-Use **LazyRex: Plugins…** to stop/remove Files without stopping home. Local manager re-add is not supported by the pinned upstream; use explicit `apply --reseed` to restore the local declaration, then upstream Start if deliberately stopped.
+Use **LazyRex: Plugins…** to stop/remove Files without stopping home. Local manager re-add is not supported by the pinned upstream. To restore the local declaration, run `rexdeck stop`, `rexdeck apply --reseed`, then `rexdeck start`, retaining the same explicit workspace/config/server arguments. If Files remains deliberately stopped, use Start in Plugins. Reapply/reseed preserves manager settings; update Files executable arguments in Plugins settings when tool paths change.
 
 ```sh
 uv run rexdeck stop --workspace /absolute/owned/rexdeck-workspace --config /absolute/rex/init.lua --server unix:///tmp/rexdeck-lab.sock

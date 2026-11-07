@@ -147,7 +147,8 @@ def list_directory(source_pwd: str, directory: str | None = None) -> ListResult:
     return result
 
 
-def file_target(source_pwd: str, filename: str) -> FileResult:
+def read_text_file(source_pwd: str, filename: str) -> tuple[FileResult, bytes]:
+    """Return metadata and the bounded UTF-8 bytes validated for this preview."""
     root = source_root(source_pwd)
     path = selected_path(root, filename)
     if not stat.S_ISREG(path.stat().st_mode):
@@ -161,6 +162,7 @@ def file_target(source_pwd: str, filename: str) -> FileResult:
             raise BoundaryError("Text preview supports files up to 2 MiB")
         decoder = codecs.getincrementaldecoder("utf-8")("strict")
         total = 0
+        chunks: list[bytes] = []
         while True:
             chunk = os.read(descriptor, 64 * 1024)
             if not chunk:
@@ -178,6 +180,7 @@ def file_target(source_pwd: str, filename: str) -> FileResult:
                 raise BoundaryError(
                     "Binary/control content is not supported in text preview"
                 )
+            chunks.append(chunk)
         try:
             decoder.decode(b"", final=True)
         except UnicodeDecodeError as error:
@@ -186,7 +189,12 @@ def file_target(source_pwd: str, filename: str) -> FileResult:
             ) from error
     finally:
         os.close(descriptor)
-    return {"ok": True, "root": str(root), "path": str(path)}
+    return {"ok": True, "root": str(root), "path": str(path)}, b"".join(chunks)
+
+
+def file_target(source_pwd: str, filename: str) -> FileResult:
+    target, _ = read_text_file(source_pwd, filename)
+    return target
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -209,7 +217,7 @@ def main(arguments: list[str] | None = None) -> int:
         # OS error paths may contain arbitrary filename bytes; keep errors small, too.
         print(encoded({"ok": False, "error": message[:512]}).decode("ascii"))
         return 1
-    print(reply.decode("ascii"))
+    print(reply.decode("ascii"), end="")
     return 0
 
 
