@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rexdeck"
+version = "0.1.0.dev0"
+description = "Independently selectable Rex tools on unchanged LazyRex"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = []
+
+[project.scripts]
+rexdeck = "rexdeck.cli:main"
+
+[dependency-groups]
+dev = ["mypy>=1.15,<2", "pytest>=8,<10", "ruff>=0.11,<1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/rexdeck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "plugins/files"]
+
+[tool.mypy]
+strict = true
+files = ["src", "plugins/files", "tests"]
+mypy_path = ["src", "plugins/files"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
