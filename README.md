@@ -1,64 +1,47 @@
 # RexDeck
 
-Independently selectable tools for Rex, using unchanged [LazyRex](https://github.com/lazy-rex/LazyRex). The local Files slice uses upstream home and Plugins management; it does not install the default plugin suite, agent hooks, profiles or autostart.
+A collection of independently selectable plugins and extensions that bring existing tools into your own Rex application.
 
-## Local Files
+RexDeck is more than a file explorer. Files is the first available integration; Git/GitHub workflows, rich viewers, agent/subagent views, and task-provider integrations are planned. Select the tools you need without installing an unrelated default suite.
 
-Prerequisites: macOS arm64, Rex CLI/server API revision 10, Python 3.12+, `uv`, Go 1.27.3, `bat` and `less`. The source lock pins LazyRex commit `8b9e30b6b6b63f957a2696e9027e0bbe5c6fea0f`, including matching hub, renderer, SDK and home. Other clients, platforms, remote hosts and multi-device use are not qualified. SDK `0` alone is not compatibility.
+## Plugins and extensions
 
-Run from this checkout. Choose an explicit workspace, Rex config and server; the helper has no implicit live configuration target:
+| Integration | Purpose | Status |
+| --- | --- | --- |
+| [Files](plugins/files/README.md) | Browse, preview, and manage files using unmodified Yazi in a native Rex terminal | Available locally |
+| Git and GitHub | Repository/worktree tools and pull-request/issue workflows | Planned |
+| Rich viewers | Rendered Markdown, PDF, and image viewing | Planned |
+| Agents and subagents | Attention, observed state, and navigation to agent work | Planned |
+| Tasks | Independently selectable Linear and ClickUp workflows | Planned |
+
+Planned integrations are not implemented or installable yet. Public distribution is also future work; the current Files integration runs from this checkout.
+
+## Getting started
+
+Choose an available integration above and follow the README in its folder. Each plugin owns its requirements, setup, configuration, usage, removal, and verification instructions. There is no collection-wide install-all command.
+
+## Design principles
+
+- **Reuse tools, do not rebuild them.** Preserve their normal interfaces, configuration, authentication, and capabilities.
+- **Prefer native Rex integration.** Use native actions and panes where sufficient. LazyRex is optional only where a particular integration needs an existing capability; it is not a collection-wide dependency.
+- **Keep features independently selectable.** Install only the dependencies needed by the chosen integration; no implicit default suite, hooks, or autostart.
+- **Preserve user context and ownership.** Pass explicit launch context and structured arguments, keep unrelated work intact, and make removal reversible.
+- **Disclose capabilities accurately.** External tools run as your OS account and can be write-capable; they are not sandboxed or automatically read-only.
+
+## Development
+
+Run from the repository root:
 
 ```sh
 uv sync --locked
-uv run rexdeck prepare-runtime --workspace /absolute/owned/rexdeck-workspace
-uv run rexdeck verify-runtime --workspace /absolute/owned/rexdeck-workspace
-uv run rexdeck inspect --workspace /absolute/owned/rexdeck-workspace --config /absolute/rex/init.lua --server unix:///tmp/rexdeck-lab.sock
-```
-
-`prepare-runtime` explicitly verifies/downloads the locked source archive and builds the bundle. It records a build receipt only after verification. Other commands never download, upgrade or repair mismatching binaries by regenerating checksums. Keep the workspace private and outside the repository. Preserve upstream's MIT license in the prepared source.
-
-Review `inspect` before applying. Applying to an existing live Rex configuration is an explicit user operation; campaign automation requires separate owner approval. The selected server must already exist:
-
-Isolated runs require a Unix socket under `/tmp` or `/private/tmp`, including its resolved target. Use, for example, `--server unix:///tmp/rexdeck-lab.sock`; an arbitrary `/var/folders` socket is not supported by the unchanged renderer. For an explicitly owner-approved live application only, pass `--real-server` on every setup/lifecycle command; this propagates upstream's own live-server guard and never grants campaign approval by itself. Do not use it to bypass an isolated endpoint error.
-
-```sh
-uv run rexdeck apply --workspace /absolute/owned/rexdeck-workspace --config /absolute/rex/init.lua --server unix:///tmp/rexdeck-lab.sock
-uv run rexdeck start --workspace /absolute/owned/rexdeck-workspace --config /absolute/rex/init.lua --server unix:///tmp/rexdeck-lab.sock
-uv run rexdeck status --workspace /absolute/owned/rexdeck-workspace --config /absolute/rex/init.lua --server unix:///tmp/rexdeck-lab.sock
-```
-
-Setup seeds one managed absolute local Files source and upstream `lazyrex` home. Reapply/start preserves manager choices; `apply --reseed` explicitly restores the Files declaration. Existing/ambiguous foreign hubs are not adopted. A ready host is distinct from a registered Files instance or a deliberately stopped/removed feature. Expected stopped/disabled status is not an error.
-
-## Interaction
-
-From a project terminal, open the native palette and choose **LazyRex: Rexdeck Files**. **LazyRex: Plugins…** opens the unchanged manager. Tab/Shift+Tab selects; Enter opens; Esc closes the browser. Arrows scroll the upstream terminal renderer; they do not select entries.
-
-The browser captures the invoking pane and directory. Directory names end in `/`; Parent, Refresh, project-root recovery and Return retain explicit navigation. File paths remain structured identities even when display text is clipped or control characters are escaped. Binary/non-UTF-8 content and text above 2 MiB are refused. UTF-8 code and Markdown open as source in independent `bat`/`less` previews, using a bounded snapshot of the validated bytes rather than reopening a changing pathname. Large directories receive a bounded refusal rather than a partial listing; reduce the directory or navigate back.
-
-Pager `q` returns to the captured origin. Preview errors and an unavailable origin remain visible until Enter acknowledges them. Closing the browser leaves previews running. Different origins retain independent previews. Replacement closes only a still-matching owned child-process generation; uncertain/replaced panes are left alone. Orderly restart resets browser navigation to its captured root and does not sweep independent previews.
-
-Plugins execute as your OS user, not in a sandbox. Root confinement is a trusted-local read boundary, not protection against hostile concurrent path replacement. No file editor or file-management operation is provided.
-
-## Stop and remove
-
-Use **LazyRex: Plugins…** to stop/remove Files without stopping home. Local manager re-add is not supported by the pinned upstream. To restore the local declaration, run `uv run rexdeck stop`, `uv run rexdeck apply --reseed`, then `uv run rexdeck start`, retaining the same explicit workspace/config/server arguments. If Files remains deliberately stopped, use Start in Plugins. Reapply/reseed preserves manager settings; update Files executable arguments in Plugins settings when tool paths change.
-
-```sh
-uv run rexdeck stop --workspace /absolute/owned/rexdeck-workspace --config /absolute/rex/init.lua --server unix:///tmp/rexdeck-lab.sock
-uv run rexdeck disable --workspace /absolute/owned/rexdeck-workspace --config /absolute/rex/init.lua --server unix:///tmp/rexdeck-lab.sock
-```
-
-Stop terminates only the verified owned hub. A crashed hub whose PID was reused is reported as stopped; the unrelated process is never signalled. Disable stops the owned palette writer, removes only unchanged owned integration and reloads the selected config. It preserves configuration symlinks/modes, unrelated edits, selection/state and independent previews. Changed or stale owned artifacts are reported for judgment, not overwritten. It never restores the historical Files POC.
-
-Cancellation during apply/disable recovery retains the original failure and any preserved-artifact diagnostics.
-
-## Validation
-
-```sh
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy --strict
 uv run pytest
 ```
 
-LuaJIT compilation screens Lua syntax only; actual Rex interaction is separate required acceptance evidence. Native GUI proof cannot be replaced by CLI invocation. Public-source installation, version-tag manager add/update/re-add, rich media, Git, agents and task providers remain later campaign outcomes; no source tag, release or package publication is authorized by this local slice.
+Plugin-specific syntax checks and real interaction verification belong in each plugin's README. Keep new plugin documentation alongside its implementation under `plugins/<name>/README.md`, and link available integrations from the table above. Do not create empty plugin folders for planned features.
+
+## License
+
+RexDeck is [MIT licensed](LICENSE). Integrated external tools retain their own licenses.

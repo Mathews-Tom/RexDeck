@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "rexdeck"
 version = "0.1.0.dev0"
-description = "Independently selectable Rex tools on unchanged LazyRex"
+description = "Native Rex integrations for independently selectable existing tools"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
