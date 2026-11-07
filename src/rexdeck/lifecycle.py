@@ -25,7 +25,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import cast
+from typing import NoReturn, cast
 from urllib.parse import unquote
 
 from rexdeck.runtime import RuntimePaths, verify_runtime
@@ -701,6 +701,38 @@ def _rollback(changes: list[_Change]) -> list[str]:
     return conflicts
 
 
+def _recover_changes(
+    setup: Setup,
+    changes: list[_Change],
+    operation: str,
+    cause: RuntimeError | OSError | KeyboardInterrupt,
+) -> NoReturn:
+    conflicts: list[str] = []
+    cancellation: KeyboardInterrupt | None = None
+    try:
+        with _defer_sigint():
+            conflicts = _rollback(changes)
+            try:
+                _reload(setup)
+            except RuntimeError as reload_error:
+                conflicts.append(f"Rollback config reload failed: {reload_error}")
+    except KeyboardInterrupt as interrupted:
+        # A deferred Ctrl-C must not bypass the completed recovery report.
+        cancellation = interrupted
+    suffix = (
+        f"; recovery needs judgment: {'; '.join(conflicts)}"
+        if conflicts
+        else "; owned changes rolled back"
+    )
+    if isinstance(cause, KeyboardInterrupt):
+        cause.add_note(f"{operation} cancelled{suffix}")
+        raise cause
+    if cancellation is not None:
+        cancellation.add_note(f"{operation} cancelled after failure: {cause}{suffix}")
+        raise cancellation from cause
+    raise RuntimeError(f"{operation} failed: {cause}{suffix}") from cause
+
+
 def _apply_changes(
     setup: Setup,
     paths: _Paths,
@@ -721,21 +753,7 @@ def _apply_changes(
         applied.append(publication)
         _replace(publication.path, publication.before, publication.after)
     except (RuntimeError, OSError, KeyboardInterrupt) as exc:
-        with _defer_sigint():
-            conflicts = _rollback(applied)
-            try:
-                _reload(setup)
-            except RuntimeError as reload_error:
-                conflicts.append(f"Rollback config reload failed: {reload_error}")
-        suffix = (
-            f"; recovery needs judgment: {'; '.join(conflicts)}"
-            if conflicts
-            else "; owned changes rolled back"
-        )
-        if isinstance(exc, KeyboardInterrupt):
-            exc.add_note(f"Apply cancelled{suffix}")
-            raise
-        raise RuntimeError(f"Apply failed: {exc}{suffix}") from exc
+        _recover_changes(setup, applied, "Apply", exc)
 
 
 def inspect_setup(setup: Setup) -> dict[str, object]:
@@ -1363,18 +1381,7 @@ def _disable(setup: Setup) -> dict[str, object]:
         applied.append(publication)
         _replace(publication.path, publication.before, publication.after)
     except (RuntimeError, OSError, KeyboardInterrupt) as exc:
-        with _defer_sigint():
-            recovery = _rollback(applied)
-            try:
-                _reload(setup)
-            except RuntimeError as reload_error:
-                recovery.append(str(reload_error))
-        if isinstance(exc, KeyboardInterrupt):
-            exc.add_note(f"Disable cancelled; rollback conflicts: {recovery}")
-            raise
-        raise RuntimeError(
-            f"Disable failed: {exc}; rollback conflicts: {recovery}"
-        ) from exc
+        _recover_changes(setup, applied, "Disable", exc)
     return {
         "state": "conflict" if conflicts else "disabled",
         "server": setup.server,

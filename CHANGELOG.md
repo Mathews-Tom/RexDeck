@@ -5,4 +5,5 @@
 - Add the self-contained local Files plugin, compact navigator, bounded complete listings and snapshot-consistent UTF-8 text previews.
 - Preserve frozen origins and independent previews; replace a preview only while its pane and child-process generation still match, and keep preview errors visible for acknowledgement.
 - Add explicit pinned-runtime preparation and cancellation-safe owned configuration/lifecycle commands with stale-PID recovery, without default-suite installation, autostart or POC restoration.
+- Retain rollback conflict diagnostics and the original failure when Ctrl-C interrupts apply or disable recovery.
 - Public-source distribution and version tags remain separately gated; this is not a release announcement.

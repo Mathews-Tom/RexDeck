@@ -392,6 +392,78 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(palette.read_bytes(), b"-- another writer\n")
         self.assertEqual(self.target.read_bytes(), self.original)
 
+    def assert_second_sigint_recovery(self, *, disable: bool) -> None:
+        for initial_interrupt in (False, True):
+            with self.subTest(initial_interrupt=initial_interrupt):
+                root = self.root / str(initial_interrupt)
+                root.mkdir()
+                target = root / "selected.lua"
+                target.write_bytes(self.original)
+                target.chmod(0o640)
+                config = root / "init.lua"
+                config.symlink_to(target)
+                setup = life.Setup(
+                    self.project, root / "workspace", config, self.setup.server
+                )
+                if disable:
+                    life.apply_setup(setup)
+                paths = life._paths(setup)
+                artifacts = (paths.config, paths.hub, paths.receipt)
+                baseline = {path: life._file(path) for path in artifacts}
+                concurrent = b"-- concurrent artifact edit; preserve for owner\n"
+                original_error: RuntimeError | KeyboardInterrupt | None = None
+
+                def reject_then_interrupt() -> None:
+                    nonlocal original_error
+                    if original_error is None:
+                        paths.palette.write_bytes(concurrent)
+                        if initial_interrupt:
+                            try:
+                                signal.raise_signal(signal.SIGINT)
+                            except KeyboardInterrupt as exc:
+                                exc.add_note("Original cancellation context")
+                                original_error = exc
+                                raise
+                        original_error = RuntimeError("initial reload rejected")
+                        raise original_error
+                    signal.raise_signal(signal.SIGINT)
+
+                self.on_reload = reject_then_interrupt
+                previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+                try:
+                    with self.assertRaises(KeyboardInterrupt) as caught:
+                        if disable:
+                            life.disable(setup)
+                        else:
+                            life.apply_setup(setup)
+                finally:
+                    signal.signal(signal.SIGINT, previous)
+                    self.on_reload = None
+                notes = "\n".join(getattr(caught.exception, "__notes__", []))
+                self.assertIn(str(paths.palette), notes)
+                if initial_interrupt:
+                    self.assertIs(caught.exception, original_error)
+                    self.assertIn("Original cancellation context", notes)
+                else:
+                    self.assertIs(caught.exception.__cause__, original_error)
+                    self.assertIn("initial reload rejected", notes)
+                self.assertEqual(
+                    {path: life._file(path) for path in artifacts}, baseline
+                )
+                self.assertEqual(paths.palette.read_bytes(), concurrent)
+                self.assertTrue(config.is_symlink())
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+
+    def test_second_sigint_during_apply_recovery_reports_preserved_artifact(
+        self,
+    ) -> None:
+        self.assert_second_sigint_recovery(disable=False)
+
+    def test_second_sigint_during_disable_recovery_reports_preserved_artifact(
+        self,
+    ) -> None:
+        self.assert_second_sigint_recovery(disable=True)
+
     def test_existing_palette_is_never_claimed(self) -> None:
         palette = self.root / "rexdeck_palette.lua"
         palette.write_bytes(b"-- user file\n")

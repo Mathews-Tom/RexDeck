@@ -41,7 +41,7 @@ Plugins execute as your OS user, not in a sandbox. Root confinement is a trusted
 
 ## Stop and remove
 
-Use **LazyRex: Plugins…** to stop/remove Files without stopping home. Local manager re-add is not supported by the pinned upstream. To restore the local declaration, run `rexdeck stop`, `rexdeck apply --reseed`, then `rexdeck start`, retaining the same explicit workspace/config/server arguments. If Files remains deliberately stopped, use Start in Plugins. Reapply/reseed preserves manager settings; update Files executable arguments in Plugins settings when tool paths change.
+Use **LazyRex: Plugins…** to stop/remove Files without stopping home. Local manager re-add is not supported by the pinned upstream. To restore the local declaration, run `uv run rexdeck stop`, `uv run rexdeck apply --reseed`, then `uv run rexdeck start`, retaining the same explicit workspace/config/server arguments. If Files remains deliberately stopped, use Start in Plugins. Reapply/reseed preserves manager settings; update Files executable arguments in Plugins settings when tool paths change.
 
 ```sh
 uv run rexdeck stop --workspace /absolute/owned/rexdeck-workspace --config /absolute/rex/init.lua --server unix:///tmp/rexdeck-lab.sock
@@ -49,6 +49,8 @@ uv run rexdeck disable --workspace /absolute/owned/rexdeck-workspace --config /a
 ```
 
 Stop terminates only the verified owned hub. A crashed hub whose PID was reused is reported as stopped; the unrelated process is never signalled. Disable stops the owned palette writer, removes only unchanged owned integration and reloads the selected config. It preserves configuration symlinks/modes, unrelated edits, selection/state and independent previews. Changed or stale owned artifacts are reported for judgment, not overwritten. It never restores the historical Files POC.
+
+Cancellation during apply/disable recovery retains the original failure and any preserved-artifact diagnostics.
 
 ## Validation
 
