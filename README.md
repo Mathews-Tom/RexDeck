@@ -8,17 +8,30 @@ RexDeck is more than a file explorer. Files is the first available integration; 
 
 | Integration | Purpose | Status |
 | --- | --- | --- |
-| [Files](plugins/files/README.md) | Browse, preview, and manage files using unmodified Yazi in a native Rex terminal | Available locally |
+| [Files](plugins/files/README.md) | Browse, preview, and manage files using unmodified Yazi in a native Rex terminal | Available |
 | Git and GitHub | Repository/worktree tools and pull-request/issue workflows | Planned |
 | Rich viewers | Rendered Markdown, PDF, and image viewing | Planned |
 | Agents and subagents | Attention, observed state, and navigation to agent work | Planned |
 | Tasks | Independently selectable Linear and ClickUp workflows | Planned |
 
-Planned integrations are not implemented or installable yet. Public distribution is also future work; the current Files integration runs from this checkout.
+Planned integrations are not implemented or installable yet. RexDeck is not published on PyPI; install the current source package as described below.
 
 ## Getting started
 
-Choose an available integration above and follow the README in its folder. Each plugin owns its requirements, setup, configuration, usage, removal, and verification instructions. There is no collection-wide install-all command.
+Install once from a RexDeck checkout with Python 3.12+ and `uv`:
+
+```sh
+uv tool install .
+rexdeck setup
+rexdeck enable files
+rexdeck status
+```
+
+The installed command works from any directory; the package includes Files' native Lua action and Python launcher. No shell wrapper, `RD_*` variables, or developer checkout is needed at runtime. Ensure the tool executable directory reported by `uv` is on `PATH`.
+
+`setup` remembers the selected Rex configuration and running server without changing Rex configuration. Interactive setup asks for approval before saving a personal-server target. `enable files` installs and enables only Files; `disable files` removes its owned integration. See the [Files README](plugins/files/README.md) for prerequisites, explicit target selection, updates, and removal.
+
+Each available integration owns its requirements and usage instructions. There is no collection-wide install-all command, and external tools are not auto-installed.
 
 ## Design principles
 
@@ -40,7 +53,7 @@ uv run mypy --strict
 uv run pytest
 ```
 
-Plugin-specific syntax checks and real interaction verification belong in each plugin's README. Keep new plugin documentation alongside its implementation under `plugins/<name>/README.md`, and link available integrations from the table above. Do not create empty plugin folders for planned features.
+Plugin-specific syntax checks and real interaction verification belong in each plugin's README. Keep plugin documentation under `plugins/<name>/README.md` and packaged runtime assets under `src/rexdeck/plugins/<name>/`. Link available integrations from the table above. Do not create empty plugin folders for planned features.
 
 ## License
 

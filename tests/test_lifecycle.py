@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 from unittest.mock import Mock, patch
@@ -64,7 +65,7 @@ class LifecycleTests(unittest.TestCase):
         self.project.mkdir()
         files = self.project / "plugins/files"
         files.mkdir(parents=True)
-        canonical = Path(__file__).resolve().parents[1] / "plugins/files"
+        canonical = Path(life.__file__).resolve().parent / "plugins/files"
         (files / "main.lua").write_bytes((canonical / "main.lua").read_bytes())
         (files / "launch.py").write_bytes((canonical / "launch.py").read_bytes())
         self.workspace = self.root / "workspace"
@@ -167,6 +168,18 @@ class LifecycleTests(unittest.TestCase):
             self.module.read_bytes() if self.module.exists() else None,
             self.receipt_path.read_bytes() if self.receipt_path.exists() else None,
         )
+
+    def updated_package(self) -> life.Setup:
+        project = self.root / 'installed-"-é'
+        shutil.copytree(self.project, project)
+        for name, comment in (
+            ("main.lua", b"-- update\n"),
+            ("launch.py", b"# update\n"),
+        ):
+            asset = project / "plugins/files" / name
+            asset.write_bytes(asset.read_bytes() + b"\n" + comment)
+        shutil.rmtree(self.project)
+        return replace(self.setup, project=project)
 
     def test_apply_starts_disabled_and_native_selection_survives_reapply(self) -> None:
         life.apply_setup(self.setup)
@@ -298,16 +311,56 @@ class LifecycleTests(unittest.TestCase):
             life.start(self.setup)
             self.assertEqual(life.status(self.setup)["state"], "ready")
 
+    def test_updated_package_reapply_refreshes_provenance_and_preserves_enabled(
+        self,
+    ) -> None:
+        life.apply_setup(self.setup)
+        life.start(self.setup)
+        previous = self.receipt()
+        updated = self.updated_package()
+        before = self.snapshot()
+        self.assertEqual(life.status(updated)["state"], "fault")
+        self.assertEqual(self.snapshot(), before)
+        life.apply_setup(updated)
+        refreshed = self.receipt()
+        self.assertEqual(refreshed["project"], str(updated.project))
+        for key in ("module_sha256", "source_sha256", "launcher_sha256"):
+            self.assertNotEqual(refreshed[key], previous[key])
+        self.assertTrue(refreshed["enabled"])
+        self.assertEqual(life.status(updated)["state"], "ready")
+        life.disable(updated)
+        self.assertEqual(self.target.read_bytes(), self.original)
+        self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
+        self.assertFalse(self.module.exists())
+
+    def test_updated_package_can_disable_without_refreshing_old_assets(self) -> None:
+        life.apply_setup(self.setup)
+        life.start(self.setup)
+        updated = self.updated_package()
+        self.assertEqual(life.disable(updated)["state"], "disabled")
+        self.assertEqual(self.target.read_bytes(), self.original)
+        self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
+        self.assertTrue(self.config.is_symlink())
+        self.assertFalse(self.module.exists())
+        self.assertFalse(self.receipt()["applied"])
+        self.assertEqual(self.actions, [])
+        life.apply_setup(updated)
+        self.assertFalse(self.receipt()["enabled"])
+        self.assertEqual(self.receipt()["project"], str(updated.project))
+        life.start(updated)
+        self.assertEqual(life.status(updated)["state"], "ready")
+
     def test_owned_module_change_refuses_start_and_reapply_but_disable_preserves(
         self,
     ) -> None:
         life.apply_setup(self.setup)
         changed = self.module.read_bytes() + b"-- operator change\n"
         self.module.write_bytes(changed)
+        updated = self.updated_package()
         for operation in (life.start, life.apply_setup):
             with self.assertRaises(RuntimeError):
-                operation(self.setup)
-        result = life.disable(self.setup)
+                operation(updated)
+        result = life.disable(updated)
         self.assertEqual(result["state"], "conflict")
         self.assertEqual(self.module.read_bytes(), changed)
         self.assertEqual(self.target.read_bytes(), self.original)
@@ -444,6 +497,60 @@ class LifecycleTests(unittest.TestCase):
                 life.start(self.setup)
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.actions, [])
+
+    def test_package_refresh_failure_restores_previous_owned_bundle(self) -> None:
+        life.apply_setup(self.setup)
+        life.start(self.setup)
+        before = self.snapshot()
+        actions = self.actions.copy()
+        updated = self.updated_package()
+        self.reject_check = self.check_count + 1
+        with self.assertRaises(RuntimeError):
+            life.apply_setup(updated)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.actions, actions)
+        life.disable(updated)
+        self.assertEqual(self.target.read_bytes(), self.original)
+        self.assertFalse(self.module.exists())
+
+    def test_package_provenance_must_remain_an_absolute_path(self) -> None:
+        life.apply_setup(self.setup)
+        receipt = self.receipt()
+        project: object
+        for project in (None, "", "relative/package", "/invalid\x00package", 7, []):
+            self.receipt_path.write_bytes(life._json(receipt | {"project": project}))
+            before = self.snapshot()
+            for operation in (life.apply_setup, life.disable):
+                with (
+                    self.subTest(project=project, operation=operation.__name__),
+                    self.assertRaises(RuntimeError),
+                ):
+                    operation(self.setup)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_updated_package_does_not_relax_setup_ownership(self) -> None:
+        life.apply_setup(self.setup)
+        receipt = self.receipt()
+        updated = self.updated_package()
+        different: dict[str, object] = {
+            "version": 999,
+            "kind": "other",
+            "workspace": str(self.root / "other-workspace"),
+            "config": str(self.target),
+            "config_target": str(self.root / "other.lua"),
+            "server": "unix:///tmp/other.sock",
+            "real_server": True,
+        }
+        for key, value in different.items():
+            self.receipt_path.write_bytes(life._json(receipt | {key: value}))
+            before = self.snapshot()
+            for operation in (life.apply_setup, life.disable):
+                with (
+                    self.subTest(key=key, operation=operation.__name__),
+                    self.assertRaises(RuntimeError),
+                ):
+                    operation(updated)
+                self.assertEqual(self.snapshot(), before)
 
     def test_unknown_or_legacy_receipt_is_refused_without_changes(self) -> None:
         self.workspace.mkdir()

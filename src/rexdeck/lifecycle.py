@@ -267,7 +267,7 @@ def _server_status(setup: Setup, *, selected: bool) -> dict[str, object] | None:
     return value
 
 
-def _endpoint_policy(setup: Setup) -> None:
+def _is_real_endpoint(setup: Setup) -> bool:
     selected = _socket_path(setup.server)
     known = [
         Path.home() / "Library/Application Support/rex/server.sock",
@@ -299,6 +299,11 @@ def _endpoint_policy(setup: Setup) -> None:
                 _socket_path(cast(str, default["endpoint"])) == selected
                 or default["instance_id"] == current["instance_id"]
             )
+    return is_real
+
+
+def _endpoint_policy(setup: Setup) -> None:
+    is_real = _is_real_endpoint(setup)
     if is_real != setup.real_server:
         raise RuntimeError(
             "Selected endpoint is the real Rex server; explicit --real-server approval is required"
@@ -487,7 +492,6 @@ def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
     expected: dict[str, object] = {
         "version": 2,
         "kind": "native-files",
-        "project": str(paths.project),
         "workspace": str(paths.workspace),
         "config": str(paths.selected),
         "config_target": str(paths.config),
@@ -498,6 +502,14 @@ def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
         raise RuntimeError(
             "Unknown/old receipt or different setup identity; use a fresh native workspace"
         )
+    # Package location is provenance, not ownership: upgrades may remove the old root.
+    project = result.get("project")
+    if (
+        not isinstance(project, str)
+        or not Path(project).is_absolute()
+        or "\x00" in project
+    ):
+        raise RuntimeError("Setup receipt has malformed project provenance")
     for key in ("applied", "enabled"):
         if not isinstance(result.get(key), bool):
             raise RuntimeError(f"Setup receipt has no explicit {key} state")
@@ -553,7 +565,8 @@ def _current_bundle(setup: Setup, paths: _Paths, receipt: dict[str, object]) -> 
         != receipt["module_sha256"]
     ):
         raise RuntimeError(
-            "Canonical Files source, launcher or tool paths changed; inspect and reapply"
+            "Canonical Files source, launcher or tool paths changed; "
+            "run rexdeck enable files to refresh the owned integration"
         )
 
 
@@ -726,6 +739,7 @@ def _unowned(paths: _Paths) -> None:
 
 
 def inspect_setup(setup: Setup) -> dict[str, object]:
+    """Inspect ownership; enable refreshes package drift and status checks readiness."""
     paths = _paths(setup)
     receipt = _receipt(paths, setup)
     prerequisites: dict[str, object] = {}
@@ -741,7 +755,7 @@ def inspect_setup(setup: Setup) -> dict[str, object]:
             _unowned(paths)
             _expect_action(setup, False)
         elif receipt["applied"]:
-            _current_bundle(setup, paths, receipt)
+            _owned_config(paths, receipt)
             _expect_action(setup, bool(receipt["enabled"]))
     except RuntimeError as exc:
         conflicts.append(str(exc))

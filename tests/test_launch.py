@@ -11,8 +11,9 @@ import sys
 import time
 from pathlib import Path
 
-import launch
 import pytest
+
+from rexdeck.plugins.files import launch
 
 LAUNCHER = Path(launch.__file__)
 
@@ -308,7 +309,7 @@ def test_native_action_refuses_invalid_context_before_opening_panes() -> None:
         [
             "luajit",
             str(root / "tests/lua/native_files.lua"),
-            str(root / "plugins/files"),
+            str(LAUNCHER.parent),
         ],
         check=True,
         capture_output=True,

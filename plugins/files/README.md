@@ -10,51 +10,64 @@ Launch unmodified [Yazi](https://yazi-rs.github.io/) from Rex's native palette i
 - Python 3.12+, `uv`, and Yazi available on `PATH`. Yazi 26.9.1 is the verified local navigation baseline.
 - Terminal/font support required by your Yazi configuration. RexDeck does not install tools/fonts or change their settings.
 
-This is a repository-local integration, not a released installer or published package. Other platforms, remote hosts, and multi-device use are not qualified.
+Other platforms, remote hosts, and multi-device use are not qualified. RexDeck is not published on PyPI; install from the source checkout.
 
-## Set up in your existing Rex app
+## Install and set up once
 
-Run from the RexDeck repository root. The following uses the standard macOS Rex config/socket and a persistent Files workspace in your home directory. If Rex uses a custom config or socket, set those two variables to its actual locations instead.
-
-```sh
-uv sync --locked
-
-export RD_WORKSPACE="$HOME/.local/state/rexdeck/files-native"
-export RD_CONFIG="$HOME/.config/rex/init.lua"
-export RD_SERVER="unix://$HOME/Library/Application%20Support/rex/server.sock"
-
-rd_files() {
-  uv run rexdeck "$@" \
-    --workspace "$RD_WORKSPACE" \
-    --config "$RD_CONFIG" \
-    --server "$RD_SERVER" \
-    --real-server
-}
-
-rd_files inspect
-```
-
-`inspect` is read-only. Review its resolved config target, tool paths, and conflicts before continuing. The selected config and Rex server must already exist; `apply` creates the workspace. The `--real-server` flag explicitly selects your existing application, so retain it for every command against that endpoint. These are live configuration changes only when you execute the next commands:
+From the RexDeck checkout:
 
 ```sh
-rd_files apply && rd_files start && rd_files status
+uv tool install .
 ```
 
-`apply` installs a disabled integration; `start` enables it and verifies the real native action. Reapply preserves enabled/stopped selection. Python, Rex, and Yazi paths are explicit in the owned module. No command downloads, builds, upgrades, or auto-installs a runtime.
+Ensure the tool executable directory reported by `uv` is on `PATH`. The installed package includes the Files action and launcher; subsequent commands work from any directory and do not require the checkout.
+
+With your Rex application already running:
+
+```sh
+rexdeck setup
+rexdeck enable files
+rexdeck status
+```
+
+`setup` discovers the current Rex endpoint and uses `REX_CONFIG`, or the standard `$XDG_CONFIG_HOME/rex/init.lua` / `~/.config/rex/init.lua` configuration. It displays the target and requests approval before remembering a personal-server selection. It does not install an action, change Rex configuration, or start a missing server. `enable files` performs the owned installation and enables the native action; no separate apply/start commands or shell wrapper are needed.
+
+For a custom target or noninteractive setup, select and approve it explicitly once:
+
+```sh
+rexdeck setup \
+  --config "$HOME/.config/rex/init.lua" \
+  --server "unix://$HOME/Library/Application%20Support/rex/server.sock" \
+  --real-server
+rexdeck enable files
+```
+
+The `--real-server` flag authorizes the personal target for subsequent explicit enable/disable commands. For an isolated server, pass its existing config and Unix socket with `--config` and `--server`, omit `--real-server`, and isolate RexDeck's XDG directories. Isolated sockets must resolve under `/tmp` or `/private/tmp`; they are not interchangeable with your application's endpoint.
+
+Settings are stored in `$XDG_CONFIG_HOME/rexdeck/config.json` (default `~/.config/rexdeck/config.json`). Files ownership records use `$XDG_STATE_HOME/rexdeck/files` (default `~/.local/state/rexdeck/files`), remembered at setup time. There is no required `-native` suffix. Later commands use the saved target, not ambient `REX_SERVER` or changing shell variables. Malformed settings, changed config symlink targets, and replacing an existing saved target are refused rather than silently adopted. To select a different target, disable Files first, deliberately remove the saved RexDeck `config.json`, then run setup for the new target with `--workspace` pointing to a fresh directory. Preserve the old ownership workspace; its receipt remains bound to the old target even after disable.
 
 The generated `rexdeck_files.lua` sits beside the canonical target of the selected config, including when that config is a symlink. A tracked `require` loader preserves module search path/cache state and lets Rex detect action changes. The target directory cannot contain `;` or `?`, which have special module-search meanings. Conflicting files, changed owned bytes, and old/unknown receipts are refused rather than overwritten or adopted.
 
-For an isolated server, use its existing config/socket and a separate workspace, and omit `--real-server` from the helper. Isolated sockets must resolve under `/tmp` or `/private/tmp`. A lab socket is not interchangeable with your application's socket; RexDeck does not start a missing server.
+### Existing native Files setup
 
-### Fixing the old `/absolute` example
+If Files is already applied using the earlier manual commands, select its **existing** workspace during one-time setup:
 
-The previous README used illustrative paths such as `/absolute/rex/init.lua` and a lab socket. Copying those literally caused `No such file or directory: '/absolute'` before setup could apply changes. Re-run the variable assignments and helper definition above to replace those values, then inspect again. Do not create `/absolute` or repeat a successful legacy disable to resolve this error.
+```sh
+rexdeck setup \
+  --workspace "$HOME/.local/state/rexdeck/files-native" \
+  --config "$HOME/.config/rex/init.lua" \
+  --server "unix://$HOME/Library/Application%20Support/rex/server.sock" \
+  --real-server
+rexdeck enable files
+```
 
-### Switching from the previous LazyRex-based Files
+Use the actual original workspace if it differs. Do not rename or discard an applied ownership directory. Setup remembers that location; subsequent commands still need no workspace argument. Package reinstall or relocation does not transfer ownership to a different config or server.
 
-Do not reuse its workspace with the native helper. Close the old Files/previews, then use the **previous implementation's** disable command or the frozen cleanup helper supplied for that installation, with its original workspace/config/server and live opt-in where required. Preserve the old workspace and runtime files. If cleanup already returned `"state": "disabled"` with `"conflicts": []`, continue with the fresh native workspace above; do not run cleanup again merely because the new setup had invalid paths.
+### Previous LazyRex-based Files
 
-The native CLI intentionally refuses legacy receipts; it does not stop or adopt an old hub automatically.
+Do not reuse its workspace with native Files. Close the old Files/previews and use the **previous implementation's** disable command or the frozen cleanup helper supplied for that installation, with its original target and required approval. Preserve its old workspace/runtime files. If cleanup already returned `"state": "disabled"` with `"conflicts": []`, do not repeat it. Continue with a fresh native setup.
+
+The native CLI refuses legacy receipts; it does not stop or adopt an old hub automatically.
 
 ## Use Files
 
@@ -66,30 +79,30 @@ Quit Yazi with its normal `q` binding to return focus to the exact captured proj
 
 Tools run as your OS account, not in a sandbox. Tool-native opening/previewing can invoke programs configured by the user. RexDeck supplies structured argv and cwd, not a shell-interpolated command.
 
-## Stop and remove
-
-Using the same variables and helper:
+## Disable and update
 
 ```sh
-rd_files stop
+rexdeck disable files
 ```
 
-`stop` disables the native action and reloads configuration. It does not terminate open Yazi panes or unrelated processes. `start` explicitly re-enables it. Expected disabled status is not an error; readiness requires matching owned source/configuration and actual native registration.
+Disable removes only unchanged owned loader/module state and reloads the selected config. It preserves config symlinks/modes, unrelated edits, user tool configuration, existing Yazi panes, and data. Changed artifacts produce conflicts for judgment. Failed operations recover owned state without overwriting concurrent edits. Disable never enables the historical Files POC or touches unrelated LazyRex instances. Saved target settings remain available for the next `rexdeck enable files`.
 
-To remove the integration:
+After updating the source checkout, reinstall and refresh the integration before launching Files again:
 
 ```sh
-rd_files disable
+uv tool install --reinstall .
+rexdeck enable files
+rexdeck status
 ```
 
-`disable` removes only unchanged owned loader/module state and reloads the selected config. It preserves config symlinks/modes, unrelated edits, user tool configuration, existing panes, and data. Changed artifacts produce conflicts for judgment. Failed operations recover owned state without overwriting concurrent edits; interrupted recovery retains the original error and conflict diagnostics. Disable never enables the historical Files POC or touches unrelated LazyRex instances.
+Re-enabling verifies the recorded ownership before refreshing the packaged action, launcher, and interpreter paths. To remove RexDeck itself, run `rexdeck disable files` before `uv tool uninstall rexdeck`; uninstalling the Python tool alone does not remove Rex configuration.
 
 ## Development verification
 
 Run the shared checks from the [root README](../../README.md#development), plus this plugin's Lua syntax screen:
 
 ```sh
-luajit -b plugins/files/main.lua /tmp/rexdeck-files-syntax.out
+luajit -b src/rexdeck/plugins/files/main.lua /tmp/rexdeck-files-syntax.out
 ```
 
-Lua compilation is not runtime proof. Native action/Yazi behavior must also be exercised on a private Rex server; owner-app palette, glyphs, and visual behavior require owner-led checking rather than a CLI-only GUI claim.
+Lua compilation is not runtime proof. Build and install the wheel outside the checkout, then exercise setup/enable/status, native action/Yazi navigation and quit focus, reinstall/refresh, and disable on a private Rex server. Owner-app palette, glyphs, and visual behavior require owner-led checking rather than a CLI-only GUI claim.

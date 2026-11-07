@@ -22,12 +22,12 @@ packages = ["src/rexdeck"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "plugins/files"]
+pythonpath = ["src"]
 
 [tool.mypy]
 strict = true
-files = ["src", "plugins/files", "tests"]
-mypy_path = ["src", "plugins/files"]
+files = ["src", "tests"]
+mypy_path = ["src"]
 
 [tool.ruff]
 target-version = "py312"

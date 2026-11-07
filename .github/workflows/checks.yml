@@ -21,6 +21,6 @@ jobs:
       - run: uv run pytest
       - name: Lua syntax
         run: |
-          for file in plugins/files/*.lua; do
+          for file in src/rexdeck/plugins/files/*.lua; do
             luajit -b "$file" "$RUNNER_TEMP/$(basename "$file").out"
           done
