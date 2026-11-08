@@ -10,14 +10,14 @@ Launch unmodified [Yazi](https://yazi-rs.github.io/) from Rex's native palette i
 - Python 3.12+, `uv`, and Yazi on `PATH` at qualified version **26.9.1**. Other installed versions require manual resolution, not an implicit upgrade.
 - Terminal/font support required by your Yazi configuration. RexDeck does not install fonts or change tool settings.
 
-Other platforms, remote hosts, and multi-device use are not qualified. RexDeck is not published on PyPI; install from the source checkout.
+Other platforms, remote hosts, and multi-device use are not qualified.
 
 ## Install and set up once
 
-From the RexDeck checkout:
+Install the published package from PyPI (or `uv tool install .` from a source checkout):
 
 ```sh
-uv tool install .
+uv tool install --default-index https://pypi.org/simple rexdeck
 ```
 
 Ensure the tool executable directory reported by `uv` is on `PATH`. The installed package includes the Files action and launcher; subsequent commands work from any directory and do not require the checkout.
@@ -88,10 +88,10 @@ Disable removes only unchanged owned loader/module state and reloads the selecte
 
 Ctrl-C, SIGTERM, and SIGHUP during a lifecycle mutation run the same rollback path; further cancellation is deferred until recovery finishes. SIGKILL, power loss, and OS crashes cannot run Python recovery, and there is no durable crash-recovery journal. Retain ownership records and inspect artifacts before manual recovery after an uncatchable interruption.
 
-After updating the source checkout, reinstall and refresh the integration before launching Files again:
+After upgrading RexDeck, refresh the integration before launching Files again:
 
 ```sh
-uv tool install --reinstall .
+uv tool upgrade rexdeck
 rexdeck enable files
 rexdeck status
 ```
@@ -110,4 +110,4 @@ luajit -b src/rexdeck/plugins/files/main.lua /tmp/rexdeck-files-syntax.out
 
 Lua compilation is not runtime proof. Build and install the wheel outside the checkout, then exercise setup/enable/status, native action/Yazi navigation and quit focus, reinstall/refresh, and disable on a private Rex server. Owner-app palette, glyphs, and visual behavior require owner-led checking rather than a CLI-only GUI claim.
 
-Yazi is an unbundled [MIT-licensed upstream tool](https://github.com/sxyazi/yazi/blob/main/LICENSE); Rex remains an external, separately licensed prerequisite. See the root [release owner gate](../../README.md#release-preparation-and-owner-gate) for pinned source installation and publication/evidence limits.
+Yazi is an unbundled [MIT-licensed upstream tool](https://github.com/sxyazi/yazi/blob/main/LICENSE); Rex remains an external, separately licensed prerequisite. See the root [release workflow and owner gate](../../README.md#release-workflow-and-owner-gate) for publication/evidence limits.
