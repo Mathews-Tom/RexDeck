@@ -378,7 +378,8 @@ def test_fractional_sprint_points_stay_fractional_and_stage_the_held_value(
 ) -> None:
     del synced
     sent: list[httpx.Request] = []
-    route[TASK] = _task_routes(sent, overrides={"points": 2})
+    # ClickUp may return a whole value as `2.0`; the diff must not show `2.0`.
+    route[TASK] = _task_routes(sent, overrides={"points": 2.0})
     argv = ["touch", "synaa0001", "--points", "0.5"]
     assert main([*argv, "--dry-run", "--json"]) == 0
     diff = _mutation(capsys)["diff"]["points"]

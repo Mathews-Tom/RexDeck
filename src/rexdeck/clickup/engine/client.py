@@ -227,7 +227,9 @@ def _rejected(method: str, path: str, response: httpx.Response) -> EngineError:
             message=f"ClickUp refused the request as invalid ({detail})",
             subject=path,
             evidence={"method": method, "path": path, "status": 400, "ecode": ecode},
-            supported_fixes=("--dry-run",),
+            # A refused write is rechecked by staging it again; a refused read
+            # has nothing to stage, and the identifier it named is the suspect.
+            supported_fixes=("--dry-run",) if method in {"PUT", "POST"} else ("<id>",),
         )
     )
 

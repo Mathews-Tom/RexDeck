@@ -80,6 +80,11 @@ def test_http_400_is_a_refused_request_keeping_only_a_well_formed_ecode(
         assert finding.evidence["ecode"] == ecode
         assert TOKEN not in str(finding) and "echo" not in str(finding)
         assert connection.calls == 1
+        assert finding.supported_fixes == ("--dry-run",)
+        with pytest.raises(EngineError) as read:
+            connection.get("/task/synaa0001")
+        # A read has nothing to dry-run; the identifier is what to check.
+        assert read.value.diagnostic.supported_fixes == ("<id>",)
     finally:
         connection.close()
 

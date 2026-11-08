@@ -133,10 +133,8 @@ def verb_touch(session: Session) -> Outcome:
             Staged(
                 name="points",
                 current=held_points,
-                current_text=projections.ABSENT
-                if held_points is None
-                else str(held_points),
-                proposed_text=str(points),
+                current_text=_points_text(held_points),
+                proposed_text=_points_text(points),
             )
         )
         body["points"] = points
@@ -549,6 +547,15 @@ def _member_number(member_id: str) -> int:
             exit_code=2,
         )
     return int(member_id)
+
+
+def _points_text(value: object) -> str:
+    """Render points so ClickUp's `2.0` and a proposed `2` read the same."""
+    if value is None:
+        return projections.ABSENT
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
 
 
 def _points(raw: str) -> int | float:
