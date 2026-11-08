@@ -35,6 +35,7 @@ class Setup:
     project: Path
     workspace: Path
     config: Path
+    data_root: Path
     server: str
     real_server: bool = False
 
@@ -45,6 +46,7 @@ class _Paths:
     workspace: Path
     selected: Path
     config: Path
+    data_root: Path
     module: Path
     receipt: Path
 
@@ -84,6 +86,22 @@ def _socket_path(endpoint: str) -> Path:
         ) from exc
 
 
+def _validate_data_root(root: Path) -> None:
+    try:
+        if (
+            not root.is_absolute()
+            or ".." in root.parts
+            or "\x00" in str(root)
+            or root.resolve() != root
+        ):
+            raise RuntimeError("Files data root must remain a resolved absolute path")
+        for path in (root, root / "plugins", root / "plugins/files"):
+            if path.is_symlink() or (path.exists() and not path.is_dir()):
+                raise RuntimeError(f"Files deployment directory is redirected: {path}")
+    except OSError as exc:
+        raise RuntimeError(f"Cannot validate Files data directory: {exc}") from exc
+
+
 def _paths(setup: Setup) -> _Paths:
     if not setup.server.strip() or setup.server != setup.server.strip():
         raise RuntimeError("An explicit nonempty Rex server endpoint is required")
@@ -107,12 +125,14 @@ def _paths(setup: Setup) -> _Paths:
             raise RuntimeError(f"Setup workspace must be a directory: {workspace}")
     except OSError as exc:
         raise RuntimeError(f"Cannot resolve the explicit setup paths: {exc}") from exc
+    _validate_data_root(setup.data_root)
     return _Paths(
         project,
         workspace,
         selected,
         config,
-        config.parent / "rexdeck_files.lua",
+        setup.data_root,
+        setup.data_root / "plugins/files/rexdeck_files.lua",
         workspace / "setup.json",
     )
 
@@ -435,7 +455,12 @@ def _expect_action(setup: Setup, enabled: bool) -> None:
     if not isinstance(source, str):
         raise RuntimeError("Files action has no native source identity")
     filename, separator, line = source.rpartition(":")
-    owned_sources = {"rexdeck_files.lua", str(_paths(setup).module)}
+    paths = _paths(setup)
+    owned_sources = {str(paths.module)} | {
+        str(paths.module.relative_to(parent))
+        for parent in (paths.selected.parent, paths.config.parent)
+        if paths.module.is_relative_to(parent)
+    }
     if not separator or not line.isdecimal() or filename not in owned_sources:
         raise RuntimeError(
             "Files action is registered from an unexpected config source"
@@ -490,9 +515,10 @@ def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
         return None
     result = _decode(snapshot.data, str(paths.receipt))
     expected: dict[str, object] = {
-        "version": 2,
+        "version": 3,
         "kind": "native-files",
         "workspace": str(paths.workspace),
+        "data_root": str(paths.data_root),
         "config": str(paths.selected),
         "config_target": str(paths.config),
         "server": setup.server,
@@ -591,10 +617,12 @@ def _defer_sigint() -> Iterator[None]:
             previous(signal.SIGINT, None)
 
 
-def _rollback(changes: list[_Change]) -> list[str]:
+def _rollback(changes: list[_Change], data_root: Path) -> list[str]:
     conflicts: list[str] = []
     for change in reversed(changes):
         try:
+            if change.path.is_relative_to(data_root):
+                _validate_data_root(data_root)
             current = _file(change.path)
             if current == change.before:
                 continue
@@ -639,7 +667,7 @@ def _recover_changes(
     cancellation: KeyboardInterrupt | None = None
     try:
         with _defer_sigint():
-            conflicts = _rollback(changes)
+            conflicts = _rollback(changes, setup.data_root)
             try:
                 _reload(setup)
             except RuntimeError as reload_error:
@@ -662,7 +690,20 @@ def _recover_changes(
 
 @contextmanager
 def _operation_lock(paths: _Paths) -> Iterator[None]:
+    deployment_descriptor: int | None = None
     try:
+        _validate_data_root(paths.data_root)
+        paths.data_root.mkdir(parents=True, exist_ok=True)
+        _validate_data_root(paths.data_root)
+        deployment_descriptor = os.open(
+            paths.data_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        try:
+            fcntl.flock(deployment_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                "Another RexDeck lifecycle operation is using the Files data root"
+            ) from exc
         descriptor = os.open(
             paths.workspace / "lifecycle.lock",
             os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
@@ -683,6 +724,9 @@ def _operation_lock(paths: _Paths) -> Iterator[None]:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
     except OSError as exc:
         raise RuntimeError(f"Cannot lock the owned lifecycle operation: {exc}") from exc
+    finally:
+        if deployment_descriptor is not None:
+            os.close(deployment_descriptor)
 
 
 def _transaction(
@@ -696,18 +740,24 @@ def _transaction(
     applied: list[_Change] = []
     try:
         for change in changes:
+            _validate_data_root(paths.data_root)
+            if change.path == paths.module and change.after is not None:
+                paths.module.parent.mkdir(parents=True, exist_ok=True)
+                _validate_data_root(paths.data_root)
             if paths.selected.resolve(strict=True) != paths.config:
                 raise RuntimeError(
                     "Selected Rex config symlink changed during operation"
                 )
             applied.append(change)
             _replace(change.path, change.before, change.after)
+        _validate_data_root(paths.data_root)
         if paths.selected.resolve(strict=True) != paths.config:
             raise RuntimeError(
                 "Selected Rex config symlink changed before config validation"
             )
         _check(setup)
         _reload(setup)
+        _validate_data_root(paths.data_root)
         if paths.selected.resolve(strict=True) != paths.config:
             raise RuntimeError("Selected Rex config symlink changed during reload")
         if receipt["applied"]:
@@ -790,6 +840,7 @@ def apply_setup(setup: Setup) -> dict[str, object]:
         receipt = _receipt(paths, setup)
         config = _file(paths.config)
         assert config.data is not None
+        previous_module = _file(paths.module)
         if receipt is None:
             _unowned(paths)
             _expect_action(setup, False)
@@ -802,7 +853,6 @@ def apply_setup(setup: Setup) -> dict[str, object]:
         tools = _tools()
         enabled = bool(receipt and receipt["applied"] and receipt["enabled"])
         module = _module(setup, paths, source, tools, enabled)
-        previous_module = _file(paths.module)
         changes: list[_Change] = []
         if previous_module.data != module:
             changes.append(_Change(paths.module, previous_module, module))
@@ -819,10 +869,11 @@ def apply_setup(setup: Setup) -> dict[str, object]:
         else:
             separator = cast(str, receipt["loader_separator"])
         receipt = {
-            "version": 2,
+            "version": 3,
             "kind": "native-files",
             "project": str(paths.project),
             "workspace": str(paths.workspace),
+            "data_root": str(paths.data_root),
             "config": str(paths.selected),
             "config_target": str(paths.config),
             "server": setup.server,

@@ -33,6 +33,8 @@ class CliTests(unittest.TestCase):
         self.personal = "unix:///tmp/rexdeck-cli-personal.sock"
         self.settings = self.root / "config/rexdeck/config.json"
         self.workspace = self.root / "state/rexdeck/files"
+        self.data_root = self.root / "data/rexdeck"
+        self.module = self.data_root / "plugins/files/rexdeck_files.lua"
         self.calls: list[tuple[list[str], dict[str, str]]] = []
         self.reject_check = False
         self.status_failure = False
@@ -41,6 +43,7 @@ class CliTests(unittest.TestCase):
             "HOME": str(self.root),
             "XDG_CONFIG_HOME": str(self.root / "config"),
             "XDG_STATE_HOME": str(self.root / "state"),
+            "XDG_DATA_HOME": str(self.root / "data"),
             "PATH": os.environ.get("PATH", ""),
         }
         patcher = patch.dict(os.environ, environment, clear=True)
@@ -88,8 +91,7 @@ class CliTests(unittest.TestCase):
         if "reload" in argv:
             return lifecycle._Result(0, b'{"diagnostics": []}')
         if "actions" in argv:
-            config = Path(env["REX_CONFIG"]).resolve()
-            module = config.parent / "rexdeck_files.lua"
+            module = self.module
             actions: list[dict[str, str]] = []
             # Model only the external Rex registration boundary. Ownership, settings,
             # config edits, bundle generation, receipts and rollback remain real.
@@ -295,7 +297,9 @@ class CliTests(unittest.TestCase):
         current_files = Path(cli.__file__).resolve().parent / "plugins/files"
         for name in ("main.lua", "launch.py"):
             (old_files / name).write_bytes((current_files / name).read_bytes())
-        setup = lifecycle.Setup(old_package, existing, self.config, self.endpoint)
+        setup = lifecycle.Setup(
+            old_package, existing, self.config, self.data_root, self.endpoint
+        )
         lifecycle.apply_setup(setup)
         lifecycle.start(setup)
         self.configure("--workspace", str(existing))
@@ -355,10 +359,25 @@ class CliTests(unittest.TestCase):
                 self.assertIn("rexdeck setup", str(result["error"]))
         self.assertFalse(self.calls)
 
+    def test_saved_data_destination_survives_ambient_xdg_changes(self) -> None:
+        self.configure()
+        self.assertEqual(self.document()["data_root"], str(self.data_root))
+        changed = self.root / "changed-data"
+        with patch.dict(os.environ, {"XDG_DATA_HOME": str(changed)}):
+            self.assertEqual(self.invoke("setup")[0], 0)
+            self.assertEqual(self.invoke("enable", "files")[0], 0)
+            self.assertTrue(self.module.is_file())
+            self.assertFalse((self.config.parent / "rexdeck_files.lua").exists())
+            self.assertFalse(changed.exists())
+            self.assertEqual(self.invoke("disable", "files")[0], 0)
+        self.assertFalse(self.module.exists())
+        self.assertEqual(self.config.read_bytes(), self.original)
+
     def test_foreign_module_is_not_adopted_and_failed_enable_does_not_start(
         self,
     ) -> None:
-        module = self.root / "rexdeck_files.lua"
+        module = self.module
+        module.parent.mkdir(parents=True)
         module.write_bytes(b"-- foreign\n")
         self.assertEqual(
             self.invoke(
@@ -377,7 +396,12 @@ class CliTests(unittest.TestCase):
         self.assertFalse((self.workspace / "setup.json").exists())
 
     def test_relative_or_empty_xdg_paths_are_rejected(self) -> None:
-        for name in ("XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR"):
+        for name in (
+            "XDG_CONFIG_HOME",
+            "XDG_STATE_HOME",
+            "XDG_DATA_HOME",
+            "XDG_RUNTIME_DIR",
+        ):
             for value in ("", "relative"):
                 with (
                     self.subTest(name=name, value=value),
@@ -397,6 +421,8 @@ class CliTests(unittest.TestCase):
             None,
             [],
             {**valid, "version": True},
+            {**valid, "version": 1},
+            {**valid, "data_root": "relative"},
             {**valid, "real_server": "yes"},
             {**valid, "workspace": "relative"},
             {**valid, "config_target": 1},
@@ -443,6 +469,7 @@ class CliTests(unittest.TestCase):
         before = self.settings.read_bytes()
         different = settings.SavedTarget(
             self.root / "different-workspace",
+            self.data_root,
             self.config,
             self.config,
             self.endpoint,

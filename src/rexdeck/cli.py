@@ -120,6 +120,7 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
         if old is not None
         else workspace_default
     )
+    data_root = old.data_root if old is not None else settings.default_data_root()
     server = (
         args.server
         if args.server is not None
@@ -127,6 +128,7 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
     )
     candidate = settings.SavedTarget(
         workspace=workspace,
+        data_root=data_root,
         config=config,
         config_target=config_target,
         server=server,
@@ -143,9 +145,10 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
         old.config,
         old.config_target,
         old.workspace,
+        old.data_root,
         old.server,
         old.real_server,
-    ) == (config, config_target, workspace, server, is_real)
+    ) == (config, config_target, workspace, data_root, server, is_real)
     interactive = sys.stdin.isatty()
     if interactive and not approval_saved:
         print(
@@ -168,6 +171,7 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
             raise RuntimeError("Real Rex target was not approved; nothing saved")
     candidate = settings.SavedTarget(
         workspace=workspace,
+        data_root=data_root,
         config=config,
         config_target=config_target,
         server=server,

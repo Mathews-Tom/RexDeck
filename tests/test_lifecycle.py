@@ -28,6 +28,10 @@ rex = {
     assert(type(action.run) == "function", "action has no callable run")
     local info = debug.getinfo(2, "Sl")
     local filename = info.source:gsub("^@", "")
+    local prefix = arg[1]:match("^(.*[/])")
+    if filename:sub(1, #prefix) == prefix then
+      filename = filename:sub(#prefix + 1)
+    end
     actions[#actions + 1] = {
       name = action.name, kind = "lua", title = action.title,
       category = action.category, source = filename .. ":" .. info.currentline,
@@ -79,9 +83,10 @@ class LifecycleTests(unittest.TestCase):
             self.project,
             self.workspace,
             self.config,
+            self.root / "data/rexdeck",
             "unix:///tmp/rexdeck-isolated-test.sock",
         )
-        self.module = self.root / "rexdeck_files.lua"
+        self.module = self.setup.data_root / "plugins/files/rexdeck_files.lua"
         self.receipt_path = self.workspace / "setup.json"
         self.harness = self.root / "config-harness.lua"
         self.harness.write_text(_LUA_CONFIG)
@@ -183,10 +188,13 @@ class LifecycleTests(unittest.TestCase):
 
     def test_apply_starts_disabled_and_native_selection_survives_reapply(self) -> None:
         life.apply_setup(self.setup)
+        self.assertFalse((self.target.parent / "rexdeck_files.lua").exists())
         self.assertEqual(self.actions, [])
         self.assertEqual(life.status(self.setup)["state"], "disabled")
         self.assertTrue(self.receipt()["applied"])
         self.assertFalse(self.receipt()["enabled"])
+        life.apply_setup(self.setup)
+        self.assertEqual(life.status(self.setup)["state"], "disabled")
         self.assertEqual(life.start(self.setup)["state"], "ready")
         self.assertEqual([row["name"] for row in self.actions], ["rexdeck_files"])
         life.apply_setup(self.setup)
@@ -235,12 +243,14 @@ class LifecycleTests(unittest.TestCase):
         life.apply_setup(self.setup)
         life.start(self.setup)
         original = self.actions[0].copy()
-        for owned_source in ("rexdeck_files.lua:3", f"{self.module}:3"):
+        relative_source = self.module.relative_to(self.config.parent)
+        for owned_source in (f"{relative_source}:3", f"{self.module}:3"):
             with self.subTest(owned_source=owned_source):
                 self.actions = [original | {"source": owned_source}]
                 self.assertEqual(life.status(self.setup)["state"], "ready")
         for source in (
             None,
+            "rexdeck_files.lua:3",
             "other.lua:3",
             "rexdeck_files.lua:not-a-line",
             str(self.root / "foreign" / "rexdeck_files.lua") + ":3",
@@ -526,6 +536,7 @@ class LifecycleTests(unittest.TestCase):
             "version": 999,
             "kind": "other",
             "workspace": str(self.root / "other-workspace"),
+            "data_root": str(self.root / "other-data"),
             "config": str(self.target),
             "config_target": str(self.root / "other.lua"),
             "server": "unix:///tmp/other.sock",
@@ -544,7 +555,12 @@ class LifecycleTests(unittest.TestCase):
 
     def test_unknown_or_legacy_receipt_is_refused_without_changes(self) -> None:
         self.workspace.mkdir()
-        for value in ({"version": 1, "enabled": True}, {"version": 999}, {}):
+        for value in (
+            {"version": 1, "enabled": True},
+            {"version": 2},
+            {"version": 999},
+            {},
+        ):
             self.receipt_path.write_bytes(life._json(value))
             before = self.snapshot()
             for operation in (
@@ -561,9 +577,35 @@ class LifecycleTests(unittest.TestCase):
                     operation(self.setup)
                 self.assertEqual(self.snapshot(), before)
 
+    def test_redirected_deployment_directories_are_refused_before_writes(self) -> None:
+        outside = self.root / "outside"
+        outside.mkdir()
+        for directory in (
+            self.setup.data_root,
+            self.setup.data_root / "plugins",
+            self.setup.data_root / "plugins/files",
+        ):
+            directory.parent.mkdir(parents=True, exist_ok=True)
+            directory.symlink_to(outside, target_is_directory=True)
+            with self.assertRaises(RuntimeError):
+                life.apply_setup(self.setup)
+            self.assertEqual(self.target.read_bytes(), self.original)
+            self.assertFalse(self.workspace.exists())
+            self.assertEqual(list(outside.iterdir()), [])
+            directory.unlink()
+
+    def test_changed_data_root_is_not_receipt_ownership(self) -> None:
+        life.apply_setup(self.setup)
+        before = self.snapshot()
+        other = replace(self.setup, data_root=self.root / "other-data")
+        for operation in (life.apply_setup, life.start, life.disable, life.status):
+            with self.assertRaises(RuntimeError):
+                operation(other)
+            self.assertEqual(self.snapshot(), before)
+
     def test_foreign_artifacts_and_symlinked_module_are_not_adopted(self) -> None:
-        for name in ("rexdeck_files.lua", "rexdeck_palette.lua"):
-            path = self.root / name
+        self.module.parent.mkdir(parents=True)
+        for path in (self.module, self.root / "rexdeck_palette.lua"):
             path.write_bytes(b"foreign")
             with self.assertRaises(RuntimeError):
                 life.apply_setup(self.setup)
@@ -609,6 +651,47 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.target.read_bytes(), self.original)
         self.assertEqual(other.read_bytes(), b"-- another target")
         self.assertFalse(self.module.exists())
+
+    def test_shared_data_root_serializes_different_workspaces(self) -> None:
+        other_config = self.root / "other.lua"
+        other_config.write_bytes(b"-- other target\n")
+        other = replace(
+            self.setup, workspace=self.root / "other-workspace", config=other_config
+        )
+        tools = life._tools()
+        attempted = False
+
+        def install_concurrently() -> dict[str, str]:
+            nonlocal attempted
+            if not attempted:
+                attempted = True
+                with self.assertRaisesRegex(RuntimeError, "using the Files data root"):
+                    life.apply_setup(other)
+            return tools
+
+        with patch.object(life, "_tools", side_effect=install_concurrently):
+            life.apply_setup(self.setup)
+        self.assertEqual(life.status(self.setup)["state"], "disabled")
+        self.assertFalse((other.workspace / "setup.json").exists())
+        self.assertEqual(other_config.read_bytes(), b"-- other target\n")
+        with self.assertRaisesRegex(RuntimeError, "Unowned existing artifact"):
+            life.apply_setup(other)
+
+    def test_newly_appeared_module_is_not_adopted(self) -> None:
+        tools = life._tools()
+        foreign = b"-- concurrently installed foreign module\n"
+
+        def install_foreign_module() -> dict[str, str]:
+            self.module.parent.mkdir(parents=True, exist_ok=True)
+            self.module.write_bytes(foreign)
+            return tools
+
+        with patch.object(life, "_tools", side_effect=install_foreign_module):
+            with self.assertRaisesRegex(RuntimeError, "Concurrent edit"):
+                life.apply_setup(self.setup)
+        self.assertEqual(self.module.read_bytes(), foreign)
+        self.assertEqual(self.target.read_bytes(), self.original)
+        self.assertFalse(self.receipt_path.exists())
 
     def test_concurrent_lifecycle_lock_refuses_mutation(self) -> None:
         life.apply_setup(self.setup)
@@ -707,6 +790,7 @@ class ProcessBoundaryTests(unittest.TestCase):
             Path("/project"),
             Path("/workspace"),
             Path("/selected.lua"),
+            Path("/data/rexdeck"),
             "unix:///tmp/private.sock",
         )
         with patch.dict(

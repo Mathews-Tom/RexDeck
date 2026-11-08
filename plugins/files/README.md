@@ -44,24 +44,15 @@ rexdeck enable files
 
 The `--real-server` flag authorizes the personal target for subsequent explicit enable/disable commands. For an isolated server, pass its existing config and Unix socket with `--config` and `--server`, omit `--real-server`, and isolate RexDeck's XDG directories. Isolated sockets must resolve under `/tmp` or `/private/tmp`; they are not interchangeable with your application's endpoint.
 
-Settings are stored in `$XDG_CONFIG_HOME/rexdeck/config.json` (default `~/.config/rexdeck/config.json`). Files ownership records use `$XDG_STATE_HOME/rexdeck/files` (default `~/.local/state/rexdeck/files`), remembered at setup time. There is no required `-native` suffix. Later commands use the saved target, not ambient `REX_SERVER` or changing shell variables. Malformed settings, changed config symlink targets, and replacing an existing saved target are refused rather than silently adopted. To select a different target, disable Files first, deliberately remove the saved RexDeck `config.json`, then run setup for the new target with `--workspace` pointing to a fresh directory. Preserve the old ownership workspace; its receipt remains bound to the old target even after disable.
+Settings are stored in `$XDG_CONFIG_HOME/rexdeck/config.json` (default `~/.config/rexdeck/config.json`). Files ownership records use `$XDG_STATE_HOME/rexdeck/files` (default `~/.local/state/rexdeck/files`), remembered at setup time. There is no required `-native` suffix. Later commands use the saved target, not ambient `REX_SERVER` or changing shell variables. Malformed settings, changed config symlink targets, and replacing an existing saved target are refused rather than silently adopted. To select a different target, disable Files first, deliberately remove the saved RexDeck `config.json`, then run setup for the new target with a fresh ownership location. Keep the old receipt until removal and rollback safety are verified; never reuse it for another target. XDG settings here do not relocate `uv` or Rex's own configuration.
 
-The generated `rexdeck_files.lua` sits beside the canonical target of the selected config, including when that config is a symlink. A tracked `require` loader preserves module search path/cache state and lets Rex detect action changes. The target directory cannot contain `;` or `?`, which have special module-search meanings. Conflicting files, changed owned bytes, and old/unknown receipts are refused rather than overwritten or adopted.
+The generated module is `$XDG_DATA_HOME/rexdeck/plugins/files/rexdeck_files.lua` (default `~/.local/share/rexdeck/plugins/files/rexdeck_files.lua`). Setup resolves, validates, and saves the app data root (`…/rexdeck`) once; later commands reuse it even if ambient `XDG_DATA_HOME` changes. The uv-managed package remains the action/launcher source. Only the owned tracked `require` loader is added to the canonical Rex config target, including when the selected config is a symlink; it restores module search path/cache state and lets Rex detect action changes. The module data directory—not the config parent—cannot contain `;` or `?`, which have special module-search meanings. Symlinked or redirecting deployment subdirectories, conflicting files, and changed owned bytes are refused rather than overwritten or silently redirected to config-adjacent storage.
 
 ### Existing native Files setup
 
-If Files is already applied using the earlier manual commands, select its **existing** workspace during one-time setup:
+This pre-release cutover uses settings schema **2** and receipt schema **3**, binding ownership to the saved app data root. Old or unknown settings/receipts and foreign formats are refused, not automatically adopted. Reinstalling the package alone does not migrate an existing config-adjacent module.
 
-```sh
-rexdeck setup \
-  --workspace "$HOME/.local/state/rexdeck/files-native" \
-  --config "$HOME/.config/rex/init.lua" \
-  --server "unix://$HOME/Library/Application%20Support/rex/server.sock" \
-  --real-server
-rexdeck enable files
-```
-
-Use the actual original workspace if it differs. Do not rename or discard an applied ownership directory. Setup remembers that location; subsequent commands still need no workspace argument. Package reinstall or relocation does not transfer ownership to a different config or server.
+For an existing installation, retain the old working package or rollback wheel and verify its original workspace, config, server, and unchanged owned artifacts. Use that **old implementation's** disable against its verified saved target before installing the new layout. Preserve the old settings/receipt and exact baseline as rollback evidence; deliberately reset the saved selection only after owned disable succeeds, then use the ordinary new setup/enable/status commands. Keep the same approved target and establish readiness and rollback safety before removing any verified obsolete owned state. Do not blindly delete, rename, reuse, or adopt applied ownership. This is an explicit owner operation, not a migration command or framework.
 
 ### Previous LazyRex-based Files
 
@@ -94,6 +85,8 @@ uv tool install --reinstall .
 rexdeck enable files
 rexdeck status
 ```
+
+This refresh sequence applies to the current schemas. For a pre-cutover installation, follow **Existing native Files setup** before replacing the old package.
 
 Re-enabling verifies the recorded ownership before refreshing the packaged action, launcher, and interpreter paths. To remove RexDeck itself, run `rexdeck disable files` before `uv tool uninstall rexdeck`; uninstalling the Python tool alone does not remove Rex configuration.
 

@@ -17,6 +17,7 @@ _FIELDS = {
     "version",
     "kind",
     "workspace",
+    "data_root",
     "config",
     "config_target",
     "server",
@@ -43,6 +44,12 @@ def default_workspace() -> Path:
     ).resolve()
 
 
+def default_data_root() -> Path:
+    return (
+        xdg_path("XDG_DATA_HOME", Path.home() / ".local/share") / "rexdeck"
+    ).resolve()
+
+
 def _absolute(value: object, name: str) -> Path:
     if not isinstance(value, str) or not value or "\x00" in value:
         raise RuntimeError(f"Saved {name} must be a nonempty absolute path")
@@ -64,6 +71,7 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 @dataclass(frozen=True)
 class SavedTarget:
     workspace: Path
+    data_root: Path
     config: Path
     config_target: Path
     server: str
@@ -77,9 +85,11 @@ class SavedTarget:
             )
         if self.workspace.resolve() != self.workspace:
             raise RuntimeError("Saved Files workspace target changed; restore its path")
+        lifecycle._validate_data_root(self.data_root)
         return lifecycle.Setup(
             project=Path(__file__).resolve().parent,
             workspace=self.workspace,
+            data_root=self.data_root,
             config=self.config,
             server=self.server,
             real_server=self.real_server,
@@ -87,9 +97,10 @@ class SavedTarget:
 
     def document(self) -> dict[str, object]:
         return {
-            "version": 1,
+            "version": 2,
             "kind": "native-files",
             "workspace": str(self.workspace),
+            "data_root": str(self.data_root),
             "config": str(self.config),
             "config_target": str(self.config_target),
             "server": self.server,
@@ -124,7 +135,7 @@ def load(path: Path) -> SavedTarget | None:
     if (
         set(fields) != _FIELDS
         or type(fields["version"]) is not int
-        or fields["version"] != 1
+        or fields["version"] != 2
         or fields["kind"] != "native-files"
         or type(fields["real_server"]) is not bool
     ):
@@ -135,6 +146,7 @@ def load(path: Path) -> SavedTarget | None:
     lifecycle._socket_path(server)
     target = SavedTarget(
         workspace=_absolute(fields["workspace"], "workspace"),
+        data_root=_absolute(fields["data_root"], "data_root"),
         config=_absolute(fields["config"], "config"),
         config_target=_absolute(fields["config_target"], "config_target"),
         server=server,

@@ -31,6 +31,8 @@ The installed command works from any directory; the package includes Files' nati
 
 `setup` remembers the selected Rex configuration and running server without changing Rex configuration. Interactive setup asks for approval before saving a personal-server target. `enable files` installs and enables only Files; `disable files` removes its owned integration. See the [Files README](plugins/files/README.md) for prerequisites, explicit target selection, updates, and removal.
 
+The uv-managed package remains the runtime source. Setup freezes the app data root from `$XDG_DATA_HOME/rexdeck` (default `~/.local/share/rexdeck`); Files deploys `plugins/files/rexdeck_files.lua` there, leaving only its owned tracked-require loader in Rex's `init.lua`. Approved preferences remain in `$XDG_CONFIG_HOME/rexdeck/config.json`, and receipt/lock state remains in `$XDG_STATE_HOME/rexdeck/files`. Later `XDG_DATA_HOME` changes do not retarget the saved installation.
+
 Each available integration owns its requirements and usage instructions. There is no collection-wide install-all command, and external tools are not auto-installed.
 
 ## Design principles

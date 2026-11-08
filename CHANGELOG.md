@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Deploy Files' generated Lua module under the setup-frozen `$XDG_DATA_HOME/rexdeck/plugins/files` app data root, leaving only the tracked-require loader in Rex config. Keep package, preferences, and receipt/lock roles separate; use settings v2 and receipt v3, refusing old/foreign formats without automatic adoption. Preserve exact native source identity for relative or absolute paths, serialize shared-root mutations across workspaces, and refuse modules appearing during ownership checks.
 - Package the native Files Lua action and Python launcher so installed RexDeck works outside a checkout. Replace manual workspace flags and shell wrappers with one-time `setup`, `enable files`, `status`, and `disable files`; persist the explicitly approved Rex target and derive Files state paths automatically.
 - Remove unused internal stop lifecycle code and stale lifecycle documentation; public Files usage remains setup/enable/status/disable. Require verified ownership and rollback safety before explicitly migrating existing state or removing obsolete owned artifacts; no automatic migration command is added.
 - Replace the custom Files browser with a native **RexDeck Files** action launching unmodified Yazi in the invoking terminal's captured working directory, preserving its normal UI, configuration, navigation, previews, and file operations.
