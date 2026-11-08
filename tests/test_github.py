@@ -213,6 +213,8 @@ def helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path
     gh = bin_dir / "gh"
     gh.write_text(f"""#!{sys.executable}
 import os, sys
+if os.environ.get("TEST_EXPECT_PATH") and os.environ["PATH"] != os.environ["TEST_EXPECT_PATH"]:
+    sys.exit("relative PATH leaked into gh")
 if os.environ.get("TEST_AUTH_FAILURE"):
     print("authentication required", file=sys.stderr); sys.exit(4)
 if sys.argv[4] == "user":
@@ -230,6 +232,7 @@ pathlib.Path({str(marker)!r}).write_text(json.dumps({{
     "argv": sys.argv[1:], "config": json.loads(config.read_text()),
     "host": os.environ["GH_HOST"], "repo": os.environ["GH_REPO"],
     "gh": os.environ["GH_PATH"], "cwd": os.getcwd(),
+    "path": os.environ["PATH"],
 }}))
 sys.exit(int(os.environ.get("TEST_TOOL_EXIT", "0")))
 """)
@@ -298,6 +301,13 @@ def test_run_passes_explicit_identity_without_changing_parent_or_persisting_conf
     tool, marker = helpers
     monkeypatch.setenv("GH_HOST", "wrong.example")
     monkeypatch.setenv("GH_REPO", "wrong/other")
+    monkeypatch.setenv("GH_PATH", "./untrusted-gh")
+    untrusted_path = ":.:relative:" + os.environ["PATH"] + ":relative:"
+    expected_path = os.pathsep.join(
+        entry for entry in untrusted_path.split(os.pathsep) if Path(entry).is_absolute()
+    )
+    monkeypatch.setenv("PATH", untrusted_path)
+    monkeypatch.setenv("TEST_EXPECT_PATH", expected_path)
     monkeypatch.setattr(launch, "restore_focus", lambda *args: None)
     assert (
         launch.run(
@@ -324,6 +334,10 @@ def test_run_passes_explicit_identity_without_changing_parent_or_persisting_conf
     assert not Path(record["argv"][1]).exists()
     assert os.environ["GH_HOST"] == "wrong.example"
     assert os.environ["GH_REPO"] == "wrong/other"
+    assert record["path"] == expected_path
+    assert record["gh"] == str(tool.parent / "gh")
+    assert os.environ["PATH"] == untrusted_path
+    assert os.environ["GH_PATH"] == "./untrusted-gh"
 
 
 @pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGTERM])

@@ -190,6 +190,10 @@ def tools(tmp_path: Path) -> tuple[Path, Path, Path]:
         "state['argv'] = sys.argv[1:]\n"
         "state['cwd'] = os.getcwd()\n"
         "state['config'] = os.environ.get('YAZI_CONFIG_HOME')\n"
+        "state['path'] = os.environ.get('PATH')\n"
+        "if state.get('probe_helper'):\n"
+        "    import subprocess\n"
+        "    state['helper'] = subprocess.check_output(['preload-helper'], text=True)\n"
         "state['focused'] = 'origin-b'\n"
         "if state.get('remove_origin'):\n"
         "    state['blocks'].remove(state['remove_origin'])\n"
@@ -604,3 +608,173 @@ def test_document_run_passes_arguments_and_target_in_parent_directory(
     assert state["argv"] == ["--theme", "dark", str(target.resolve())]
     assert state["cwd"] == str(target.parent.resolve())
     assert state["focused"] == "origin-a"
+
+
+@pytest.mark.parametrize(
+    ("suffix", "header"),
+    [
+        (".PDF", b"%PDF-1.4\n"),
+        (".jpg", b"\xff\xd8\xff"),
+        (".jpeg", b"\xff\xd8\xff"),
+        (".png", b"\x89PNG\r\n\x1a\n"),
+        (".svg", b'<svg xmlns="http://www.w3.org/2000/svg"/>'),
+    ],
+)
+@pytest.mark.parametrize("representation", ["absolute", "relative", "uri"])
+def test_media_explicit_local_selection(
+    tmp_path: Path, suffix: str, header: bytes, representation: str
+) -> None:
+    target = tmp_path / ("雪 ; $(touch nope)" + suffix)
+    target.write_bytes(header)
+    selected = (
+        target.name
+        if representation == "relative"
+        else target.as_uri()
+        if representation == "uri"
+        else str(target)
+    )
+    assert launch.resolve("media", str(tmp_path), selected) == str(target.resolve())
+    assert not (tmp_path / "nope").exists()
+
+
+@pytest.mark.parametrize("suffix", [".pdf", ".jpg", ".png", ".svg"])
+def test_media_mislabeled_files_fail_before_launch(tmp_path: Path, suffix: str) -> None:
+    target = tmp_path / ("corrupt" + suffix)
+    target.write_text("not an image", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid .* file signature"):
+        launch.resolve("media", str(tmp_path), str(target))
+
+
+def test_media_requires_file_and_checks_resolved_suffix(tmp_path: Path) -> None:
+    unsupported = tmp_path / "untrusted.html"
+    unsupported.write_text("<svg/>", encoding="utf-8")
+    link = tmp_path / "misleading.svg"
+    link.symlink_to(unsupported)
+    for selected in (None, "", str(tmp_path), str(link)):
+        with pytest.raises(ValueError):
+            launch.resolve("media", str(tmp_path), selected)
+
+
+def test_media_launch_passes_one_absolute_target_and_restores_origin(
+    tmp_path: Path, tools: tuple[Path, Path, Path]
+) -> None:
+    tool, rex, state_path = tools
+    target = tmp_path / "雪 ; $(touch nope).png"
+    target.write_bytes(b"\x89PNG\r\n\x1a\n")
+    assert (
+        launch.run(
+            "media",
+            "Viewer",
+            "Yazi",
+            str(tool),
+            str(rex),
+            "unix:///private server.sock",
+            "session-exact",
+            "origin-a",
+            str(target),
+        )
+        == 0
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["argv"] == [str(target.resolve())]
+    assert state["cwd"] == str(target.parent.resolve())
+    assert state["focused"] == "origin-a"
+
+
+@pytest.mark.parametrize("plugin", ["files", "git", "markdown", "usage", "viewer"])
+def test_tool_path_excludes_untrusted_entries_without_changing_launch_contract(
+    tmp_path: Path,
+    tools: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    plugin: str,
+) -> None:
+    from rexdeck.integrations import get
+
+    integration = get(plugin)
+    tool, rex, state_path = tools
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    relative = tmp_path / "relative"
+    relative.mkdir()
+    for folder, marker in (
+        (tmp_path, "cwd"),
+        (relative, "relative"),
+        (trusted, "trusted"),
+    ):
+        helper = folder / "preload-helper"
+        helper.write_text(f"#!/bin/sh\nprintf {marker}\n", encoding="utf-8")
+        helper.chmod(0o700)
+    state = json.loads(state_path.read_text())
+    state["probe_helper"] = True
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    target = tmp_path
+    if plugin == "markdown":
+        target = tmp_path / "selected.md"
+        target.write_text("# Markdown\n", encoding="utf-8")
+    elif plugin == "viewer":
+        target = tmp_path / "selected.png"
+        target.write_bytes(
+            bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000d4944415408d763606068f80f000204018088089b4a"
+                "0000000049454e44ae426082"
+            )
+        )
+    untrusted_path = f":.:relative:{trusted}:/usr/bin:relative:"
+    monkeypatch.setenv("PATH", untrusted_path)
+    monkeypatch.setenv("YAZI_CONFIG_HOME", str(tmp_path / "user config"))
+    assert (
+        launch.run(
+            integration.context,
+            integration.title,
+            integration.tool_label,
+            str(tool),
+            str(rex),
+            "unix:///private server.sock",
+            "session-exact",
+            "origin-a",
+            str(target),
+            integration.args,
+        )
+        == 0
+    )
+    state = json.loads(state_path.read_text())
+    assert state["path"] == f"{trusted}:/usr/bin"
+    assert state["helper"] == "trusted"
+    assert state["argv"] == list(integration.args) + (
+        [str(target.resolve())] if plugin in ("markdown", "viewer") else []
+    )
+    assert state["cwd"] == str(tmp_path.resolve())
+    assert state["config"] == str(tmp_path / "user config")
+    assert state["focused"] == "origin-a"
+    assert os.environ["PATH"] == untrusted_path
+
+
+@pytest.mark.parametrize("path", [":.:relative", ""])
+def test_tool_path_defaults_to_system_when_no_absolute_entries(
+    tmp_path: Path,
+    tools: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    tool, rex, state_path = tools
+    monkeypatch.setenv("PATH", path)
+    assert (
+        launch.run(
+            "directory",
+            "Files",
+            "Yazi",
+            str(tool),
+            str(rex),
+            "unix:///private server.sock",
+            "session-exact",
+            "origin-a",
+            str(tmp_path),
+        )
+        == 0
+    )
+    state = json.loads(state_path.read_text())
+    assert state["path"] == os.defpath
+    assert state["focused"] == "origin-a"
+    assert os.environ["PATH"] == path

@@ -17,10 +17,11 @@ from dataclasses import dataclass
 # inherited repository redirection. "document" accepts an explicitly selected
 # Markdown file (the action's ``file`` argument, absolute or relative to the
 # invoking directory) and otherwise browses the invoking directory; the
-# validated target is passed to the tool as its final argument.
+# validated target is passed to the tool as its final argument. "media" requires
+# an explicit PDF/JPG/PNG/SVG file and never falls back to directory browsing.
 # "github-worktree" reuses Git discovery and captures an explicit repository/host
 # and account choice, verified against existing gh authentication before launch.
-CONTEXTS = ("directory", "git-worktree", "document", "github-worktree")
+CONTEXTS = ("directory", "git-worktree", "document", "github-worktree", "media")
 PLACEMENTS = ("right", "left", "below", "above")
 MIN_SIZE = 20
 MAX_SIZE = 80
@@ -302,6 +303,41 @@ INTEGRATIONS: dict[str, Integration] = {
             prerequisites=(
                 ("git", "https://git-scm.com/downloads"),
                 ("gh", "https://cli.github.com/"),
+            ),
+        ),
+        Integration(
+            id="viewer",
+            title="Viewer",
+            tool="yazi",
+            tool_label="Yazi",
+            description="Preview an explicitly selected PDF, JPG, PNG or SVG in Yazi",
+            keywords="viewer pdf jpg jpeg png svg image",
+            context="media",
+            versions=("26.9.1",),
+            version_pattern=(
+                r"^Yazi(?:[ \t]+|[ \t]*\r?\n[ \t]*Version:[ \t]*)"
+                r"(\d+\.\d+\.\d+)(?:\s|$)"
+            ),
+            release="https://github.com/sxyazi/yazi/releases/tag/v26.9.1",
+            license="MIT",
+            capabilities=(
+                "in-pane Kitty graphics previews; PDF pages use pdftoppm; SVG uses "
+                "resvg, not a browser; unbundled helper prerequisites: "
+                "pdftoppm/Poppler (GPL), resvg (MIT/Apache-2.0)",
+                "filesystem read/write and configured openers, editors and shell "
+                "commands: the same unrestricted Yazi as Files",
+                "selected file is a start point, not a root jail or sandbox",
+                "opens the parent folder and type-checks/preloads visible siblings "
+                "using file(1), pdftoppm, resvg and ImageMagick; use trusted or "
+                "isolated folders for untrusted files",
+                "Enter/open follows the owner's openers (macOS default application), "
+                "which may fetch resources and run SVG scripts; RexDeck never invokes "
+                "an external opener automatically",
+            ),
+            default_layout=Layout("right", 50),
+            prerequisites=(
+                ("pdftoppm", "https://poppler.freedesktop.org/"),
+                ("resvg", "https://github.com/linebender/resvg/releases/tag/v0.49.0"),
             ),
         ),
     )
