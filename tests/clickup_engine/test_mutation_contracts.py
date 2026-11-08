@@ -56,6 +56,20 @@ CASES = (
         {"due_date": 1790812800000},
     ),
     WriteCase(
+        "description",
+        ("touch", TASK_ID, "--description", "Synthetic **Markdown** body"),
+        "PUT",
+        TASK,
+        {"markdown_content": "Synthetic **Markdown** body"},
+    ),
+    WriteCase(
+        "points",
+        ("touch", TASK_ID, "--points", "3"),
+        "PUT",
+        TASK,
+        {"points": 3},
+    ),
+    WriteCase(
         "custom-field",
         ("touch", TASK_ID, "--field", "Channel=Paid Social"),
         "POST",

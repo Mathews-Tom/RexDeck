@@ -486,18 +486,33 @@ class WriteBackend(Backend):
         self.due: object = None
         self.assignees: list[dict[str, object]] = []
         self.field_value: object = "before"
+        self.description = "Original body"
+        self.points: object = None
         self.posted_comment = ""
         self.write_calls: list[tuple[str, dict[str, object]]] = []
         self.fail_write = False
+        self.reject_write = False
+        self.reject_reads_after_write = False
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.removeprefix("/api/v2")
+        if (
+            request.method == "GET"
+            and self.reject_reads_after_write
+            and self.write_calls
+        ):
+            return httpx.Response(400, json={"ECODE": "ITEM_000"})
         if request.method in {"PUT", "POST"}:
             assert path in {"/task/a", "/task/a/comment", "/task/a/field/field-x"}
             body = cu.obj(json.loads(request.content))
             self.write_calls.append((path, body))
             if self.fail_write:
                 return httpx.Response(503, json={})
+            if self.reject_write:
+                return httpx.Response(
+                    400,
+                    json={"err": "not a valid points selection", "ECODE": "ITEM_223"},
+                )
             if path.endswith("/comment"):
                 self.posted_comment = str(body["comment_text"])
             elif "/field/" in path:
@@ -506,6 +521,10 @@ class WriteBackend(Backend):
                 self.status = str(body["status"])
             elif "due_date" in body:
                 self.due = body["due_date"]
+            elif "markdown_content" in body:
+                self.description = str(body["markdown_content"])
+            elif "points" in body:
+                self.points = body["points"]
             elif "assignees" in body:
                 self.assignees = [{"id": 2, "username": "user_two"}]
             return httpx.Response(200, json={})
@@ -526,6 +545,8 @@ class WriteBackend(Backend):
                 }
                 payload["due_date"] = self.due
                 payload["assignees"] = self.assignees
+                payload["markdown_description"] = self.description
+                payload["points"] = self.points
                 payload["custom_fields"] = [
                     {
                         "id": "field-x",
@@ -601,6 +622,8 @@ def writable_controller(tmp_path: Path) -> Iterator[tuple[WriteBackend, cu.Contr
         ("assignee", "2", "/task/a"),
         ("due", "2026-12-01", "/task/a"),
         ("field", "Disposable=after", "/task/a/field/field-x"),
+        ("description", "Updated **Markdown** body", "/task/a"),
+        ("points", "2.5", "/task/a"),
         ("comment", "Sample write proof", "/task/a/comment"),
     ],
 )
@@ -626,6 +649,10 @@ def test_engine_write_requires_exact_confirmation_and_refreshes(
             assert view.detail.task.status == "active"
         if action == "comment":
             assert any(comment.body == value for comment in view.detail.comments)
+        if action == "description":
+            assert view.detail.task.description == value
+        if action == "points":
+            assert view.detail.task.points == "2.5"
         with pytest.raises(ValueError):
             controller.confirm("a", proposed.approval)
         assert len(backend.write_calls) == 1
@@ -660,16 +687,35 @@ def test_changed_remote_value_refuses_staged_digest(tmp_path: Path) -> None:
         assert controller.snapshot().pending is None
 
 
-def test_failed_write_is_not_retried_or_replayable(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("failure", "outcome"),
+    [
+        ("unavailable", "Write may have succeeded"),
+        ("rejected", "ClickUp refused this write; it was not applied"),
+        ("refresh-rejected", "Write may have succeeded"),
+    ],
+)
+def test_failed_write_is_not_retried_or_replayable(
+    tmp_path: Path, failure: str, outcome: str
+) -> None:
     with writable_controller(tmp_path) as (backend, controller):
-        settled(controller.stage("status", "active"))
+        settled(controller.stage("points", "2.5"))
         proposed = controller.snapshot().pending
         assert proposed is not None
-        backend.fail_write = True
-        with pytest.raises(diagnostics.EngineError):
+        backend.fail_write = failure == "unavailable"
+        backend.reject_write = failure == "rejected"
+        backend.reject_reads_after_write = failure == "refresh-rejected"
+        with pytest.raises((diagnostics.EngineError, cu.ClickUpError)):
             settled(controller.confirm("a", proposed.approval))
+        if failure == "refresh-rejected":
+            assert backend.points == 2.5
         assert len(backend.write_calls) == 1
-        assert "NOT retried" in controller.snapshot().output
+        snapshot = controller.snapshot()
+        assert "NOT retried" in snapshot.output and outcome in snapshot.output
+        if failure == "rejected":
+            assert snapshot.error_state == "rejected"
+            assert "ITEM_223" in snapshot.error
+            assert "not a valid points selection" not in snapshot.error
         with pytest.raises(ValueError):
             controller.confirm("a", proposed.approval)
 

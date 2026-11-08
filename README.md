@@ -2,7 +2,7 @@
 
 A collection of independently selectable plugins and extensions that bring existing tools into your own Rex application.
 
-Files, local Git, Markdown, Usage, GitHub and rich-format viewing bring unmodified Yazi, lazygit, markdown-reader, tokscale and gh-dash into native Rex terminals. ClickUp adds an identity-bound read/write pane backed by the owner's MIT engine with explicit confirmation. Native attention retains exact terminal navigation; opt-in Claude Code/Codex hooks add provider-reported subagent parentage (script-qualified, owner live-event proof pending). Linear remains planned. Select only the tools you need.
+Files, local Git, Markdown, Usage, GitHub and rich-format viewing bring unmodified Yazi, lazygit, markdown-reader, tokscale and gh-dash into native Rex terminals. ClickUp adds an identity-bound read/write pane backed by the owner's MIT engine with explicit confirmation. Native attention retains exact terminal navigation; opt-in Claude Code/Codex hooks add provider-reported subagent parentage (script-qualified, owner live-event proof pending). Linear is not implemented; contributions are welcome. Select only the tools you need.
 
 ## Plugins and extensions
 
@@ -17,9 +17,19 @@ Files, local Git, Markdown, Usage, GitHub and rich-format viewing bring unmodifi
 | [ClickUp](plugins/clickup/README.md) | Explicit account/workspace/list, engine reads and confirmed task changes, validated browser links | Unreleased (source checkout) |
 | [Native attention](plugins/attention/README.md) | Retain explicit native worker status, filter by project/location, and revalidate exact terminal navigation | Unreleased (source checkout); provider identity remains unknown |
 | [Provider subagents](plugins/attention/README.md#optional-provider-hooks-d11-implement-and-hold-for-owner) | Opt-in Claude Code/Codex start/stop metadata, parentage and exact inherited-terminal navigation | Unreleased; script-qualified, held for owner hook installation and real-event proof; omp interface missing |
-| Linear | Independently selectable Linear workflows | Planned |
+| Linear | Independently selectable Linear workflows | Not implemented — help wanted |
 
-Planned integrations are not implemented or installable yet. Published RexDeck releases are available on [PyPI](https://pypi.org/project/rexdeck/); `rexdeck plugins` is new in version 0.1.1.
+Published RexDeck releases are available on [PyPI](https://pypi.org/project/rexdeck/); `rexdeck plugins` is new in version 0.1.1.
+
+### Untested environments — feedback and PRs welcome
+
+The maintainer can only qualify what they can access. These gaps are known, not hidden:
+
+- **Linear** is not implemented: the maintainer has no Linear account to qualify it against. A contributed integration should follow [Adding an integration](#adding-an-integration) and exercise real Linear data.
+- **GitHub Enterprise Server and multiple GitHub accounts**: the GitHub integration's explicit `repo=HOST/OWNER/REPO` and `account=LOGIN` checks apply to any host, but they have only been exercised on `github.com` with one account.
+- **ClickUp with a second account or workspace**: isolation is covered by tests and a deliberate account-mismatch check, not by a second real account.
+
+If you have one of these environments, open an issue with what you ran and what you observed, or raise a PR with the fix and its evidence.
 
 ## Getting started
 
