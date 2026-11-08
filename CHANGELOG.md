@@ -2,7 +2,9 @@
 
 ## 0.2.0 — 2026-11-09
 
-New integrations: Markdown, Usage, GitHub, Viewer, ClickUp, native attention and opt-in Claude Code/Codex subagent hooks, plus configurable pane placement and size for every integration. Upgrading from 0.1.x: run `rexdeck enable <id>` for each previously enabled integration (Files, Git) to refresh its native module. Publication is recorded here only after the approved files are verified on PyPI.
+New integrations: Markdown, Usage, GitHub, Viewer, ClickUp, native attention and opt-in Claude Code/Codex subagent hooks, plus configurable pane placement and size for every integration. Upgrading from 0.1.x: run `rexdeck enable <id>` for each previously enabled integration (Files, Git) to refresh its native module.
+
+- Published the approved main-CI wheel/sdist (commit `32bcb43`, artifact `13638546210`) to GitHub and PyPI from tag `v0.2.0`; public asset and registry hashes match. A no-cache public-index install listed every integration and ran the ClickUp native action in a private Rex with exact-origin quit and clean disable.
 
 - ClickUp: propose and confirm `description MARKDOWN` (replaces the whole description through `markdown_content`, staged against the current Markdown) and `points NUMBER` (native Sprint Points; negative/non-numeric/non-finite values refused before any request, and ClickUp itself refuses values off the workspace's point scale). Task detail shows `points=`. The engine's `touch` gains `--description` and `--points`. HTTP 400 is now a coded `request/rejected` finding (pane state `REJECTED`, keeping only ClickUp's short `ECODE`) instead of a malformed response, and a refused write says it was not applied rather than "may have succeeded".
 - README: Linear is listed as not implemented (help wanted) and an untested-environments section names GitHub Enterprise/multi-account and second-account ClickUp as unqualified, inviting issues and PRs.
