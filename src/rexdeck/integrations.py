@@ -364,7 +364,7 @@ INTEGRATIONS: dict[str, Integration] = {
             release="https://github.com/Mathews-Tom/RexDeck",
             license="MIT",
             capabilities=(
-                "owned MIT engine/frontend; confirmed status/assignee/due/field/comment writes",
+                "owned MIT engine/frontend; confirmed status/assignee/due/description/points/field/comment writes",
                 "explicit account/workspace/list; credential environment-name reference",
                 "all task pages, native statuses, complete comments/replies and engine projections",
                 "explicit validated browser deep link; never opens automatically",

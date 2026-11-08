@@ -167,6 +167,19 @@ class CliTests(unittest.TestCase):
         value: object = json.loads(output)
         return code, cast(dict[str, object], value)
 
+    def invoke_terminal(self, *args: str) -> tuple[int, str]:
+        """Run with an interactive stdout, as a person at a terminal would."""
+        stdout = _Terminal()
+        with (
+            patch.object(sys, "argv", ["rexdeck", *args]),
+            patch.object(sys, "stdin", io.StringIO()),
+            patch.dict(os.environ, {"NO_COLOR": "1"}),
+            redirect_stdout(stdout),
+            redirect_stderr(io.StringIO()),
+        ):
+            code = cli.main()
+        return code, stdout.getvalue()
+
     def configure(self, *extra: str) -> None:
         code, result = self.invoke(
             "setup", "--config", str(self.config), "--server", self.endpoint, *extra
@@ -658,6 +671,49 @@ class CliTests(unittest.TestCase):
         self.assertEqual((code, explicit["state"]), (1, "failed"))
         self.assertIn(str(receipt), str(explicit["error"]))
         self.assertNotIn("plugins", explicit)
+
+    def test_interactive_listing_is_a_table_and_json_stays_available(self) -> None:
+        """A terminal gets one row per plugin plus the fix; --json keeps the document."""
+        self.configure()
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        (self.workspace / "git").mkdir()
+        (self.workspace / "git/setup.json").write_text("{malformed")
+
+        for command in ("plugins", "status"):
+            with self.subTest(command=command):
+                code, text = self.invoke_terminal(command)
+                self.assertEqual(code, 1)
+                lines = text.splitlines()
+                self.assertEqual(lines[0], f"RexDeck {command}: fault")
+                rows = {
+                    words[0]: words[1]
+                    for words in (line.split() for line in lines)
+                    if words and words[0] in lifecycle.PLUGINS
+                }
+                self.assertEqual(set(rows), set(lifecycle.PLUGINS))
+                self.assertEqual(
+                    (rows["files"], rows["git"], rows["viewer"]),
+                    ("ready", "fault", "disabled"),
+                )
+                problems = text.split("Needs attention:", 1)[1]
+                self.assertIn("  git:", problems)
+                self.assertNotIn("files:", problems)
+                self.assertNotIn('"state"', text)
+
+        code, text = self.invoke_terminal("plugins", "--json")
+        self.assertEqual(code, 1)
+        document = json.loads(text)
+        self.assertEqual(document["plugins"]["git"]["state"], "fault")
+
+        code, text = self.invoke_terminal("status", "files")
+        self.assertEqual(code, 0)
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "RexDeck status: ready")
+        single = [line.split() for line in lines if line.split()[:1] == ["files"]]
+        self.assertEqual(single, [["files", "ready", "yazi", "26.9.1", "right", "50%"]])
+        self.assertNotIn("Needs attention:", text)
+        code, text = self.invoke_terminal("status", "files", "--json")
+        self.assertEqual((code, json.loads(text)["state"]), (0, "ready"))
 
     def test_status_reports_selected_tool_removed_after_enable(self) -> None:
         """A vanished upstream tool is a missing dependency, not a generic fault."""

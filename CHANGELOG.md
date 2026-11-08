@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 — 2026-11-09
+
+- `rexdeck plugins` and `rexdeck status` print a readable table at a terminal: one row per plugin with state, tool/versions and pane layout, then a **Needs attention** section that gives each problem and its fix once (shared causes such as Rex missing from `PATH` are not repeated per plugin). Server URLs are shown decoded; remote/receipt text is stripped of terminal control characters; state color follows `NO_COLOR`/`TERM=dumb`. `--json`, or piped output, keeps the full JSON document unchanged; exit codes are unchanged.
+- The ClickUp capability disclosure now lists the description and sprint-points writes added in 0.2.0.
+
 ## 0.2.0 — 2026-11-09
 
 New integrations: Markdown, Usage, GitHub, Viewer, ClickUp, native attention and opt-in Claude Code/Codex subagent hooks, plus configurable pane placement and size for every integration. Upgrading from 0.1.x: run `rexdeck enable <id>` for each previously enabled integration (Files, Git) to refresh its native module.
