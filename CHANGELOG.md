@@ -1,11 +1,15 @@
 # Changelog
 
-## 0.1.0 — prepared, unpublished
+## 0.1.1 — prepared, unpublished
+
+- Add `rexdeck plugins` to list all available integrations and their enabled/disabled state as JSON. Discovery works before setup, reporting `not-configured`; configured inspection reuses aggregate status, preserving healthy siblings and nonzero failure reporting when a plugin cannot be inspected. Listing does not change registration or install dependencies.
+
+## 0.1.0 — 2026-11-08
 
 - Add manual-only selected dependency validation: setup/status never install; enable reuses qualified preinstalled Yazi/lazygit (and requires Git for Git integration), or returns actionable nonzero manual-install/version-check/rerun guidance without registration. RexDeck never runs Homebrew or installs, upgrades, removes or supervises upstream package transactions. Preserve qualified executable metadata identity, frozen-target checks, siblings and upstream settings; owner-run Homebrew is optional only when its selected version qualifies and the owner accepts its effects, otherwise use the qualified upstream release.
 - Accept both upstream and Homebrew's multiline Yazi version reports. Ignore empty/relative executable-search paths during qualification and lifecycle binding. Restrict the source distribution to product source, tests, metadata, and public documentation; globally ignored local evidence is not packaged.
 - Prepare Python 3.12+ metadata, packaged MIT license and project URLs. Document macOS arm64/Rex API 10 baseline, upstream unbundled licenses, installed-package checks and private-versus-owner visual proof limits.
-- Retain exact CI-built 0.1.0 wheel/sdist for owner-reviewed release. Manual Trusted Publishing requires owner-only protected environment approval bound to exact commit, immutable artifact ID, file hashes and evidence; no push/PR/tag publication or release-time rebuild. Publication and public-index native-use proof remain gated, not claimed complete.
+- Published the exact approved main-CI wheel/sdist to GitHub and PyPI without rebuilding. Protected Trusted Publishing and no-cache public-index native Files/Git use, exact-origin quits, sibling preservation and removal passed; public asset/registry hashes matched the approved pair.
 
 - Add independently selectable local Git through unmodified lazygit, preserving the invoking repository/worktree and exact return origin. Reject inherited Git repository/discovery overrides rather than silently redirecting work. Reuse native hosting and lifecycle ownership for Files/Git; serialize shared configuration and data-root changes, preserve siblings/open panes, and restore exact config bytes in either disable order without changing existing settings or Files receipt schemas.
 - Resolve Git validation through absolute PATH directories and preserve discovery errors. Retain healthy integration status when a sibling receipt is invalid; validate only deployment/sibling artifacts needed by the selected operation. Clarify cleanup of applied-but-disabled integrations before package removal.
