@@ -221,9 +221,9 @@ rex = {
   end,
   exec = execute,
   json = {decode = function(raw)
-    local cwd = raw:match('^{"cwd": "([^"]+)"}%s*$')
-    assert(cwd == arg[2], raw)
-    return {cwd = cwd}
+    local cwd, target = raw:match('^{"cwd": "([^"]+)", "target": "([^"]+)"}%s*$')
+    assert(cwd == arg[2] and target == arg[2], raw)
+    return {cwd = cwd, target = target}
   end},
   session = {new_split = function(request)
     local result = execute(request.layout.block.options.command)

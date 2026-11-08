@@ -419,7 +419,10 @@ def test_git_cwd_preserves_exact_invoking_subdirectory(
         timeout=10,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"cwd": str(cwd.resolve())}
+    assert json.loads(result.stdout) == {
+        "cwd": str(cwd.resolve()),
+        "target": str(cwd.resolve()),
+    }
 
 
 @pytest.fixture
@@ -594,7 +597,10 @@ def test_git_validation_never_executes_repository_relative_git(
         if entrypoint == "git-run":
             assert git_consumers[2].read_text(encoding="utf-8") == str(cwd.resolve())
         else:
-            assert json.loads(result.stdout) == {"cwd": str(cwd.resolve())}
+            assert json.loads(result.stdout) == {
+                "cwd": str(cwd.resolve()),
+                "target": str(cwd.resolve()),
+            }
     else:
         assert result.returncode != 0
         assert "Required executable not found" in result.stderr

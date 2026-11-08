@@ -1,7 +1,7 @@
 -- Native Rex host for one RexDeck integration; embedded verbatim in its generated module.
 -- Every integration shares this action: frozen origin identity, validated context,
 -- shell-less argv, configured split layout and exact-origin return by the launcher.
-local contexts = {directory = true, ['git-worktree'] = true}
+local contexts = {directory = true, ['git-worktree'] = true, document = true}
 local function nonempty(value)
   return type(value) == 'string' and value ~= '' and not value:find('%z')
 end
@@ -41,13 +41,22 @@ return function(opts)
   if not nonempty(launcher) then error(title .. ' requires its applied Python launcher', 0) end
   if not nonempty(opts.server) then error(title .. ' requires an explicit Rex server', 0) end
 
+  local document = opts.context == 'document'
+
   rex.action{
     name = 'rexdeck_' .. opts.plugin,
     title = title,
     category = 'RexDeck',
     description = opts.description,
     keywords = opts.keywords,
-    run = function(ctx, _)
+    -- Only a document integration takes an explicitly selected file path.
+    args = document and {file = 'string?'} or nil,
+    run = function(ctx, action_args)
+      local selected = nil
+      if document and type(action_args) == 'table' then selected = action_args.file end
+      if selected ~= nil and not nonempty(selected) then
+        error(title .. ' requires a nonempty selected file path', 0)
+      end
       -- Freeze identity before any call can change focus or mutate the context.
       local session = type(ctx) == 'table' and ctx.session_id
       local origin = type(ctx) == 'table' and ctx.block_id
@@ -67,22 +76,27 @@ return function(opts)
       if type(reported.pwd) ~= 'string' or reported.pwd == '' then
         error(title .. ': the invoking terminal has not reported a cwd', 0)
       end
-      local checked, exec_error = rex.exec({paths.python, '-I', '-c', launcher,
-        'context', opts.context, reported.pwd}, {timeout = 15})
+      local validation = {paths.python, '-I', '-c', launcher, 'context', opts.context,
+        reported.pwd}
+      if selected then validation[#validation + 1] = selected end
+      local checked, exec_error = rex.exec(validation, {timeout = 15})
       if not checked then
-        error(title .. ' cannot validate the invoking cwd: ' .. tostring(exec_error), 0)
+        error(title .. ' cannot validate the invoking context: ' .. tostring(exec_error), 0)
       end
       if not checked.ok then
-        error(title .. ' refused the invoking cwd: ' .. tostring(checked.stderr), 0)
+        error(title .. ' refused the invoking context: ' .. tostring(checked.stderr), 0)
       end
       local decoded, json_error = rex.json.decode(checked.stdout)
-      if json_error or type(decoded) ~= 'table' or type(decoded.cwd) ~= 'string'
-          or decoded.cwd:sub(1, 1) ~= '/' or decoded.cwd:find('%z') then
-        error(title .. ' received an invalid cwd validation result: ' .. tostring(json_error), 0)
+      if json_error or type(decoded) ~= 'table'
+          or type(decoded.cwd) ~= 'string' or decoded.cwd:sub(1, 1) ~= '/' or decoded.cwd:find('%z')
+          or type(decoded.target) ~= 'string' or decoded.target:sub(1, 1) ~= '/'
+          or decoded.target:find('%z') then
+        error(title .. ' received an invalid context validation result: ' .. tostring(json_error), 0)
       end
       local cwd = decoded.cwd
       local command = {paths.python, '-I', '-c', launcher, 'run', opts.context, opts.title,
-        opts.tool_label, paths[opts.tool], paths.rex, opts.server, session, origin, cwd}
+        opts.tool_label, paths[opts.tool], paths.rex, opts.server, session, origin,
+        decoded.target}
       for index = 1, #args do command[#command + 1] = args[index] end
       local split, split_error = rex.session.new_split{
         session_id = session,
