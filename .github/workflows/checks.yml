@@ -31,9 +31,13 @@ jobs:
         run: |
           "$RUNNER_TEMP/rexdeck-wheel/bin/rexdeck" --help
           "$RUNNER_TEMP/rexdeck-wheel/bin/rexdeck" plugins
-          "$RUNNER_TEMP/rexdeck-wheel/bin/python" -m rexdeck.host.launch context directory "$RUNNER_TEMP"
           git init "$RUNNER_TEMP/rexdeck-installed-repo"
-          "$RUNNER_TEMP/rexdeck-wheel/bin/python" -m rexdeck.host.launch context git-worktree "$RUNNER_TEMP/rexdeck-installed-repo"
+          for check in "directory $RUNNER_TEMP" "git-worktree $RUNNER_TEMP/rexdeck-installed-repo"; do
+            context="${check%% *}"; target="${check#* }"
+            resolved="$(cd "$target" && pwd -P)"
+            "$RUNNER_TEMP/rexdeck-wheel/bin/python" -m rexdeck.host.launch context "$context" "$target" \
+              | "$RUNNER_TEMP/rexdeck-wheel/bin/python" -c 'import json, sys; assert json.load(sys.stdin)["cwd"] == sys.argv[1]' "$resolved"
+          done
           "$RUNNER_TEMP/rexdeck-wheel/bin/python" - <<'PY'
           import os
           import subprocess

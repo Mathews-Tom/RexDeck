@@ -54,7 +54,7 @@ rex = {
     opened = opened + 1
     local id = 'yazi-' .. opened
     panes[id] = {session = source.session, window = source.window,
-      cwd = request.layout.block.options.cwd}
+      cwd = request.layout.block.options.cwd, command = request.layout.block.options.command}
     if request.focus then focused = id end
     return {block_ids = {id}}
   end},
@@ -100,3 +100,14 @@ assert(panes[second].window == 'window-b', 'second origin opened in first origin
 context = {session_id = 'session-a', block_id = 'origin-a'}
 local third = action.run(context, {}).block_ids[1]
 assert(third ~= first and panes[first] and panes[second], 'repeat invocation closed independent panes')
+
+-- Descriptor argv reaches the launcher after the nine fixed fields, in order.
+local fixed = panes[first].command
+assert(#fixed == 14 and fixed[5] == 'run' and fixed[14] == '/exact origin',
+  'launch command lost its fixed launcher fields')
+options.args = {'tui', '--client', 'omp'}
+install(options)
+reset()
+local forwarded = panes[action.run(context, {}).block_ids[1]].command
+assert(#forwarded == 17 and forwarded[15] == 'tui' and forwarded[16] == '--client'
+  and forwarded[17] == 'omp', 'descriptor args were not forwarded after the fixed fields')
