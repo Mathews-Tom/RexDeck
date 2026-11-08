@@ -1,4 +1,4 @@
-"""One-time native Rex target approval and the Files enable/disable lifecycle."""
+"""One-time native Rex target approval and independent integration lifecycle."""
 
 from __future__ import annotations
 
@@ -71,9 +71,6 @@ def _inspect(target: settings.SavedTarget) -> dict[str, object]:
     result = lifecycle.inspect_setup(setup)
     if result.get("state") in _FAILURES:
         return result
-    prerequisites = result.get("prerequisites")
-    if isinstance(prerequisites, dict) and prerequisites.get("error"):
-        raise RuntimeError(str(prerequisites["error"]))
     return result
 
 
@@ -162,7 +159,7 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
                 "or pass setup --real-server for approved automation"
             )
         print(
-            "Approve this real Rex target for later Files writes? Type yes: ",
+            "Approve this real Rex target for later integration writes? Type yes: ",
             end="",
             file=sys.stderr,
             flush=True,
@@ -179,7 +176,7 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
     )
     if old is not None and old != candidate:
         raise RuntimeError(
-            "Cannot retarget existing saved Files ownership. Run rexdeck disable files "
+            "Cannot retarget existing saved integration ownership. Disable every integration "
             "for the saved target, then deliberately remove "
             f"{path} before setup with --workspace pointing to a fresh directory "
             "for the new target; preserve the old ownership workspace"
@@ -206,12 +203,12 @@ def main() -> int:
     configure.add_argument(
         "--real-server",
         action="store_true",
-        help="Explicitly approve the real Rex target for subsequent Files writes",
+        help="Explicitly approve the real Rex target for subsequent integration writes",
     )
     for name in ("enable", "disable", "status"):
         command = subcommands.add_parser(name)
         command.add_argument(
-            "plugin", choices=("files",), nargs="?" if name == "status" else None
+            "plugin", choices=lifecycle.PLUGINS, nargs="?" if name == "status" else None
         )
     args = parser.parse_args()
     try:
@@ -222,19 +219,36 @@ def main() -> int:
             target = settings.load(path)
             if target is None:
                 raise RuntimeError("No saved Rex target; run rexdeck setup first")
-            setup = target.setup()
+            setup = target.setup(args.plugin or "files")
             if args.command == "enable":
                 result = lifecycle.apply_setup(setup)
                 if result.get("state") == "applied":
                     result = lifecycle.start(setup)
                 elif result.get("state") not in _FAILURES:
                     raise RuntimeError(
-                        "Files apply did not succeed; Files was not started"
+                        f"{args.plugin} apply did not succeed; integration was not started"
                     )
             elif args.command == "disable":
                 result = lifecycle.disable(setup)
             else:
-                result = lifecycle.status(setup)
+                if args.plugin:
+                    result = lifecycle.status(setup)
+                else:
+                    plugins = {
+                        plugin: lifecycle.status(target.setup(plugin))
+                        for plugin in lifecycle.PLUGINS
+                    }
+                    failed = any(
+                        row.get("state") in _FAILURES for row in plugins.values()
+                    )
+                    result = {
+                        "state": "fault"
+                        if failed
+                        else "ready"
+                        if any(row.get("enabled") for row in plugins.values())
+                        else "disabled",
+                        "plugins": plugins,
+                    }
         print(json.dumps(result, ensure_ascii=True, indent=2))
         return 1 if result.get("state") in _FAILURES else 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:

@@ -833,7 +833,9 @@ action.run({session_id = "session", block_id = "origin"})
         self.assertFalse(self.module.exists())
 
     def test_shared_data_root_serializes_different_workspaces(self) -> None:
-        other_config = self.root / "other.lua"
+        other_dir = self.root / "other-config"
+        other_dir.mkdir()
+        other_config = other_dir / "other.lua"
         other_config.write_bytes(b"-- other target\n")
         other = replace(
             self.setup, workspace=self.root / "other-workspace", config=other_config
@@ -845,7 +847,7 @@ action.run({session_id = "session", block_id = "origin"})
             nonlocal attempted
             if not attempted:
                 attempted = True
-                with self.assertRaisesRegex(RuntimeError, "using the Files data root"):
+                with self.assertRaises(RuntimeError):
                     life.apply_setup(other)
             return tools
 

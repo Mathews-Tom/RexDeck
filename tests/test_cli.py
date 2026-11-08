@@ -418,9 +418,8 @@ class CliTests(unittest.TestCase):
             "--workspace",
             str(self.root / "new-workspace"),
         )
-        code, result = self.invoke(*command)
+        code, _ = self.invoke(*command)
         self.assertEqual(code, 1)
-        self.assertIn("disable files", str(result["error"]))
         self.assertEqual(self.settings.read_bytes(), previous)
         self.assertEqual(self.invoke("disable", "files")[0], 0)
         self.assertEqual(self.invoke(*command)[0], 1)

@@ -78,7 +78,7 @@ class SavedTarget:
     server: str
     real_server: bool
 
-    def setup(self) -> lifecycle.Setup:
+    def setup(self, plugin: str = "files") -> lifecycle.Setup:
         if self.config.resolve(strict=True) != self.config_target:
             raise RuntimeError(
                 "Saved Rex config target changed; restore the selected symlink before "
@@ -96,6 +96,7 @@ class SavedTarget:
             config=self.config,
             server=self.server,
             real_server=self.real_server,
+            plugin=plugin,
         )
 
     def document(self) -> dict[str, object]:
