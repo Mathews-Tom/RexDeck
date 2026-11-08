@@ -273,6 +273,9 @@ def _plugins(target: settings.SavedTarget | None) -> dict[str, object]:
 
 def main() -> int:
     """Dispatch lifecycle commands and isolate faults in aggregate status rows."""
+    # Hook invocations must bypass argparse/settings error output even when malformed.
+    if sys.argv[1:3] == ["attention", "hook"]:
+        return attention.hook(sys.argv[3] if len(sys.argv) == 4 else "")
     parser = _Parser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser(
@@ -294,6 +297,13 @@ def main() -> int:
     retained.add_argument("--project")
     retained.add_argument("--session")
     retained.add_argument("--block")
+    retained.add_argument("--provider", choices=attention.PROVIDERS)
+    retained.add_argument("--parent", help="Exact provider-reported parent session ID")
+    retained.add_argument("--agent", help="Exact provider agent ID")
+    receiver = attention_commands.add_parser("hook", help="Silent stdin hook receiver")
+    receiver.add_argument("provider", choices=attention.PROVIDERS)
+    clear = attention_commands.add_parser("clear", help="Remove one provider's rows")
+    clear.add_argument("--provider", choices=attention.PROVIDERS, required=True)
     navigate = attention_commands.add_parser("jump")
     navigate.add_argument(
         "id", help="Exact retained observation ID from attention list"
@@ -357,8 +367,16 @@ def main() -> int:
                         )
                 elif args.attention_command == "list":
                     result = attention.listing(
-                        target, args.project, args.session, args.block
+                        target,
+                        args.project,
+                        args.session,
+                        args.block,
+                        args.provider,
+                        args.parent,
+                        args.agent,
                     )
+                elif args.attention_command == "clear":
+                    result = attention.clear_provider(target, args.provider)
                 else:
                     result = attention.jump(target, args.id)
                 print(json.dumps(result, ensure_ascii=True, indent=2))

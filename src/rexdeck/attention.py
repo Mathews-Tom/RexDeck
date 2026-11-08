@@ -1,4 +1,4 @@
-"""On-demand native terminal status, never inferred provider session identity."""
+"""Bounded native terminal evidence and opt-in provider-reported parentage."""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ import hashlib
 import json
 import math
 import os
+import signal
 import stat
+import sys
 import tempfile
 import time
 from collections.abc import Iterator
@@ -19,6 +21,8 @@ from rexdeck import lifecycle, settings
 
 _MAX_BYTES = 2 * 1024 * 1024
 _MAX_ROWS = 256
+_MAX_PROVIDER_ROWS = 64
+_MAX_PROVIDER_BYTES = 256 * 1024
 _MAX_ROW_BYTES = 16 * 1024
 _MAX_ERROR = 1024
 _FIELD_LIMITS = {
@@ -32,6 +36,120 @@ _FIELD_LIMITS = {
     "updated_at": 64,
 }
 FRESH_SECONDS = 60
+PROVIDERS = ("claude-code", "codex")
+_MAX_HOOK_BYTES = 2 * 1024 * 1024
+_HOOK_SECONDS = 1.0
+_HOOK_SAVE_MARGIN = 0.05
+_BINDING_SECONDS = 0.35
+_PROVIDER_READ_LOCK_SECONDS = 0.1
+_BINDING_REASONS = {
+    "verified",
+    "missing-identifiers",
+    "endpoint-mismatch",
+    "verification-failed",
+    "verification-timeout",
+    "exact-block-absent",
+    "detached",
+}
+
+
+class _HookDeadline(RuntimeError):
+    """Interrupt native subprocess waits while retaining their cleanup path."""
+
+
+class _BindingDeadline(RuntimeError):
+    """Bound receipt-time lookup without spending the receiver's storage budget."""
+
+
+class _ProviderRows(dict[str, dict[str, object]]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sequence = 0
+
+
+def _receipt_number(value: object) -> int:
+    if type(value) is not int or value < 0:
+        raise RuntimeError("Invalid provider receipt sequence")
+    return value
+
+
+@contextmanager
+def _binding_budget() -> Iterator[None]:
+    previous = signal.getsignal(signal.SIGALRM)
+    remaining, interval = signal.getitimer(signal.ITIMER_REAL)
+    started = time.monotonic()
+
+    def expired(signum: int, frame: object) -> None:
+        # The binding alarm is one-shot. Rearm the overall alarm before raising
+        # so lifecycle._run's subprocess cleanup cannot spend another two seconds.
+        if remaining:
+            left = remaining - (time.monotonic() - started)
+            if left <= 0:
+                raise _HookDeadline("Provider hook deadline")
+            signal.signal(signal.SIGALRM, previous)
+            signal.setitimer(signal.ITIMER_REAL, left, interval)
+        raise _BindingDeadline("Provider binding deadline")
+
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(
+        signal.ITIMER_REAL,
+        min(remaining, _BINDING_SECONDS) if remaining else _BINDING_SECONDS,
+    )
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+        if remaining:
+            left = remaining - (time.monotonic() - started)
+            if left <= 0:
+                raise _HookDeadline("Provider hook deadline")
+            signal.setitimer(signal.ITIMER_REAL, left, interval)
+
+
+def _hook_text(value: object, limit: int = 1024, *, empty: bool = False) -> str:
+    if (
+        not isinstance(value, str)
+        or (not value and not empty)
+        or "\x00" in value
+        or len(value) > limit
+    ):
+        raise RuntimeError("Invalid or oversized provider hook field")
+    return value
+
+
+def _validate_provider(row: dict[str, object]) -> None:
+    """Validate the separate provider-store schema without adopting native IDs."""
+    if row.get("provider") not in PROVIDERS:
+        raise RuntimeError("Invalid attention provider")
+    if row.get("event") not in ("SubagentStart", "SubagentStop"):
+        raise RuntimeError("Invalid provider event")
+    expected = "started" if row["event"] == "SubagentStart" else "stopped"
+    if row.get("state") != expected or row.get("outcome") != "unknown":
+        raise RuntimeError("Invalid provider lifecycle state")
+    for field in ("parent_session_id", "agent_id"):
+        _hook_text(row.get(field))
+    _hook_text(row.get("agent_type"), empty=True)
+    _hook_text(row.get("cwd"), 4096)
+    _text(row.get("endpoint"))
+    _receipt_number(row.get("receipt_order", 0))
+    for field in (
+        "last_message_present",
+        "transcript_present",
+        "agent_transcript_present",
+    ):
+        if type(row.get(field)) is not bool:
+            raise RuntimeError("Invalid provider presence flag")
+    for field in ("rex_server", "instance_id", "session_id", "block_id", "host_id"):
+        if row.get(field) is not None:
+            _hook_text(row[field], 4096, empty=True)
+    if row.get("binding") not in ("bound", "unbound"):
+        raise RuntimeError("Invalid provider binding")
+    if row.get("binding_reason") not in _BINDING_REASONS:
+        raise RuntimeError("Invalid provider binding reason")
+    if row["binding"] == "bound":
+        for field in ("instance_id", "session_id", "block_id", "host_id"):
+            _text(row.get(field))
 
 
 def _object(value: object) -> dict[str, object]:
@@ -46,8 +164,9 @@ def _text(value: object) -> str:
     return value
 
 
-def _path(target: settings.SavedTarget) -> Path:
-    return target.workspace / "attention" / "attention.json"
+def _path(target: settings.SavedTarget, *, provider_store: bool = False) -> Path:
+    name = "providers.json" if provider_store else "attention.json"
+    return target.workspace / "attention" / name
 
 
 def _timestamp(value: object) -> float:
@@ -63,10 +182,20 @@ def _timestamp(value: object) -> float:
 
 
 @contextmanager
-def _store(target: settings.SavedTarget) -> Iterator[dict[str, dict[str, object]]]:
+def _store(
+    target: settings.SavedTarget,
+    *,
+    provider_store: bool = False,
+    lock_timeout: float | None = None,
+) -> Iterator[dict[str, dict[str, object]]]:
     """Validate frozen workspace and read only bounded regular non-symlink files."""
     target.setup()
-    path = _path(target)
+    path = _path(target, provider_store=provider_store)
+    max_bytes = _MAX_PROVIDER_BYTES if provider_store else _MAX_BYTES
+    max_rows = _MAX_PROVIDER_ROWS if provider_store else _MAX_ROWS
+    size_label = "256 KiB (providers)" if provider_store else "2 MiB"
+    if provider_store and lock_timeout is None:
+        lock_timeout = _PROVIDER_READ_LOCK_SECONDS
     if path.parent.resolve() != path.parent:
         raise RuntimeError("Attention storage directory must not be a symlink")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,8 +208,19 @@ def _store(target: settings.SavedTarget) -> Iterator[dict[str, dict[str, object]
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
             raise RuntimeError("Attention lock must be a regular non-symlink file")
         os.fchmod(handle.fileno(), 0o600)
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        rows: dict[str, dict[str, object]] = {}
+        if lock_timeout is None:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        else:
+            deadline = time.monotonic() + lock_timeout
+            while True:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Attention lock timed out") from None
+                    time.sleep(0.005)
+        rows: dict[str, dict[str, object]] = _ProviderRows() if provider_store else {}
         descriptor: int | None
         try:
             descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -93,34 +233,57 @@ def _store(target: settings.SavedTarget) -> Iterator[dict[str, dict[str, object]
                     raise RuntimeError(
                         "Attention storage must be a regular non-symlink file"
                     )
-                if info.st_size > _MAX_BYTES:
-                    raise RuntimeError("Attention storage exceeds 2 MiB")
+                if info.st_size > max_bytes:
+                    raise RuntimeError(f"Attention storage exceeds {size_label}")
                 with os.fdopen(descriptor, "rb", closefd=False) as source:
-                    raw = source.read(_MAX_BYTES + 1)
+                    raw = source.read(max_bytes + 1)
             finally:
                 os.close(descriptor)
-            if len(raw) > _MAX_BYTES:
-                raise RuntimeError("Attention storage exceeds 2 MiB")
+            if len(raw) > max_bytes:
+                raise RuntimeError(f"Attention storage exceeds {size_label}")
             document = _object(json.loads(raw))
-            if document.get("version") != 1:
+            version = document.get("version")
+            if type(version) is not int or version != 1:
                 raise RuntimeError("Unsupported attention storage version")
+            if provider_store and document.get("kind") != "provider-subagents":
+                raise RuntimeError("Invalid provider attention storage kind")
+            if provider_store:
+                cast(_ProviderRows, rows).sequence = _receipt_number(
+                    document.get("receipt_sequence", 0)
+                )
             for key, value in _object(document.get("rows")).items():
                 row = _object(value)
-                for field in ("endpoint", "instance_id", "session_id", "block_id"):
-                    _text(row.get(field))
+                if provider_store:
+                    _text(key)
+                    if row.get("row_type") != "provider":
+                        raise RuntimeError("Invalid provider attention row type")
+                    _validate_provider(row)
+                    if (
+                        _receipt_number(row.get("receipt_order", 0))
+                        > cast(_ProviderRows, rows).sequence
+                    ):
+                        raise RuntimeError("Provider receipt exceeds store sequence")
+                else:
+                    for field in ("endpoint", "instance_id", "session_id", "block_id"):
+                        _text(row.get(field))
+                    if not isinstance(row.get("records", []), list):
+                        raise RuntimeError("Attention row records must be a list")
                 _timestamp(row.get("observed_at"))
-                if not isinstance(row.get("records", []), list):
-                    raise RuntimeError("Attention row records must be a list")
                 if len(json.dumps(row, ensure_ascii=True).encode()) > _MAX_ROW_BYTES:
                     raise RuntimeError("Attention row exceeds 16 KiB")
                 rows[key] = row
-        if len(rows) > _MAX_ROWS:
-            raise RuntimeError("Attention storage exceeds 256 observed terminals")
+        if len(rows) > max_rows:
+            raise RuntimeError(f"Attention storage exceeds {max_rows} retained rows")
         yield rows
 
 
 def _bounded_row(row: dict[str, object]) -> dict[str, object]:
     """Bound untrusted terminal reports independently of other terminal rows."""
+    if row.get("row_type") == "provider":
+        _validate_provider(row)
+        if len(json.dumps(row, ensure_ascii=True).encode()) > _MAX_ROW_BYTES:
+            raise RuntimeError("Provider metadata exceeds the 16 KiB row limit")
+        return row
     truncated = False
     records: list[dict[str, object]] = []
     for value in cast(list[object], row.get("records", [])):
@@ -168,15 +331,24 @@ def _bounded_row(row: dict[str, object]) -> dict[str, object]:
     return row
 
 
-def _save(target: settings.SavedTarget, rows: dict[str, dict[str, object]]) -> None:
+def _save(
+    target: settings.SavedTarget,
+    rows: dict[str, dict[str, object]],
+    *,
+    provider_store: bool = False,
+) -> None:
     for key, row in rows.items():
         rows[key] = _bounded_row(row)
-    data = json.dumps(
-        {"version": 1, "rows": rows}, ensure_ascii=True, allow_nan=False
-    ).encode()
-    if len(data) > _MAX_BYTES or len(rows) > _MAX_ROWS:
-        raise RuntimeError("Attention retention limit reached (256 terminals / 2 MiB)")
-    path = _path(target)
+    document: dict[str, object] = {"version": 1, "rows": rows}
+    if provider_store:
+        document["kind"] = "provider-subagents"
+        document["receipt_sequence"] = cast(_ProviderRows, rows).sequence
+    data = json.dumps(document, ensure_ascii=True, allow_nan=False).encode()
+    max_bytes = _MAX_PROVIDER_BYTES if provider_store else _MAX_BYTES
+    max_rows = _MAX_PROVIDER_ROWS if provider_store else _MAX_ROWS
+    if len(data) > max_bytes or len(rows) > max_rows:
+        raise RuntimeError("Attention retention limit reached")
+    path = _path(target, provider_store=provider_store)
     fd, name = tempfile.mkstemp(prefix=".attention-", dir=path.parent)
     directory: int | None = None
     try:
@@ -351,51 +523,287 @@ def refresh(
     return observe(target, session, block, project)
 
 
+def _provider_fault(error: Exception) -> dict[str, object]:
+    """Expose provider evidence failures without hiding healthy native rows."""
+    return {
+        "state": "fault",
+        "provider_state": "fault",
+        "provider_error": str(error)[:_MAX_ERROR],
+    }
+
+
 def listing(
     target: settings.SavedTarget,
     project: str | None = None,
     session: str | None = None,
     block: str | None = None,
+    provider: str | None = None,
+    parent: str | None = None,
+    agent: str | None = None,
 ) -> dict[str, object]:
     """Local retained evidence only. Freshness never means the worker is alive."""
     result: list[dict[str, object]] = []
-    with _store(target) as rows:
-        for key, row in rows.items():
-            if row.get("endpoint") != target.server or any(
-                wanted is not None and row.get(field) != wanted
-                for field, wanted in (
-                    ("project", project),
-                    ("session_id", session),
-                    ("block_id", block),
-                )
-            ):
-                continue
-            age = max(0.0, time.time() - _timestamp(row["observed_at"]))
-            result.append(
+    provider_status: dict[str, object] = {"provider_state": "ready"}
+    # Never hold both locks: native and provider stores have independent quotas.
+    for provider_store in (False, True):
+        try:
+            with _store(target, provider_store=provider_store) as rows:
+                for key, row in rows.items():
+                    if row.get("endpoint") != target.server or any(
+                        wanted is not None and row.get(field) != wanted
+                        for field, wanted in (
+                            ("project", project),
+                            ("session_id", session),
+                            ("block_id", block),
+                            ("provider", provider),
+                            ("parent_session_id", parent),
+                            ("agent_id", agent),
+                        )
+                    ):
+                        continue
+                    age = max(0.0, time.time() - _timestamp(row["observed_at"]))
+                    result.append(
+                        {
+                            **row,
+                            "row_type": "provider" if provider_store else "native",
+                            "id": key,
+                            "age_seconds": round(age, 1),
+                            "freshness": "stale" if age > FRESH_SECONDS else "recent",
+                        }
+                    )
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
+            if not provider_store:
+                raise
+            provider_status = _provider_fault(error)
+    parents: dict[tuple[str, str], dict[str, object]] = {}
+    for row in result:
+        if row.get("row_type") == "provider":
+            parent_key = (_text(row["provider"]), _text(row["parent_session_id"]))
+            group = parents.setdefault(
+                parent_key,
                 {
-                    **row,
-                    "id": key,
-                    "age_seconds": round(age, 1),
-                    "freshness": "stale" if age > FRESH_SECONDS else "recent",
-                }
+                    "provider": parent_key[0],
+                    "parent_session_id": parent_key[1],
+                    "children": [],
+                    "identity_scope": "provider-reported parent, not observed lifecycle",
+                },
             )
-    return {"state": "retained", "rows": result}
+            cast(list[str], group["children"]).append(_text(row["id"]))
+    return {
+        "state": "retained",
+        "rows": result,
+        "parents": list(parents.values()),
+        **provider_status,
+    }
 
 
 def jump(target: settings.SavedTarget, identity: str) -> dict[str, object]:
     """Revalidate endpoint incarnation and exact placed block before native focus."""
     setup = target.setup()
-    with _store(target) as rows:
+    with _store(target, provider_store=identity.startswith("hook:")) as rows:
         row = rows.get(identity)
         if row is None or row.get("endpoint") != setup.server:
             raise RuntimeError("Unknown attention observation for the saved endpoint")
-        if _status(setup) != row.get("instance_id"):
-            raise RuntimeError("Captured Rex server was replaced; no focus attempted")
-        session, block = _text(row.get("session_id")), _text(row.get("block_id"))
-        found = _block(setup, session, block)
-        if found is None or found.get("placement") != "placed":
-            raise RuntimeError("Exact target is closed or unbound; no focus attempted")
-        if found.get("host_id") != row.get("host_id"):
-            raise RuntimeError("Captured block host changed; no focus attempted")
-        _call(setup, session, "session.focus_block", {"block_id": block})
+        if row.get("row_type") == "provider" and row.get("binding") != "bound":
+            raise RuntimeError("Provider target is unbound; no focus attempted")
+    # The retained row is a private in-memory snapshot. Never hold providers.lock
+    # across Rex IPC: independent hook receipts must be able to update immediately.
+    if _status(setup) != row.get("instance_id"):
+        raise RuntimeError("Captured Rex server was replaced; no focus attempted")
+    session, block = _text(row.get("session_id")), _text(row.get("block_id"))
+    found = _block(setup, session, block)
+    if found is None or found.get("placement") != "placed":
+        raise RuntimeError("Exact target is closed or unbound; no focus attempted")
+    if found.get("host_id") != row.get("host_id"):
+        raise RuntimeError("Captured block host changed; no focus attempted")
+    _call(setup, session, "session.focus_block", {"block_id": block})
     return {"state": "focused", "session_id": session, "block_id": block}
+
+
+def _hook_lock_budget() -> float:
+    remaining, _ = signal.getitimer(signal.ITIMER_REAL)
+    return max(0.0, (remaining or _HOOK_SECONDS) - _HOOK_SAVE_MARGIN)
+
+
+def _reserve_receipt(target: settings.SavedTarget, identity: str) -> int | None:
+    """Persist an ordering token before lookup, independent of wall-clock changes."""
+    with _store(target, provider_store=True, lock_timeout=_hook_lock_budget()) as rows:
+        if identity not in rows and len(rows) >= _MAX_PROVIDER_ROWS:
+            return None
+        provider_rows = cast(_ProviderRows, rows)
+        provider_rows.sequence += 1
+        _save(target, rows, provider_store=True)
+        return provider_rows.sequence
+
+
+def _receive_hook(target: settings.SavedTarget, provider: str, payload: object) -> None:
+    """Accept only documented metadata; neither content nor transcript paths escape."""
+    if provider not in PROVIDERS:
+        return
+    value = _object(payload)
+    event = value.get("hook_event_name")
+    if event not in ("SubagentStart", "SubagentStop"):
+        return
+    parent = _hook_text(value.get("session_id"))
+    agent = _hook_text(value.get("agent_id"))
+    row: dict[str, object] = {
+        "row_type": "provider",
+        "provider": provider,
+        "event": event,
+        "parent_session_id": parent,
+        "agent_id": agent,
+        "agent_type": _hook_text(value.get("agent_type"), empty=True),
+        "cwd": _hook_text(value.get("cwd"), 4096),
+        "state": "started" if event == "SubagentStart" else "stopped",
+        "outcome": "unknown",
+        "observed_at": time.time(),
+        "last_message_present": isinstance(value.get("last_assistant_message"), str),
+        "transcript_present": isinstance(value.get("transcript_path"), str),
+        "agent_transcript_present": isinstance(value.get("agent_transcript_path"), str),
+        "endpoint": target.server,
+        "rex_server": None,
+        "instance_id": None,
+        "session_id": None,
+        "block_id": None,
+        "host_id": None,
+        "binding": "unbound",
+        "binding_reason": "missing-identifiers",
+    }
+    for variable, field in (
+        ("REX_SERVER", "rex_server"),
+        ("REX_SESSION", "session_id"),
+        ("REX_BLOCK", "block_id"),
+    ):
+        if variable in os.environ:
+            row[field] = _hook_text(os.environ[variable], 4096, empty=True)
+    identity = (
+        "hook:"
+        + hashlib.sha256(json.dumps([provider, parent, agent]).encode()).hexdigest()
+    )
+    sequence = _reserve_receipt(target, identity)
+    if sequence is None:
+        return
+    row["receipt_order"] = sequence
+    server, session, block = row["rex_server"], row["session_id"], row["block_id"]
+    endpoint_matches = server is None
+    if isinstance(server, str):
+        try:
+            endpoint_matches = lifecycle._canonical_server(server) == target.server
+        except _HookDeadline:
+            raise
+        except (OSError, RuntimeError, ValueError):
+            endpoint_matches = False
+    if not endpoint_matches:
+        row["binding_reason"] = "endpoint-mismatch"
+    elif (
+        isinstance(session, str)
+        and session.startswith("session:")
+        and isinstance(block, str)
+        and block.startswith("block:")
+    ):
+        try:
+            with _binding_budget():
+                setup = target.setup()
+                instance = _status(setup)
+                found = _block(setup, session, block)
+                if found is None:
+                    row["binding_reason"] = "exact-block-absent"
+                elif found.get("placement") != "placed":
+                    row["binding_reason"] = "detached"
+                else:
+                    row.update(
+                        instance_id=instance,
+                        host_id=_text(found.get("host_id")),
+                        binding="bound",
+                        binding_reason="verified",
+                    )
+        except _BindingDeadline:
+            row.update(
+                binding="unbound",
+                binding_reason="verification-timeout",
+                instance_id=None,
+                host_id=None,
+            )
+        except _HookDeadline:
+            raise
+        except (OSError, RuntimeError):
+            row.update(
+                binding="unbound",
+                binding_reason="verification-failed",
+                instance_id=None,
+                host_id=None,
+            )
+    with _store(target, provider_store=True, lock_timeout=_hook_lock_budget()) as rows:
+        if identity not in rows and len(rows) >= _MAX_PROVIDER_ROWS:
+            return
+        if sequence > cast(_ProviderRows, rows).sequence:
+            return  # The store was reset after this receipt reserved its order.
+        previous = rows.get(identity)
+        if (
+            previous is not None
+            and _receipt_number(previous.get("receipt_order", 0)) > sequence
+        ):
+            return
+        rows[identity] = row
+        _save(target, rows, provider_store=True)
+
+
+def hook(provider: str) -> int:
+    """Silent fail-open boundary, including deadline restoration and cleanup."""
+    try:
+        previous = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+        def expired(signum: int, frame: object) -> None:
+            raise _HookDeadline("Provider hook deadline")
+
+        try:
+            signal.signal(signal.SIGALRM, expired)
+            signal.setitimer(signal.ITIMER_REAL, _HOOK_SECONDS)
+            if provider not in PROVIDERS:
+                return 0
+            raw = sys.stdin.buffer.read(_MAX_HOOK_BYTES + 1)
+            if len(raw) > _MAX_HOOK_BYTES:
+                while sys.stdin.buffer.read(64 * 1024):
+                    pass
+                return 0
+            payload: object = json.loads(raw)
+            target = settings.load(settings.settings_path())
+            if target is not None:
+                _receive_hook(target, provider, payload)
+        finally:
+            # Keep restoration inside the outer fail-open handler: a pending
+            # deadline delivered at this boundary must not escape the hook.
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            finally:
+                signal.signal(signal.SIGALRM, previous)
+                signal.setitimer(signal.ITIMER_REAL, *previous_timer)
+    except (Exception, KeyboardInterrupt):
+        # Provider control semantics must never be affected by telemetry failure.
+        pass
+    return 0
+
+
+def clear_provider(target: settings.SavedTarget, provider: str) -> dict[str, object]:
+    """Explicit rollback removes only the requested provider's retained rows."""
+    if provider not in PROVIDERS:
+        raise RuntimeError("Unknown attention provider")
+    try:
+        with _store(target, provider_store=True) as rows:
+            removed = [
+                key
+                for key, row in rows.items()
+                if row.get("row_type") == "provider" and row.get("provider") == provider
+            ]
+            for key in removed:
+                del rows[key]
+            _save(target, rows, provider_store=True)
+    except (OSError, ValueError, RuntimeError, TypeError) as error:
+        return {"provider": provider, **_provider_fault(error)}
+    return {
+        "state": "cleared",
+        "provider": provider,
+        "provider_state": "ready",
+        "removed": len(removed),
+    }

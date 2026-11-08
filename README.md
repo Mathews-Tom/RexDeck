@@ -2,7 +2,7 @@
 
 A collection of independently selectable plugins and extensions that bring existing tools into your own Rex application.
 
-Files, local Git, Markdown, Usage, GitHub and rich-format viewing bring unmodified Yazi, lazygit, markdown-reader, tokscale and gh-dash into native Rex terminals. Native attention retains explicit terminal status and exact navigation. Provider-specific subagent views and task-provider integrations remain planned. Select the tools you need without installing an unrelated default suite.
+Files, local Git, Markdown, Usage, GitHub and rich-format viewing bring unmodified Yazi, lazygit, markdown-reader, tokscale and gh-dash into native Rex terminals. Native attention retains explicit terminal status and exact navigation; opt-in Claude Code/Codex hooks add provider-reported subagent parentage (script-qualified, owner live-event proof pending). Task-provider integrations remain planned. Select the tools you need without installing an unrelated default suite.
 
 ## Plugins and extensions
 
@@ -15,7 +15,7 @@ Files, local Git, Markdown, Usage, GitHub and rich-format viewing bring unmodifi
 | [GitHub](plugins/github/README.md) | Repository-scoped PRs/issues with explicit host/account using unmodified gh-dash | Unreleased (source checkout) |
 | [Viewer](plugins/viewer/README.md) | Selected PDF (page navigation), JPG, PNG and SVG previews using Yazi and Rex Kitty graphics | Unreleased (source checkout) |
 | [Native attention](plugins/attention/README.md) | Retain explicit native worker status, filter by project/location, and revalidate exact terminal navigation | Unreleased (source checkout); provider identity remains unknown |
-| Provider subagents | Provider-specific lifecycle and parentage | Planned |
+| [Provider subagents](plugins/attention/README.md#optional-provider-hooks-d11-implement-and-hold-for-owner) | Opt-in Claude Code/Codex start/stop metadata, parentage and exact inherited-terminal navigation | Unreleased; script-qualified, held for owner hook installation and real-event proof; omp interface missing |
 | Tasks | Independently selectable Linear and ClickUp workflows | Planned |
 
 Planned integrations are not implemented or installable yet. Published RexDeck releases are available on [PyPI](https://pypi.org/project/rexdeck/); `rexdeck plugins` is new in version 0.1.1.
@@ -57,6 +57,10 @@ Run `rexdeck plugins` to list every available plugin shipped with this installat
 `rexdeck attention observe --session session:… --block block:… --project my-project` captures one explicitly identified terminal's native OSC 7501 records and exit result. `rexdeck attention list --project my-project` shows retained source, timestamps, freshness and bound/unbound state; `rexdeck attention jump <observation-id>` revalidates the exact server incarnation/session/block before focus. This native extension needs setup but no `enable`, upstream executable, hooks or daemon. A terminal binding is not a provider agent identity. See [native attention](plugins/attention/README.md) for limits and privacy.
 
 Refresh a retained row explicitly with `rexdeck attention observe <observation-id>`: **list → observe ID → jump ID**, without a watcher. Observations live under the setup-owned workspace's `attention/` directory. Untrusted status text and each serialized row are capped and disclose `truncated: true`; a newly observed server incarnation invalidates all older-instance rows on that endpoint without changing their last observed placement.
+
+Optional `rexdeck attention hook claude-code` / `codex` receivers accept bounded stdin hook JSON without retaining message content or transcript paths. Provider rows preserve parent/child IDs, receipt freshness, `started`/`stopped` and `outcome: unknown`; `list --provider … --parent … --agent …` filters them and groups their reported parents. Exact inherited Rex bindings reuse native jump revalidation; outside Rex they are unbound. Hooks are never auto-installed. See the [provider-specific config/trust/rollback instructions](plugins/attention/README.md#optional-provider-hooks-d11-implement-and-hold-for-owner), separate provider retention limits and owner-only real-subagent prerequisites. Native storage stays schema 1 and keeps its independent capacity; `attention clear --provider claude-code|codex` frees only that provider's retained space after hook removal.
+
+If provider evidence is damaged, `attention list` preserves native rows and reports `provider_state: fault` plus `provider_error` with a nonzero exit. Provider clearing reports that fault too; see the [scoped recovery instructions](plugins/attention/README.md#provider-store-faults-and-explicit-recovery) rather than deleting native attention data. A provider jump releases its store lock before native verification/focus calls so concurrent hook receipts are not blocked by navigation.
 
 The uv-managed package remains the runtime source. Setup freezes the app data root from `$XDG_DATA_HOME/rexdeck` (default `~/.local/share/rexdeck`); each integration deploys `plugins/<id>/rexdeck_<id>.lua` there with an independently owned tracked loader in Rex's `init.lua`. Approved preferences remain in `$XDG_CONFIG_HOME/rexdeck/config.json`. Files receipt/lock paths remain in the saved `$XDG_STATE_HOME/rexdeck/files` workspace; every other integration uses its `<id>/` subdirectory. Later `XDG_DATA_HOME` changes do not retarget the saved installation. Run `disable` for every applied integration before uninstalling RexDeck or deliberately resetting a saved target, including integrations reported as disabled after a failed enable.
 
