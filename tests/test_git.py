@@ -13,8 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from rexdeck import integrations
 from rexdeck import lifecycle as life
-from rexdeck.plugins.files import launch
+from rexdeck.host import launch
 
 LAUNCHER = Path(launch.__file__)
 
@@ -407,7 +408,8 @@ def test_git_cwd_preserves_exact_invoking_subdirectory(
         [
             sys.executable,
             str(LAUNCHER),
-            "git-cwd",
+            "context",
+            "git-worktree",
             cwd.as_uri() if as_uri else str(cwd),
         ],
         env=git_environment,
@@ -469,9 +471,12 @@ def test_git_entrypoints_reject_inherited_repository_and_discovery_overrides(
 ) -> None:
     """Reject repository overrides before either Git entrypoint launches the tool."""
     tool, rex, tool_state = git_consumers
-    arguments = [str(tmp_path)]
+    arguments = ["git-worktree", str(tmp_path)]
     if entrypoint == "git-run":
         arguments = [
+            "git-worktree",
+            "Git",
+            "lazygit",
             str(tool),
             str(rex),
             "unix:///private captured.sock",
@@ -481,7 +486,12 @@ def test_git_entrypoints_reject_inherited_repository_and_discovery_overrides(
         ]
     environment = git_environment | {name: value}
     result = subprocess.run(
-        [sys.executable, str(LAUNCHER), entrypoint, *arguments],
+        [
+            sys.executable,
+            str(LAUNCHER),
+            "run" if entrypoint == "git-run" else "context",
+            *arguments,
+        ],
         env=environment,
         capture_output=True,
         text=True,
@@ -503,9 +513,12 @@ def invoke_git_entrypoint(
 ) -> subprocess.CompletedProcess[str]:
     """Exercise the packaged standalone launcher through its public CLI boundary."""
     tool, rex, _state = consumers
-    arguments = [str(cwd)]
+    arguments = ["git-worktree", str(cwd)]
     if entrypoint == "git-run":
         arguments = [
+            "git-worktree",
+            "Git",
+            "lazygit",
             str(tool),
             str(rex),
             "unix:///private captured.sock",
@@ -514,7 +527,12 @@ def invoke_git_entrypoint(
             str(cwd),
         ]
     return subprocess.run(
-        [sys.executable, str(LAUNCHER), entrypoint, *arguments],
+        [
+            sys.executable,
+            str(LAUNCHER),
+            "run" if entrypoint == "git-run" else "context",
+            *arguments,
+        ],
         env=environment,
         capture_output=True,
         text=True,
@@ -650,3 +668,83 @@ def test_git_entrypoints_preserve_real_nonrepository_discovery_error(
     assert "not a git repository" in result.stderr.lower()
     assert "not a non-bare Git worktree" not in result.stderr
     assert not git_consumers[2].exists()
+
+
+@pytest.mark.parametrize(
+    ("placement", "direction", "side", "ratio"),
+    [
+        ("right", "horizontal", "after", 0.7),
+        ("left", "horizontal", "before", 0.3),
+        ("below", "vertical", "after", 0.7),
+        ("above", "vertical", "before", 0.3),
+    ],
+)
+def test_layout_split_uses_before_share(
+    placement: str, direction: str, side: str, ratio: float
+) -> None:
+    assert integrations.Layout(placement, 30).split() == {
+        "direction": direction,
+        "side": side,
+        "ratio": ratio,
+    }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"placement": "right", "size": 19},
+        {"placement": "right", "size": 81},
+        {"placement": "right", "size": True},
+        {"placement": "right", "size": "30"},
+        {"placement": "diagonal", "size": 30},
+        {"placement": "right"},
+        {"size": 30},
+        {"placement": "right", "size": 30, "extra": 1},
+    ],
+)
+def test_layout_load_rejects_invalid_values(value: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        integrations.Layout.load(value)
+
+
+@pytest.mark.parametrize("size", [19, 81, True, "30"])
+def test_layout_constructor_rejects_invalid_size(size: object) -> None:
+    with pytest.raises(ValueError):
+        integrations.Layout("right", size)  # type: ignore[arg-type]
+
+
+def test_layout_constructor_rejects_unknown_placement() -> None:
+    with pytest.raises(ValueError):
+        integrations.Layout("diagonal", 30)
+
+
+def test_three_integrations_keep_all_sibling_ownership(
+    native_config: NativeConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    native = native_config
+    third = replace(integrations.get("files"), id="third", title="Third")
+    monkeypatch.setitem(integrations.INTEGRATIONS, "third", third)
+    plugins = (*integrations.PLUGINS, "third")
+    monkeypatch.setattr(integrations, "PLUGINS", plugins)
+    monkeypatch.setattr(life, "PLUGINS", plugins)
+    third_setup = replace(native.files, plugin="third")
+    original = native.target.read_bytes()
+    for setup in (native.files, native.git, third_setup):
+        native.enable(setup)
+    assert {row["name"] for row in native.actions} == {
+        "rexdeck_files",
+        "rexdeck_git",
+        "rexdeck_third",
+    }
+    third_module = native.files.data_root / "plugins/third/rexdeck_third.lua"
+    third_receipt = native.files.workspace / "third/setup.json"
+    before = (third_module.read_bytes(), third_receipt.read_bytes())
+    life.apply_setup(native.git, placement="above", size=30)
+    assert (third_module.read_bytes(), third_receipt.read_bytes()) == before
+    assert life.status(third_setup)["state"] == "ready"
+    assert life.disable(native.files)["state"] == "disabled"
+    assert life.status(native.git)["state"] == "ready"
+    assert life.status(third_setup)["state"] == "ready"
+    assert life.disable(native.git)["state"] == "disabled"
+    assert life.disable(third_setup)["state"] == "disabled"
+    native.assert_config_identity(original)

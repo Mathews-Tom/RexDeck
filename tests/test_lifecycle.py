@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import Mock, patch
 
+from rexdeck import integrations
 from rexdeck import lifecycle as life
 
 # This stand-in owns only the external Rex boundary. It executes the selected Lua
@@ -67,9 +68,9 @@ class LifecycleTests(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         self.project = self.root / 'checkout-"-é'
         self.project.mkdir()
-        files = self.project / "plugins/files"
+        files = self.project / "host"
         files.mkdir(parents=True)
-        canonical = Path(life.__file__).resolve().parent / "plugins/files"
+        canonical = Path(life.__file__).resolve().parent / "host"
         (files / "main.lua").write_bytes((canonical / "main.lua").read_bytes())
         (files / "launch.py").write_bytes((canonical / "launch.py").read_bytes())
         self.workspace = self.root / "workspace"
@@ -181,7 +182,7 @@ class LifecycleTests(unittest.TestCase):
             ("main.lua", b"-- update\n"),
             ("launch.py", b"# update\n"),
         ):
-            asset = project / "plugins/files" / name
+            asset = project / "host" / name
             asset.write_bytes(asset.read_bytes() + b"\n" + comment)
         shutil.rmtree(self.project)
         return replace(self.setup, project=project)
@@ -490,7 +491,7 @@ action.run({session_id = "session", block_id = "origin"})
     def test_canonical_or_launcher_change_requires_explicit_reapply(self) -> None:
         life.apply_setup(self.setup)
         for name in ("main.lua", "launch.py"):
-            source = self.project / "plugins/files" / name
+            source = self.project / "host" / name
             source.write_bytes(source.read_bytes() + b"\n")
             before = self.snapshot()
             with self.assertRaises(RuntimeError):
@@ -564,7 +565,8 @@ action.run({session_id = "session", block_id = "origin"})
     def test_changed_loader_is_not_removed_or_claimed(self) -> None:
         life.apply_setup(self.setup)
         changed = self.target.read_bytes().replace(
-            life._BEGIN, life._BEGIN + b"-- operator edit\n"
+            integrations.get("files").loader_markers[0],
+            integrations.get("files").loader_markers[0] + b"-- operator edit\n",
         )
         self.target.write_bytes(changed)
         self.assertEqual(life.disable(self.setup)["state"], "conflict")
@@ -903,7 +905,7 @@ action.run({session_id = "session", block_id = "origin"})
         tools = life._tools()
         attempted = False
 
-        def install_concurrently() -> dict[str, str]:
+        def install_concurrently(_tool: str) -> dict[str, str]:
             """Attempt a sibling mutation while the first workspace owns the lock."""
             nonlocal attempted
             if not attempted:
@@ -924,7 +926,7 @@ action.run({session_id = "session", block_id = "origin"})
         tools = life._tools()
         foreign = b"-- concurrently installed foreign module\n"
 
-        def install_foreign_module() -> dict[str, str]:
+        def install_foreign_module(_tool: str) -> dict[str, str]:
             self.module.parent.mkdir(parents=True, exist_ok=True)
             self.module.write_bytes(foreign)
             return tools
@@ -974,16 +976,14 @@ action.run({session_id = "session", block_id = "origin"})
                 self.assertEqual(self.target.read_bytes(), original)
 
     def test_invalid_canonical_lua_fails_without_leaking_loader_cache(self) -> None:
-        (self.project / "plugins/files/main.lua").write_bytes(
-            b"return function( invalid\n"
-        )
+        (self.project / "host/main.lua").write_bytes(b"return function( invalid\n")
         with self.assertRaises(RuntimeError):
             life.apply_setup(self.setup)
         self.assertEqual(self.snapshot(), (self.original, None, None))
 
     def test_generated_options_are_lua_quoted_not_shell_or_json_literals(self) -> None:
         # Execute a consumer that validates all tricky option bytes at its API.
-        source = self.project / "plugins/files/main.lua"
+        source = self.project / "host/main.lua"
         source.write_text(
             "return function(opts)\n"
             'assert(opts.python == "/a python/\\195\\169")\n'

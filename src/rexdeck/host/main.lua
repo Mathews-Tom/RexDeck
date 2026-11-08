@@ -1,35 +1,53 @@
--- Native Rex configuration module; also embedded verbatim by RexDeck's installer.
+-- Native Rex host for one RexDeck integration; embedded verbatim in its generated module.
+-- Every integration shares this action: frozen origin identity, validated context,
+-- shell-less argv, configured split layout and exact-origin return by the launcher.
+local contexts = {directory = true, ['git-worktree'] = true}
+local function nonempty(value)
+  return type(value) == 'string' and value ~= '' and not value:find('%z')
+end
+
 return function(opts)
-  if type(opts) ~= 'table' then error('RexDeck Files requires installation options', 0) end
-  local plugin = opts.plugin or 'files'
-  if plugin ~= 'files' and plugin ~= 'git' then error('Unknown RexDeck integration', 0) end
-  local is_git = plugin == 'git'
-  local title = is_git and 'RexDeck Git' or 'RexDeck Files'
-  local tool = is_git and 'lazygit' or 'yazi'
+  if type(opts) ~= 'table' then error('RexDeck requires installation options', 0) end
+  if not nonempty(opts.plugin) or not opts.plugin:match('^[a-z][a-z0-9]*$') then
+    error('RexDeck requires a valid integration id', 0)
+  end
+  if not nonempty(opts.title) then error('RexDeck requires an integration title', 0) end
+  local title = 'RexDeck ' .. opts.title
+  for _, key in ipairs({'tool', 'tool_label', 'description', 'keywords'}) do
+    if not nonempty(opts[key]) then error(title .. ' requires ' .. key, 0) end
+  end
+  if not contexts[opts.context] then error(title .. ' has an unknown context', 0) end
   local paths = {}
-  for _, key in ipairs({'python', 'rex', tool}) do
+  for _, key in ipairs({'python', 'rex', opts.tool}) do
     local value = opts[key]
-    if type(value) ~= 'string' or value:sub(1, 1) ~= '/' or value:find('%z') then
+    if not nonempty(value) or value:sub(1, 1) ~= '/' then
       error(title .. ' requires an absolute ' .. key .. ' path', 0)
     end
     paths[key] = value
   end
+  local args = opts.args
+  if type(args) ~= 'table' then error(title .. ' requires an argument list', 0) end
+  for index = 1, #args do
+    if not nonempty(args[index]) then error(title .. ' has an invalid argument', 0) end
+  end
+  local layout = opts.layout
+  if type(layout) ~= 'table'
+      or (layout.direction ~= 'horizontal' and layout.direction ~= 'vertical')
+      or (layout.side ~= 'before' and layout.side ~= 'after')
+      or type(layout.ratio) ~= 'number' or not (layout.ratio >= 0.2 and layout.ratio <= 0.8) then
+    error(title .. ' has an invalid pane layout', 0)
+  end
   local launcher = opts.launcher_code
-  if type(launcher) ~= 'string' or launcher == '' or launcher:find('%z') then
-    error(title .. ' requires its applied Python launcher', 0)
-  end
-  local server = opts.server
-  if type(server) ~= 'string' or server == '' or server:find('%z') then
-    error(title .. ' requires an explicit Rex server', 0)
-  end
+  if not nonempty(launcher) then error(title .. ' requires its applied Python launcher', 0) end
+  if not nonempty(opts.server) then error(title .. ' requires an explicit Rex server', 0) end
 
   rex.action{
-    name = 'rexdeck_' .. plugin,
+    name = 'rexdeck_' .. opts.plugin,
     title = title,
     category = 'RexDeck',
-    description = 'Open ' .. tool .. ' in the invoking terminal directory',
-    keywords = is_git and 'git lazygit' or 'files yazi explorer',
-    run = function(ctx, args)
+    description = opts.description,
+    keywords = opts.keywords,
+    run = function(ctx, _)
       -- Freeze identity before any call can change focus or mutate the context.
       local session = type(ctx) == 'table' and ctx.session_id
       local origin = type(ctx) == 'table' and ctx.block_id
@@ -50,7 +68,7 @@ return function(opts)
         error(title .. ': the invoking terminal has not reported a cwd', 0)
       end
       local checked, exec_error = rex.exec({paths.python, '-I', '-c', launcher,
-        is_git and 'git-cwd' or 'cwd', reported.pwd}, {timeout = 15})
+        'context', opts.context, reported.pwd}, {timeout = 15})
       if not checked then
         error(title .. ' cannot validate the invoking cwd: ' .. tostring(exec_error), 0)
       end
@@ -63,12 +81,15 @@ return function(opts)
         error(title .. ' received an invalid cwd validation result: ' .. tostring(json_error), 0)
       end
       local cwd = decoded.cwd
+      local command = {paths.python, '-I', '-c', launcher, 'run', opts.context, opts.title,
+        opts.tool_label, paths[opts.tool], paths.rex, opts.server, session, origin, cwd}
+      for index = 1, #args do command[#command + 1] = args[index] end
       local split, split_error = rex.session.new_split{
         session_id = session,
         anchor_id = origin,
-        direction = 'horizontal',
-        side = 'after',
-        ratio = 0.5,
+        direction = layout.direction,
+        side = layout.side,
+        ratio = layout.ratio,
         focus = true,
         layout = {block = {
           flavor = 'com.superlogical.terminal.shell',
@@ -78,8 +99,7 @@ return function(opts)
             shell = 'none',
             login = false,
             exit = {on_completion = true},
-            command = {paths.python, '-I', '-c', launcher, is_git and 'git-run' or 'run',
-              paths[tool], paths.rex, server, session, origin, cwd},
+            command = command,
           },
         }},
       }

@@ -1,8 +1,15 @@
 # Changelog
 
-## 0.1.1 — prepared, unpublished
+## Unreleased
+
+- Add configurable pane placement and size: `rexdeck enable <id> --placement {right,left,below,above} --size 20-80`. Invalid values are rejected before any change; omitted options keep the integration's saved layout across refresh and disable/enable; status and listings report it. Layout is stored in each integration's own receipt (still schema 3; receipts without a layout keep the original right/50% split), so changing Git's layout leaves Files untouched.
+- Consolidate Files and Git onto one shared native host contract: `rexdeck.integrations` descriptors declare identity, qualified versions, license, launch context, shell-less argv, default layout and capability disclosure; the shared `host/main.lua` action and `host/launch.py` launcher replace the Files/Git branches, and lifecycle ownership handles any number of sibling loaders. Loader bytes, deployment paths, settings schema 2 and receipt schema 3 stay compatible; run `rexdeck enable <id>` after upgrading to refresh each applied integration.
+- `rexdeck plugins` and aggregate `status` rows disclose each integration's tool, versions, license, context, capabilities and default layout. Document adding an interactive terminal tool and the limits for one-shot, data-backed and GUI programs.
+
+## 0.1.1 — 2026-11-08
 
 - Add `rexdeck plugins` to list all available integrations and their enabled/disabled state as JSON. Discovery works before setup, reporting `not-configured`; configured inspection reuses aggregate status, preserving healthy siblings and nonzero failure reporting when a plugin cannot be inspected. Listing does not change registration or install dependencies.
+- Published the approved main-CI wheel/sdist to GitHub and PyPI from tag `v0.1.1`; public asset and registry hashes match.
 
 ## 0.1.0 — 2026-11-08
 

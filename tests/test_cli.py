@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from rexdeck import cli, dependencies, lifecycle, settings
+from rexdeck import cli, dependencies, integrations, lifecycle, settings
 
 
 class _Terminal(io.StringIO):
@@ -74,7 +74,7 @@ class CliTests(unittest.TestCase):
             self.addCleanup(boundary.stop)
         for name, dependency_replacement in (
             ("_resolve", lambda name: sys.executable),
-            ("_probe", lambda executable, name: dependencies._VERSIONS[name][-1]),
+            ("_probe", lambda executable, name: name.versions[-1]),
         ):
             dependency_boundary = patch.object(
                 dependencies, name, dependency_replacement
@@ -169,6 +169,87 @@ class CliTests(unittest.TestCase):
 
     def document(self) -> dict[str, object]:
         return cast(dict[str, object], json.loads(self.settings.read_text()))
+
+    def test_invalid_layout_arguments_are_json_errors_without_mutation(self) -> None:
+        self.configure()
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        paths = (self.config, self.settings, self.module, self.workspace / "setup.json")
+        before = {path: path.read_bytes() for path in paths}
+        for option, value in (
+            ("--size", "81"),
+            ("--placement", "diagonal"),
+            ("--size", "3.5"),
+        ):
+            with self.subTest(option=option, value=value):
+                code, result = self.invoke("enable", "files", option, value)
+                self.assertEqual(code, 2)
+                self.assertIn("error", result)
+                self.assertEqual({path: path.read_bytes() for path in paths}, before)
+
+    def test_layout_persists_partial_updates_and_disable_enable(self) -> None:
+        self.configure()
+        code, result = self.invoke(
+            "enable", "files", "--placement", "below", "--size", "30"
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(result["layout"], {"placement": "below", "size": 30})
+        receipt = self.workspace / "setup.json"
+        self.assertEqual(json.loads(receipt.read_text())["layout"], result["layout"])
+        self.assertEqual(self.invoke("status", "files")[1]["layout"], result["layout"])
+        code, result = self.invoke("enable", "files", "--size", "40")
+        self.assertEqual(code, 0)
+        expected = {"placement": "below", "size": 40}
+        self.assertEqual(result["layout"], expected)
+        self.assertEqual(self.invoke("disable", "files")[0], 0)
+        self.assertEqual(self.invoke("enable", "files")[1]["layout"], expected)
+        self.assertEqual(json.loads(receipt.read_text())["layout"], expected)
+        before = (self.module.read_bytes(), receipt.read_bytes())
+        self.assertEqual(
+            self.invoke("enable", "git", "--placement", "left", "--size", "35")[0], 0
+        )
+        self.assertEqual((self.module.read_bytes(), receipt.read_bytes()), before)
+
+    def test_legacy_receipt_defaults_and_malformed_layout_faults_without_mutation(
+        self,
+    ) -> None:
+        self.configure()
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        receipt = self.workspace / "setup.json"
+        document = json.loads(receipt.read_text())
+        self.assertEqual(document["version"], 3)
+        del document["layout"]
+        receipt.write_text(json.dumps(document))
+        before = (
+            self.config.read_bytes(),
+            self.module.read_bytes(),
+            receipt.read_bytes(),
+        )
+        code, result = self.invoke("status", "files")
+        self.assertEqual(code, 0)
+        self.assertEqual(result["layout"], {"placement": "right", "size": 50})
+        self.assertEqual(
+            (self.config.read_bytes(), self.module.read_bytes(), receipt.read_bytes()),
+            before,
+        )
+        document["layout"] = {"placement": "below", "size": True}
+        receipt.write_text(json.dumps(document))
+        before = (
+            self.config.read_bytes(),
+            self.module.read_bytes(),
+            receipt.read_bytes(),
+        )
+        for command in ("status", "enable", "disable"):
+            code, result = self.invoke(command, "files")
+            self.assertNotEqual(code, 0)
+            self.assertIn("malformed layout", str(result))
+            self.assertEqual(
+                (
+                    self.config.read_bytes(),
+                    self.module.read_bytes(),
+                    receipt.read_bytes(),
+                ),
+                before,
+            )
 
     def test_setup_only_saves_then_commands_use_saved_target(self) -> None:
         self.configure()
@@ -451,9 +532,9 @@ class CliTests(unittest.TestCase):
     def test_existing_native_workspace_can_be_selected_explicitly(self) -> None:
         existing = self.root / "native-files"
         old_package = self.root / "old-checkout"
-        old_files = old_package / "plugins/files"
+        old_files = old_package / "host"
         old_files.mkdir(parents=True)
-        current_files = Path(cli.__file__).resolve().parent / "plugins/files"
+        current_files = Path(cli.__file__).resolve().parent / "host"
         for name in ("main.lua", "launch.py"):
             (old_files / name).write_bytes((current_files / name).read_bytes())
         setup = lifecycle.Setup(
@@ -503,8 +584,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(
             result["plugins"],
             {
-                "files": {"state": "not-configured"},
-                "git": {"state": "not-configured"},
+                plugin: {
+                    "state": "not-configured",
+                    "integration": integrations.get(plugin).describe(),
+                }
+                for plugin in integrations.PLUGINS
             },
         )
         self.assertFalse(self.settings.exists())
@@ -959,10 +1043,17 @@ class CliTests(unittest.TestCase):
                         setup: lifecycle.Setup,
                         *,
                         expected_tool: lifecycle.QualifiedTool | None = None,
+                        placement: str | None = None,
+                        size: int | None = None,
                     ) -> dict[str, object]:
                         """Preserve the applied disabled bundle when start is rejected."""
                         nonlocal before
-                        result = apply(setup, expected_tool=expected_tool)
+                        result = apply(
+                            setup,
+                            expected_tool=expected_tool,
+                            placement=placement,
+                            size=size,
+                        )
                         if boundary == "start":
                             before = snapshot()
                             mutate()
@@ -1069,10 +1160,10 @@ class CliTests(unittest.TestCase):
                         appeared = True
                     return bind(setup)
 
-                def probe(executable: str, name: str) -> str:
+                def probe(executable: str, name: integrations.Integration) -> str:
                     """Record the binding actually version-qualified by this enable."""
                     probes.append(executable)
-                    return dependencies._VERSIONS[name][-1]
+                    return name.versions[-1]
 
                 with (
                     patch.dict(
@@ -1114,7 +1205,8 @@ class CliTests(unittest.TestCase):
                     receipt = json.loads(selected_receipt.read_text())
                     self.assertEqual(receipt["tools"][tool], str(qualified))
                     self.assertIn(
-                        f'{tool} = "{qualified}"'.encode(), selected_module.read_bytes()
+                        f'["{tool}"] = "{qualified}"'.encode(),
+                        selected_module.read_bytes(),
                     )
                     self.assertEqual(probes, [str(qualified), str(qualified)])
                     self.assertEqual(
@@ -1153,9 +1245,13 @@ class CliTests(unittest.TestCase):
             setup: lifecycle.Setup,
             *,
             expected_tool: lifecycle.QualifiedTool | None = None,
+            placement: str | None = None,
+            size: int | None = None,
         ) -> dict[str, object]:
             """Model another deliberate lower-level apply between CLI transactions."""
-            result = apply(setup, expected_tool=expected_tool)
+            result = apply(
+                setup, expected_tool=expected_tool, placement=placement, size=size
+            )
             shadow.write_text("#!/bin/sh\nexit 99\n")
             shadow.chmod(0o755)
             apply(setup)
@@ -1221,12 +1317,12 @@ class CliTests(unittest.TestCase):
         self.configure()
         before = self.settings.read_bytes()
 
-        def probe(_executable: str, name: str) -> str:
+        def probe(_executable: str, name: integrations.Integration) -> str:
             """Model another operation changing the target during a version probe."""
             value = self.document()
             value["server"] = "unix:///tmp/rexdeck-replaced-target.sock"
             self.settings.write_text(json.dumps(value))
-            return dependencies._VERSIONS[name][-1]
+            return name.versions[-1]
 
         with patch.object(dependencies, "_probe", side_effect=probe):
             code, result = self.invoke("enable", "files")
@@ -1251,7 +1347,7 @@ class CliTests(unittest.TestCase):
             with self.subTest(change=change):
                 self.status_failure = False
 
-                def probe(_executable: str, name: str) -> str:
+                def probe(_executable: str, name: integrations.Integration) -> str:
                     """Redirect config or stop the server during executable validation."""
                     if change == "config":
                         other = self.root / "other.lua"
@@ -1260,7 +1356,7 @@ class CliTests(unittest.TestCase):
                         self.config.symlink_to(other)
                     else:
                         self.status_failure = True
-                    return dependencies._VERSIONS[name][-1]
+                    return name.versions[-1]
 
                 with patch.object(dependencies, "_probe", side_effect=probe):
                     code, _ = self.invoke("enable", "files")

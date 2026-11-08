@@ -1,4 +1,4 @@
-"""Start unmodified Yazi in a native Rex terminal and restore its exact origin."""
+"""Start one unmodified terminal tool in a native Rex pane and restore its origin."""
 
 from __future__ import annotations
 
@@ -97,6 +97,10 @@ def git_directory(raw: str) -> str:
     return cwd
 
 
+# Mirrors rexdeck.integrations.CONTEXTS; this file runs standalone under ``python -I``.
+CONTEXTS = {"directory": directory, "git-worktree": git_directory}
+
+
 def acknowledge() -> None:
     if sys.stdin.isatty():
         try:
@@ -133,41 +137,50 @@ def restore_focus(rex: str, server: str, session: str, origin: str) -> None:
         raise RuntimeError(f"Rex exited {result.returncode}: {result.stderr.strip()}")
 
 
+def resolve(context: str, raw: str) -> str:
+    """Resolve one declared context; arbitrary cwd never selects a file or account."""
+    if context not in CONTEXTS:
+        raise ValueError(f"Unknown integration context: {context!r}")
+    return CONTEXTS[context](raw)
+
+
 def run(
-    yazi: str,
+    context: str,
+    title: str,
+    label: str,
+    tool: str,
     rex: str,
     server: str,
     session: str,
     origin: str,
     cwd: str,
-    *,
-    plugin: str = "files",
+    args: tuple[str, ...] = (),
 ) -> int:
-    """Launch the selected native tool at validated cwd, then restore origin focus."""
-    title = "Git" if plugin == "git" else "Files"
-    tool = "lazygit" if plugin == "git" else "Yazi"
+    """Launch one upstream tool at its validated context, then restore origin focus."""
     exit_code = 1
     try:
         if not all((server, session, origin)):
             raise ValueError(
                 "Explicit Rex server, session and origin identities are required"
             )
-        if not Path(yazi).is_absolute() or not Path(rex).is_absolute():
+        if not Path(tool).is_absolute() or not Path(rex).is_absolute():
             raise ValueError("Absolute tool and Rex executable paths are required")
-        checked_cwd = git_directory(cwd) if plugin == "git" else directory(cwd)
+        checked_cwd = resolve(context, cwd)
         # Inherit the actual pane TTY and the tool's normal configuration.
-        exit_code = subprocess.run([yazi], cwd=checked_cwd, check=False).returncode
+        exit_code = subprocess.run(
+            [tool, *args], cwd=checked_cwd, check=False
+        ).returncode
         if exit_code < 0:
             exit_code = 128 - exit_code
         if exit_code:
-            print(f"RexDeck {title}: {tool} exited {exit_code}", file=sys.stderr)
+            print(f"RexDeck {title}: {label} exited {exit_code}", file=sys.stderr)
             acknowledge()
     except KeyboardInterrupt:
         exit_code = 130
-        print(f"RexDeck {title}: {tool} interrupted", file=sys.stderr)
+        print(f"RexDeck {title}: {label} interrupted", file=sys.stderr)
         acknowledge()
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        print(f"RexDeck {title}: cannot launch {tool}: {error}", file=sys.stderr)
+        print(f"RexDeck {title}: cannot launch {label}: {error}", file=sys.stderr)
         acknowledge()
     try:
         if not all((server, session, origin)) or not Path(rex).is_absolute():
@@ -195,20 +208,32 @@ def run(
 
 
 def main() -> int:
-    """Dispatch standalone cwd validation and native pane launch commands."""
+    """Dispatch standalone context validation and native pane launch commands."""
     args = sys.argv[1:]
-    if len(args) == 2 and args[0] in ("cwd", "git-cwd"):
+    if len(args) == 3 and args[0] == "context":
         try:
-            cwd = git_directory(args[1]) if args[0] == "git-cwd" else directory(args[1])
-            print(json.dumps({"cwd": cwd}))
+            print(json.dumps({"cwd": resolve(args[1], args[2])}))
             return 0
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             print(f"RexDeck: invalid invoking cwd: {error}", file=sys.stderr)
             return 1
-    if len(args) == 7 and args[0] in ("run", "git-run"):
-        return run(*args[1:], plugin="git" if args[0] == "git-run" else "files")
+    if len(args) >= 10 and args[0] == "run":
+        context, title, label, tool, rex, server, session, origin, cwd = args[1:10]
+        return run(
+            context,
+            title,
+            label,
+            tool,
+            rex,
+            server,
+            session,
+            origin,
+            cwd,
+            args=tuple(args[10:]),
+        )
     print(
-        "Use [git-]cwd RAW_PWD or [git-]run TOOL REX SERVER SESSION ORIGIN CWD",
+        "Use context CONTEXT RAW_PWD or run CONTEXT TITLE LABEL TOOL REX SERVER "
+        "SESSION ORIGIN CWD [ARG...]",
         file=sys.stderr,
     )
     return 2

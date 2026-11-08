@@ -30,7 +30,8 @@ rex = {
     if mode == 'no-pwd' then return {} end
     return {pwd = 'file:///exact%20origin'}
   end,
-  exec = function()
+  exec = function(argv)
+    assert(argv[5] == 'context' and argv[6] == 'directory')
     effects = effects + 1
     if mode == 'exec-error' then return nil, 'python unavailable' end
     if mode == 'refused-cwd' then return {ok = false, stderr = 'remote cwd refused'} end
@@ -45,18 +46,30 @@ rex = {
   end},
   session = {new_split = function(request)
     effects = effects + 1
+    assert(request.direction == 'vertical' and request.side == 'after' and request.ratio == 0.7,
+      'split ignored configured layout')
     local source = panes[request.anchor_id]
     if mode == 'split-error' then return nil, 'split denied' end
     if not source or source.session ~= request.session_id then return nil, 'invalid source' end
     opened = opened + 1
     local id = 'yazi-' .. opened
     panes[id] = {session = source.session, window = source.window,
-      cwd = request.layout.block.options.cwd}
+      cwd = request.layout.block.options.cwd, command = request.layout.block.options.command}
     if request.focus then focused = id end
     return {block_ids = {id}}
   end},
 }
-install{python = '/python', rex = '/rex', yazi = '/yazi', server = 'unix:///private.sock', launcher_code = 'pass'}
+local options = {python = '/python', rex = '/rex', yazi = '/yazi',
+  server = 'unix:///private.sock', launcher_code = 'pass', plugin = 'files',
+  title = 'Files', tool = 'yazi', tool_label = 'Yazi', description = 'Files',
+  keywords = 'files', context = 'directory', args = {},
+  layout = {direction = 'vertical', side = 'after', ratio = 0.7}}
+for _, ratio in ipairs({'0.7', 0 / 0, 0.1, 0.9}) do
+  options.layout.ratio = ratio
+  assert(not pcall(install, options), 'invalid layout ratio accepted: ' .. tostring(ratio))
+end
+options.layout.ratio = 0.7
+install(options)
 assert(action.name == 'rexdeck_files' and type(action.run) == 'function')
 
 for _, invalid in ipairs({{}, {session_id = 'session-a'}, {block_id = 'origin-a'},
@@ -87,3 +100,14 @@ assert(panes[second].window == 'window-b', 'second origin opened in first origin
 context = {session_id = 'session-a', block_id = 'origin-a'}
 local third = action.run(context, {}).block_ids[1]
 assert(third ~= first and panes[first] and panes[second], 'repeat invocation closed independent panes')
+
+-- Descriptor argv reaches the launcher after the nine fixed fields, in order.
+local fixed = panes[first].command
+assert(#fixed == 14 and fixed[5] == 'run' and fixed[14] == '/exact origin',
+  'launch command lost its fixed launcher fields')
+options.args = {'tui', '--client', 'omp'}
+install(options)
+reset()
+local forwarded = panes[action.run(context, {}).block_ids[1]].command
+assert(#forwarded == 17 and forwarded[15] == 'tui' and forwarded[16] == '--client'
+  and forwarded[17] == 'omp', 'descriptor args were not forwarded after the fixed fields')

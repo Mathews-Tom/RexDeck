@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Never
 
-from rexdeck import dependencies, lifecycle, settings
+from rexdeck import dependencies, integrations, lifecycle, settings
 
 _FAILURES = {"conflict", "failed", "fault"}
 
@@ -19,6 +19,18 @@ class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> Never:
         print(json.dumps({"state": "failed", "error": message}), file=sys.stderr)
         raise SystemExit(2)
+
+
+def _size(value: str) -> int:
+    """Accept only a whole percentage inside the usable split range."""
+    if not (value.isascii() and value.isdigit()) or not (
+        integrations.MIN_SIZE <= int(value) <= integrations.MAX_SIZE
+    ):
+        raise argparse.ArgumentTypeError(
+            f"size must be a whole percentage from {integrations.MIN_SIZE} to "
+            f"{integrations.MAX_SIZE}"
+        )
+    return int(value)
 
 
 def _discover(config: Path) -> str:
@@ -190,7 +202,14 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
     return {"state": "configured", "settings": str(path), **candidate.document()}
 
 
-def _enable(path: Path, target: settings.SavedTarget, plugin: str) -> dict[str, object]:
+def _enable(
+    path: Path,
+    target: settings.SavedTarget,
+    plugin: str,
+    *,
+    placement: str | None = None,
+    size: int | None = None,
+) -> dict[str, object]:
     """Carry one executable identity through both locked ownership transactions."""
     setup = target.setup(plugin)
     _selected_status(setup)
@@ -205,7 +224,9 @@ def _enable(path: Path, target: settings.SavedTarget, plugin: str) -> dict[str, 
         )
     setup = current.setup(plugin)
     _selected_status(setup)
-    result = lifecycle.apply_setup(setup, expected_tool=qualified_tool)
+    result = lifecycle.apply_setup(
+        setup, expected_tool=qualified_tool, placement=placement, size=size
+    )
     if result.get("state") == "applied":
         return lifecycle.start(setup, expected_tool=qualified_tool)
     if result.get("state") not in _FAILURES:
@@ -221,7 +242,11 @@ def _plugins(target: settings.SavedTarget | None) -> dict[str, object]:
         return {
             "state": "not-configured",
             "plugins": {
-                plugin: {"state": "not-configured"} for plugin in lifecycle.PLUGINS
+                plugin: {
+                    "state": "not-configured",
+                    "integration": integrations.get(plugin).describe(),
+                }
+                for plugin in lifecycle.PLUGINS
             },
         }
     plugins: dict[str, dict[str, object]] = {}
@@ -234,6 +259,7 @@ def _plugins(target: settings.SavedTarget | None) -> dict[str, object]:
                 "server": target.server,
                 "error": f"Cannot inspect {plugin}: {error}",
             }
+        plugins[plugin]["integration"] = integrations.get(plugin).describe()
     failed = any(row.get("state") in _FAILURES for row in plugins.values())
     return {
         "state": "fault"
@@ -268,6 +294,20 @@ def main() -> int:
         command.add_argument(
             "plugin", choices=lifecycle.PLUGINS, nargs="?" if name == "status" else None
         )
+        if name == "enable":
+            command.add_argument(
+                "--placement",
+                choices=integrations.PLACEMENTS,
+                help="Open the tool pane on this side of the invoking terminal; "
+                "omit to keep the saved placement (default right)",
+            )
+            command.add_argument(
+                "--size",
+                type=_size,
+                help=f"Tool pane share of the split, {integrations.MIN_SIZE}-"
+                f"{integrations.MAX_SIZE} percent; omit to keep the saved size "
+                "(default 50)",
+            )
     args = parser.parse_args()
     try:
         path = settings.settings_path()
@@ -280,7 +320,9 @@ def main() -> int:
             if target is None:
                 raise RuntimeError("No saved Rex target; run rexdeck setup first")
             if args.command == "enable":
-                result = _enable(path, target, args.plugin)
+                result = _enable(
+                    path, target, args.plugin, placement=args.placement, size=args.size
+                )
             elif args.command == "disable":
                 result = lifecycle.disable(target.setup(args.plugin))
             else:

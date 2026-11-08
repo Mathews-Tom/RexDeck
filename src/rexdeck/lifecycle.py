@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import math
 import os
 import selectors
 import shutil
@@ -23,11 +24,11 @@ from types import FrameType
 from typing import NoReturn, cast
 from urllib.parse import quote, unquote
 
-_BEGIN = b"-- BEGIN REXDECK (owned native Files loader)\n"
-_END = b"-- END REXDECK\n"
+from rexdeck import integrations
+
 _MAX_READ = 2 * 1024 * 1024
 _COMMAND_WAIT = 8.0
-PLUGINS = ("files", "git")
+PLUGINS = integrations.PLUGINS
 
 
 @dataclass(frozen=True)
@@ -249,14 +250,14 @@ def _tools(tool: str = "yazi") -> dict[str, str]:
 
 def _selected_tools(setup: Setup) -> dict[str, str]:
     """Resolve only the executables required by the selected integration."""
-    return _tools() if setup.plugin == "files" else _tools("lazygit")
+    return _tools(integrations.get(setup.plugin).tool)
 
 
 def _require_qualified_tool(
     setup: Setup, tools: dict[str, str], expected_tool: QualifiedTool | None
 ) -> None:
     """Require the persisted binding and followed target to retain qualification."""
-    tool = "yazi" if setup.plugin == "files" else "lazygit"
+    tool = integrations.get(setup.plugin).tool
     if expected_tool is None:
         return
     if tools[tool] != expected_tool.path:
@@ -519,6 +520,26 @@ def _lua(value: str) -> str:
     )
 
 
+def _lua_value(value: object) -> str:
+    """Render generated module options: strings, finite numbers, lists and tables."""
+    if isinstance(value, str):
+        return _lua(value)
+    if isinstance(value, float) and math.isfinite(value):
+        return repr(value)
+    if isinstance(value, (list, tuple)):
+        return "{" + ", ".join(_lua_value(item) for item in value) + "}"
+    if isinstance(value, dict):
+        return (
+            "{"
+            + ", ".join(
+                f"[{_lua(key)}] = {_lua_value(item)}"
+                for key, item in sorted(value.items())
+            )
+            + "}"
+        )
+    raise RuntimeError(f"Unsupported generated module option: {value!r}")
+
+
 def _loader(paths: _Paths) -> bytes:
     """Build the tracked loader while preserving native Files loader identity."""
     # Rex tracks required modules. Restore both its cache and the user's search path.
@@ -526,14 +547,10 @@ def _loader(paths: _Paths) -> bytes:
         raise RuntimeError(
             "Rex cannot track a module in a directory containing ';' or '?'"
         )
+    integration = integrations.get(paths.plugin)
     search = _lua(str(paths.module.parent / "?.lua") + ";")
     module = _lua(paths.module.stem)
-    begin = (
-        _BEGIN
-        if paths.plugin == "files"
-        else b"-- BEGIN REXDECK (owned native Git loader)\n"
-    )
-    end = _END if paths.plugin == "files" else b"-- END REXDECK git\n"
+    begin, end = integration.loader_markers
     return (
         begin
         + (
@@ -541,7 +558,8 @@ def _loader(paths: _Paths) -> bytes:
             f"package.path = {search} .. previous; package.loaded[{module}] = nil; "
             f"local ok, err = pcall(require, {module}); "
             f"package.loaded[{module}] = cached; package.path = previous; "
-            f"if not ok then error('RexDeck {'Files' if paths.plugin == 'files' else 'Git'} unavailable: ' .. tostring(err)) end end\n"
+            f"if not ok then error('RexDeck {integration.title} unavailable: ' "
+            ".. tostring(err)) end end\n"
         ).encode()
         + end
     )
@@ -549,7 +567,7 @@ def _loader(paths: _Paths) -> bytes:
 
 def _expect_action(setup: Setup, enabled: bool) -> None:
     """Require exact owned action identity or verified absence after reload."""
-    title = "Files" if setup.plugin == "files" else "Git"
+    title = integrations.get(setup.plugin).title
     listing = _rex(setup, "actions", "--json")
     actions = [
         _object(row, "Rex action")
@@ -611,34 +629,48 @@ def _without_loader(
 
 
 def _sources(paths: _Paths) -> tuple[bytes, bytes]:
-    source = _file(paths.project / "plugins/files/main.lua").data
-    launcher = _file(paths.project / "plugins/files/launch.py").data
+    source = _file(paths.project / "host/main.lua").data
+    launcher = _file(paths.project / "host/launch.py").data
     if not source or not launcher:
-        raise RuntimeError("Canonical native Files main.lua and launch.py are required")
+        raise RuntimeError("Canonical native host main.lua and launch.py are required")
     try:
         source.decode("utf-8")
         launcher.decode("utf-8")
     except UnicodeError as exc:
-        raise RuntimeError("Native Files module and launcher must be UTF-8") from exc
+        raise RuntimeError("Native host module and launcher must be UTF-8") from exc
     return source, launcher
 
 
 def _module(
-    setup: Setup, source: bytes, launcher: bytes, tools: dict[str, str], enabled: bool
+    setup: Setup,
+    source: bytes,
+    launcher: bytes,
+    tools: dict[str, str],
+    enabled: bool,
+    layout: integrations.Layout,
 ) -> bytes:
-    """Embed canonical action and launcher code for one selected integration."""
-    opts = tools | {
+    """Embed the shared host, launcher and one integration's contract fields."""
+    integration = integrations.get(setup.plugin)
+    opts: dict[str, object] = {
+        **tools,
         "server": setup.server,
         "launcher_code": launcher.decode("utf-8"),
-        "plugin": setup.plugin,
+        "plugin": integration.id,
+        "title": integration.title,
+        "tool": integration.tool,
+        "tool_label": integration.tool_label,
+        "description": integration.description,
+        "keywords": integration.keywords,
+        "context": integration.context,
+        "args": list(integration.args),
+        "layout": layout.split(),
     }
-    quoted = ", ".join(f"{key} = {_lua(value)}" for key, value in sorted(opts.items()))
     return (
-        b"-- Generated from canonical plugins/files/main.lua by RexDeck.\n"
+        b"-- Generated from canonical host/main.lua by RexDeck.\n"
         b"local install = (function()\n"
         + source
         + b"\nend)()\n"
-        + f"if {'true' if enabled else 'false'} then install({{{quoted}}}) end\n".encode()
+        + f"if {'true' if enabled else 'false'} then install({_lua_value(opts)}) end\n".encode()
     )
 
 
@@ -689,7 +721,7 @@ def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
     if result.get("loader_separator") not in ("", "\n"):
         raise RuntimeError("Setup receipt has malformed loader_separator")
     tools = _object(result.get("tools"), "receipt tools")
-    tool = "yazi" if setup.plugin == "files" else "lazygit"
+    tool = integrations.get(setup.plugin).tool
     if set(tools) != {"python", "rex", tool} or any(
         not isinstance(value, str) or not Path(value).is_absolute() or "\x00" in value
         for value in tools.values()
@@ -698,7 +730,19 @@ def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
     conflicts = _list(result.get("conflicts"), "receipt conflicts")
     if any(not isinstance(item, str) for item in conflicts):
         raise RuntimeError("Setup receipt has malformed conflicts")
+    if "layout" in result:
+        try:
+            integrations.Layout.load(result["layout"])
+        except ValueError as exc:
+            raise RuntimeError(f"Setup receipt has malformed layout: {exc}") from exc
     return result
+
+
+def _layout(setup: Setup, receipt: dict[str, object] | None) -> integrations.Layout:
+    """Saved pane layout; receipts predating layout choice keep the default split."""
+    if receipt is None or "layout" not in receipt:
+        return integrations.get(setup.plugin).default_layout
+    return integrations.Layout.load(receipt["layout"])
 
 
 def _owned_config(paths: _Paths, receipt: dict[str, object]) -> None:
@@ -723,7 +767,16 @@ def _current_bundle(setup: Setup, paths: _Paths, receipt: dict[str, object]) -> 
         _digest(source) != receipt["source_sha256"]
         or _digest(launcher) != receipt["launcher_sha256"]
         or tools != receipt["tools"]
-        or _digest(_module(setup, source, launcher, tools, bool(receipt["enabled"])))
+        or _digest(
+            _module(
+                setup,
+                source,
+                launcher,
+                tools,
+                bool(receipt["enabled"]),
+                _layout(setup, receipt),
+            )
+        )
         != receipt["module_sha256"]
     ):
         raise RuntimeError(
@@ -950,10 +1003,16 @@ def _transaction(
         _recover_changes(setup, applied, operation, exc)
 
 
-def _sibling(setup: Setup) -> tuple[_Paths, Setup]:
-    """Resolve the other integration only when its loader needs ownership checks."""
-    sibling = replace(setup, plugin="git" if setup.plugin == "files" else "files")
-    return _paths(sibling), sibling
+def _siblings(setup: Setup, data: bytes) -> list[tuple[_Paths, Setup]]:
+    """Resolve only other integrations whose loader appears in the shared config."""
+    result: list[tuple[_Paths, Setup]] = []
+    for plugin in PLUGINS:
+        if plugin == setup.plugin:
+            continue
+        if integrations.get(plugin).loader_markers[0] in data:
+            sibling = replace(setup, plugin=plugin)
+            result.append((_paths(sibling), sibling))
+    return result
 
 
 def _unowned(paths: _Paths, setup: Setup) -> None:
@@ -973,11 +1032,11 @@ def _unowned(paths: _Paths, setup: Setup) -> None:
     data = _file(paths.config).data or b""
     if b"-- BEGIN REXDECK" not in data and b"-- END REXDECK" not in data:
         return
-    sibling, sibling_setup = _sibling(setup)
-    receipt = _receipt(sibling, sibling_setup)
-    if receipt is not None and receipt["applied"]:
-        _owned_config(sibling, receipt)
-        data = _without_loader(data, _loader(sibling))
+    for sibling, sibling_setup in _siblings(setup, data):
+        receipt = _receipt(sibling, sibling_setup)
+        if receipt is not None and receipt["applied"]:
+            _owned_config(sibling, receipt)
+            data = _without_loader(data, _loader(sibling))
     if b"-- BEGIN REXDECK" in data or b"-- END REXDECK" in data:
         raise RuntimeError("Unowned or old RexDeck loader; nothing changed")
 
@@ -1020,9 +1079,18 @@ def inspect_setup(setup: Setup, *, check_tools: bool = True) -> dict[str, object
 
 
 def apply_setup(
-    setup: Setup, *, expected_tool: QualifiedTool | None = None
+    setup: Setup,
+    *,
+    expected_tool: QualifiedTool | None = None,
+    placement: str | None = None,
+    size: int | None = None,
 ) -> dict[str, object]:
-    """Apply owned bindings only while any supplied qualification remains current."""
+    """Apply owned bindings only while any supplied qualification remains current.
+
+    A supplied placement or size replaces that part of the saved layout under the
+    lifecycle lock; omitted parts keep the saved (or default) layout, including
+    across refreshes and disable/enable cycles.
+    """
     paths = _paths(setup)
     _receipt(paths, setup)  # Refuse unknown ownership before creating even a lock.
     _endpoint_policy(setup)
@@ -1050,7 +1118,15 @@ def apply_setup(
         source, launcher = _sources(paths)
         tools = _selected_tools(setup)
         enabled = bool(receipt and receipt["applied"] and receipt["enabled"])
-        module = _module(setup, source, launcher, tools, enabled)
+        saved_layout = _layout(setup, receipt)
+        try:
+            selected_layout = integrations.Layout(
+                placement if placement is not None else saved_layout.placement,
+                size if size is not None else saved_layout.size,
+            )
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid {setup.plugin} pane layout: {exc}") from exc
+        module = _module(setup, source, launcher, tools, enabled, selected_layout)
         changes: list[_Change] = []
         if previous_module.data != module:
             changes.append(_Change(paths.module, previous_module, module))
@@ -1084,6 +1160,7 @@ def apply_setup(
             "launcher_sha256": _digest(launcher),
             "tools": tools,
             "loader_separator": separator,
+            "layout": selected_layout.document(),
             "conflicts": [],
         }
         _require_qualified_tool(setup, tools, expected_tool)
@@ -1092,6 +1169,7 @@ def apply_setup(
             "state": "applied",
             "enabled": enabled,
             "server": setup.server,
+            "layout": selected_layout.document(),
             "changed": [str(change.path) for change in changes],
         }
 
@@ -1118,7 +1196,8 @@ def start(
             _expect_action(setup, False)
         source, launcher = _sources(paths)
         tools = cast(dict[str, str], receipt["tools"])
-        module = _module(setup, source, launcher, tools, True)
+        layout = _layout(setup, receipt)
+        module = _module(setup, source, launcher, tools, True, layout)
         receipt["enabled"] = True
         receipt["module_sha256"] = _digest(module)
         changes = [_Change(paths.module, old, module)] if old.data != module else []
@@ -1128,6 +1207,7 @@ def start(
             "state": "ready",
             "enabled": True,
             "server": setup.server,
+            "layout": layout.document(),
         }
 
 
@@ -1154,6 +1234,7 @@ def status(setup: Setup) -> dict[str, object]:
         "server": setup.server,
         "applied": bool(receipt and receipt["applied"]),
         "enabled": bool(receipt and receipt["enabled"]),
+        "layout": _layout(setup, receipt).document(),
         "conflicts": conflicts,
     }
 
@@ -1194,8 +1275,12 @@ def disable(setup: Setup) -> dict[str, object]:
                 if receipt["loader_separator"] == "\n" and tail.startswith(
                     b"-- BEGIN REXDECK"
                 ):
-                    sibling, sibling_setup = _sibling(setup)
-                    if tail.startswith(_loader(sibling)):
+                    following = [
+                        (sibling, sibling_setup)
+                        for sibling, sibling_setup in _siblings(setup, tail)
+                        if tail.startswith(_loader(sibling))
+                    ]
+                    for sibling, sibling_setup in following:
                         sibling_before = _file(sibling.receipt)
                         sibling_receipt = _receipt(sibling, sibling_setup)
                         if sibling_receipt is None or not sibling_receipt["applied"]:
