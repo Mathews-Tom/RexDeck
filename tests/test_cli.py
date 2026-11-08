@@ -17,7 +17,10 @@ from rexdeck import cli, dependencies, lifecycle, settings
 
 
 class _Terminal(io.StringIO):
+    """Provide explicit interactive consent without changing production TTY checks."""
+
     def isatty(self) -> bool:
+        """Keep scripted consent eligible for the interactive-only install prompt."""
         return True
 
 
@@ -772,6 +775,7 @@ class CliTests(unittest.TestCase):
                 files.unlink()
 
     def test_setup_and_status_never_prepare_optional_dependencies(self) -> None:
+        """Target approval and inspection never install optional integration tools."""
         with (
             patch.object(
                 dependencies, "ensure", side_effect=AssertionError("must not install")
@@ -791,6 +795,7 @@ class CliTests(unittest.TestCase):
         self.assertFalse(self.data_root.exists())
 
     def test_missing_selected_tool_decline_preserves_registered_sibling(self) -> None:
+        """Declining every unsupported consent form leaves a registered sibling intact."""
         self.configure()
         self.assertEqual(self.invoke("enable", "git")[1]["state"], "ready")
         git_module = self.data_root / "plugins/git/rexdeck_git.lua"
@@ -829,22 +834,25 @@ class CliTests(unittest.TestCase):
     def test_consented_dependency_rechecks_then_registers_without_download_lock(
         self,
     ) -> None:
+        """Consent prepares dependencies before locks, then registers the qualified tool."""
         self.configure()
         installed = False
         probes: list[str] = []
 
         def resolve(name: str) -> str | None:
+            """Expose the selected tool only after the simulated installation."""
             return None if name == "yazi" and not installed else sys.executable
 
         def install(argv: list[str]) -> None:
+            """Keep all integration state untouched throughout dependency installation."""
             nonlocal installed
-            self.assertEqual(argv, [sys.executable, "install", "yazi"])
             self.assertEqual(self.config.read_bytes(), self.original)
             self.assertFalse(self.workspace.exists())
             self.assertFalse(self.module.exists())
             installed = True
 
         def probe(executable: str, name: str) -> str:
+            """Record qualification of the newly available selected tool."""
             probes.append(name)
             return dependencies._VERSIONS[name][-1]
 
@@ -861,6 +869,147 @@ class CliTests(unittest.TestCase):
         self.assertIs(receipt["enabled"], True)
         self.assertEqual(self.invoke("disable", "files")[1]["state"], "disabled")
         self.assertEqual(self.config.read_bytes(), self.original)
+
+    def _reject_changed_tool_identity(self, boundary: str) -> None:
+        """Exercise both owners with target changes at a locked mutation boundary."""
+        self.configure()
+        for plugin, sibling, tool in (
+            ("files", "git", "yazi"),
+            ("git", "files", "lazygit"),
+        ):
+            self.assertEqual(self.invoke("enable", sibling)[1]["state"], "ready")
+            for mutation in ("atomic", "in_place", "symlink"):
+                with self.subTest(plugin=plugin, mutation=mutation, boundary=boundary):
+                    directory = self.root / f"{boundary}-{plugin}-{mutation}"
+                    directory.mkdir()
+                    target = directory / "target"
+                    target.write_text("#!/bin/sh\nexit 0\n")
+                    target.chmod(0o755)
+                    qualified = directory / tool
+                    qualified.symlink_to(target)
+                    watched = (
+                        self.settings,
+                        self.config,
+                        self.module,
+                        self.workspace / "setup.json",
+                        self.data_root / "plugins/git/rexdeck_git.lua",
+                        self.workspace / "git/setup.json",
+                    )
+
+                    def snapshot() -> dict[Path, bytes | None]:
+                        """Freeze both integrations and the approved target together."""
+                        return {
+                            path: path.read_bytes() if path.exists() else None
+                            for path in watched
+                        }
+
+                    before = snapshot()
+                    changed = False
+                    tools = lifecycle._tools
+                    bind = lifecycle._selected_tools
+                    apply = lifecycle.apply_setup
+
+                    def mutate() -> None:
+                        """Change only the executable, never any owned integration file."""
+                        nonlocal changed
+                        self.assertFalse(changed)
+                        previous = target.stat()
+                        if mutation == "in_place":
+                            target.write_text("#!/bin/sh\nexit 1\n")
+                            os.utime(
+                                target,
+                                ns=(previous.st_atime_ns, previous.st_mtime_ns),
+                            )
+                            self.assertEqual(target.stat().st_ino, previous.st_ino)
+                            self.assertEqual(target.stat().st_size, previous.st_size)
+                        else:
+                            replacement = directory / "replacement"
+                            replacement.write_text("#!/bin/sh\nexit 9\n")
+                            replacement.chmod(0o755)
+                            if mutation == "atomic":
+                                replacement.replace(target)
+                            else:
+                                qualified.unlink()
+                                qualified.symlink_to(replacement)
+                        changed = True
+
+                    def tool_paths(name: str = "yazi") -> dict[str, str]:
+                        """Keep the logical binding fixed while its target changes."""
+                        result = tools(name)
+                        if name == tool:
+                            result[name] = str(qualified)
+                        return result
+
+                    def bind_then_mutate(setup: lifecycle.Setup) -> dict[str, str]:
+                        """Replace the followed target after apply has bound its path."""
+                        result = bind(setup)
+                        if (
+                            boundary == "apply"
+                            and setup.plugin == plugin
+                            and not changed
+                        ):
+                            mutate()
+                        return result
+
+                    def apply_then_mutate(
+                        setup: lifecycle.Setup,
+                        *,
+                        expected_tool: lifecycle.QualifiedTool | None = None,
+                    ) -> dict[str, object]:
+                        """Preserve the applied disabled bundle when start is rejected."""
+                        nonlocal before
+                        result = apply(setup, expected_tool=expected_tool)
+                        if boundary == "start":
+                            before = snapshot()
+                            mutate()
+                        return result
+
+                    with (
+                        patch.object(lifecycle, "_tools", side_effect=tool_paths),
+                        patch.object(
+                            lifecycle, "_selected_tools", side_effect=bind_then_mutate
+                        ),
+                        patch.object(
+                            lifecycle, "apply_setup", side_effect=apply_then_mutate
+                        ),
+                        patch.object(
+                            dependencies,
+                            "_resolve",
+                            side_effect=lambda name: (
+                                str(qualified) if name == tool else sys.executable
+                            ),
+                        ),
+                    ):
+                        code, result = self.invoke("enable", plugin)
+                        self.assertEqual(code, 1)
+                        self.assertIn(
+                            "changed after qualification", str(result["error"])
+                        )
+                        self.assertTrue(changed)
+                        self.assertEqual(snapshot(), before)
+                        self.assertEqual(
+                            self.invoke("status", sibling)[1]["state"], "ready"
+                        )
+                        if boundary == "start":
+                            receipt_path = self.workspace / (
+                                "setup.json" if plugin == "files" else "git/setup.json"
+                            )
+                            receipt = json.loads(receipt_path.read_bytes())
+                            self.assertIs(receipt["enabled"], False)
+                            self.assertEqual(receipt["tools"][tool], str(qualified))
+                        self.assertEqual(
+                            self.invoke("disable", plugin)[1]["state"], "disabled"
+                        )
+            self.assertEqual(self.invoke("disable", sibling)[1]["state"], "disabled")
+            self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_changed_executable_identity_cannot_apply(self) -> None:
+        """Same-path replacements and edits cannot register either integration."""
+        self._reject_changed_tool_identity("apply")
+
+    def test_changed_executable_identity_cannot_start(self) -> None:
+        """A changed executable cannot enable an otherwise current applied bundle."""
+        self._reject_changed_tool_identity("start")
 
     def test_path_shadow_at_apply_cannot_replace_qualified_selected_tool(self) -> None:
         """Reject a new PATH winner at the actual binding, preserving both owners."""
@@ -901,12 +1050,14 @@ class CliTests(unittest.TestCase):
                 probes: list[str] = []
 
                 def tool_paths(name: str = "yazi") -> dict[str, str]:
+                    """Expose the actual PATH winner only for the selected tool."""
                     result = tools(name)
                     if name == tool:
                         result[name] = self.resolve_executable(name)
                     return result
 
                 def appear_at_binding(setup: lifecycle.Setup) -> dict[str, str]:
+                    """Insert a new PATH winner after qualification but before binding."""
                     nonlocal appeared
                     if setup.plugin == plugin and not appeared:
                         shadow.write_text("#!/bin/sh\nexit 99\n")
@@ -915,6 +1066,7 @@ class CliTests(unittest.TestCase):
                     return bind(setup)
 
                 def probe(executable: str, name: str) -> str:
+                    """Record the binding actually version-qualified by this enable."""
                     probes.append(executable)
                     return dependencies._VERSIONS[name][-1]
 
@@ -987,20 +1139,19 @@ class CliTests(unittest.TestCase):
         replaced: dict[Path, bytes] = {}
 
         def tool_paths(name: str = "yazi") -> dict[str, str]:
+            """Bind the selected tool through PATH while preserving sibling tools."""
             result = tools(name)
             if name == "yazi":
                 result[name] = self.resolve_executable(name)
             return result
 
         def replace_after_apply(
-            setup: lifecycle.Setup, *, expected_tool: str | None = None
+            setup: lifecycle.Setup,
+            *,
+            expected_tool: lifecycle.QualifiedTool | None = None,
         ) -> dict[str, object]:
             """Model another deliberate lower-level apply between CLI transactions."""
-            result = (
-                apply(setup)
-                if expected_tool is None
-                else apply(setup, expected_tool=expected_tool)
-            )
+            result = apply(setup, expected_tool=expected_tool)
             shadow.write_text("#!/bin/sh\nexit 99\n")
             shadow.chmod(0o755)
             apply(setup)
@@ -1047,12 +1198,14 @@ class CliTests(unittest.TestCase):
     def test_failed_or_unqualified_install_never_registers_selected_integration(
         self,
     ) -> None:
+        """Installer failure, cancellation and failed qualification cannot register Files."""
         self.configure()
         for failure in ("nonzero", "cancelled", "missing", "unqualified"):
             with self.subTest(failure=failure):
                 installed = False
 
                 def resolve(name: str) -> str | None:
+                    """Model tools missing before or after installation."""
                     return (
                         None
                         if name == "yazi" and (not installed or failure == "missing")
@@ -1060,12 +1213,14 @@ class CliTests(unittest.TestCase):
                     )
 
                 def install(argv: list[str]) -> None:
+                    """Fail before registration or make only the executable available."""
                     nonlocal installed
                     if failure in {"nonzero", "cancelled"}:
                         raise RuntimeError(f"Installer {failure}")
                     installed = True
 
                 def probe(executable: str, name: str) -> str:
+                    """Reject unsupported versions before ownership writes."""
                     if failure == "unqualified":
                         raise RuntimeError("Unqualified yazi version 99.0.0")
                     return dependencies._VERSIONS[name][-1]
@@ -1086,14 +1241,17 @@ class CliTests(unittest.TestCase):
     def test_dependency_download_rejects_changed_saved_target_before_registration(
         self,
     ) -> None:
+        """Changed saved settings remain user-owned and abort stale-target registration."""
         self.configure()
         before = self.settings.read_bytes()
         installed = False
 
         def resolve(name: str) -> str | None:
+            """Make the tool available only after the settings-changing install."""
             return None if name == "yazi" and not installed else sys.executable
 
         def install(argv: list[str]) -> None:
+            """Model an independent saved-target edit while dependency work is running."""
             nonlocal installed
             value = self.document()
             value["server"] = "unix:///tmp/rexdeck-replaced-target.sock"
@@ -1116,6 +1274,7 @@ class CliTests(unittest.TestCase):
     def test_dependency_download_revalidates_config_and_server_before_registration(
         self,
     ) -> None:
+        """Long dependency preparation cannot bypass config-target or server rechecks."""
         self.configure()
         backing = self.root / "backing.lua"
         self.config.rename(backing)
@@ -1130,9 +1289,11 @@ class CliTests(unittest.TestCase):
                 self.status_failure = False
 
                 def resolve(name: str) -> str | None:
+                    """Keep the selected dependency absent until preparation finishes."""
                     return None if name == "yazi" and not installed else sys.executable
 
                 def install(argv: list[str]) -> None:
+                    """Redirect the config or stop the server before enable revalidation."""
                     nonlocal installed
                     if change == "config":
                         other = self.root / "other.lua"

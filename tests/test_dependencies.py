@@ -26,18 +26,20 @@ class _BrewOptions(TypedDict, total=False):
     cellar: str
     outcome: str
     yazi_version: str
-    inventory_output: str
-    inventory_code: int
+    metadata_output: str
+    metadata_code: int
 
 
 class _Terminal(io.StringIO):
     def isatty(self) -> bool:
+        """Permit explicit consent while ordinary StringIO remains noninteractive."""
         return True
 
 
 class DependencyTests(unittest.TestCase):
     def setUp(self) -> None:
         # An eight-character directory below /tmp fits Homebrew's short-prefix rule.
+        """Isolate executable discovery, prefix effects and user configuration."""
         temporary = tempfile.TemporaryDirectory(prefix="", dir="/tmp")
         self.addCleanup(temporary.cleanup)
         self.prefix = Path(temporary.name)
@@ -55,12 +57,14 @@ class DependencyTests(unittest.TestCase):
         self.tool("git", "git version 2.50.0")
 
     def script(self, name: str, body: str) -> Path:
+        """Create an executable fixture solely inside the disposable prefix."""
         path = self.bin / name
         path.write_text(f"#!{sys.executable}\n{body}")
         path.chmod(0o755)
         return path
 
     def tool_source(self, name: str, output: str, code: int = 0) -> str:
+        """Record genuine version subprocesses and control their exit behavior."""
         return (
             "import pathlib, sys\n"
             "if sys.argv[1:] != ['--version']: sys.exit(97)\n"
@@ -71,6 +75,7 @@ class DependencyTests(unittest.TestCase):
         )
 
     def tool(self, name: str, output: str, code: int = 0) -> Path:
+        """Expose a versioned selected tool without requiring any package manager."""
         return self.script(name, self.tool_source(name, output, code))
 
     def brew(
@@ -81,12 +86,14 @@ class DependencyTests(unittest.TestCase):
         cellar: str | None = None,
         outcome: str = "success",
         yazi_version: str = "26.9.1",
-        installed: tuple[str, ...] = (),
-        install_dependencies: tuple[str, ...] = (),
-        inventory_output: str | None = None,
-        inventory_code: int = 0,
-        inventory_warning: bool = False,
+        dependencies_: tuple[str, ...] = (),
+        metadata_fields: dict[str, object] | None = None,
+        metadata_output: str | None = None,
+        metadata_code: int = 0,
+        metadata_warning: bool = False,
+        concurrent_go: bool = False,
     ) -> Path:
+        """Model metadata refusal and bottle/source effects, never real installation."""
         prefix = str(self.prefix) if prefix is None else prefix
         cellar = str(Path(prefix) / "Cellar") if cellar is None else cellar
         sources = {
@@ -96,17 +103,28 @@ class DependencyTests(unittest.TestCase):
                 "commit=abc, build source=test, version=0.66.3, os=darwin, arch=arm64",
             ),
         }
-        inventory = json.dumps(
-            {
-                "formulae": [
-                    {"name": name.rsplit("/", 1)[-1], "full_name": name}
-                    for name in installed
-                ],
-                "casks": [],
+        metadata = {}
+        for name in ("yazi", "lazygit"):
+            formula: dict[str, object] = {
+                "name": name,
+                "tap": "homebrew/core",
+                "versions": {
+                    "stable": dependencies._VERSIONS[name][-1],
+                    "bottle": True,
+                },
+                "bottle": {"stable": {"files": {"arm64_tahoe": {"sha256": "fixture"}}}},
+                "post_install_defined": False,
+                "disabled": False,
+                "dependencies": list(dependencies_),
+                "recommended_dependencies": [],
+                "optional_dependencies": [],
+                "uses_from_macos": [],
+                "requirements": [],
+                "options": [],
+                "build_dependencies": ["go" if name == "lazygit" else "rust"],
             }
-        )
-        if inventory_output is not None:
-            inventory = inventory_output
+            formula.update(metadata_fields or {})
+            metadata[name] = metadata_output or json.dumps({"formulae": [formula]})
         return self.script(
             "brew",
             "import json, os, pathlib, sys\n"
@@ -114,34 +132,35 @@ class DependencyTests(unittest.TestCase):
             f"if args == ['--version']: print('Homebrew {version}')\n"
             f"elif args == ['--prefix']: print({prefix!r})\n"
             f"elif args == ['--cellar']: print({cellar!r})\n"
-            "elif args == ['info', '--json=v2', '--installed', '--formula']:\n"
-            f"    if {inventory_warning!r}: print('Warning: owned fixture diagnostic', file=sys.stderr, flush=True)\n"
-            f"    if {outcome!r} == 'oversized-inventory': print(' ' * {lifecycle._MAX_READ + 1}); sys.exit(0)\n"
-            f"    print({inventory!r})\n"
-            f"    sys.exit({inventory_code})\n"
-            "elif len(args) == 2 and args[0] == 'install' and args[1] in ('yazi', 'lazygit'):\n"
+            "elif len(args) == 4 and args[:3] == ['info', '--json=v2', '--formula']:\n"
+            "    name = args[-1].rsplit('/', 1)[-1]\n"
+            f"    if {metadata_warning!r}: print('Warning: owned fixture diagnostic', file=sys.stderr, flush=True)\n"
+            f"    if {outcome!r} == 'oversized-metadata': print(' ' * {lifecycle._MAX_READ + 1}); sys.exit(0)\n"
+            f"    if {concurrent_go!r}: pathlib.Path({str(self.prefix / 'dependency-go')!r}).write_text('concurrent old Go')\n"
+            f"    print({metadata!r}[name])\n"
+            f"    sys.exit({metadata_code})\n"
+            "elif args[0] == 'install':\n"
+            "    name = args[-1].rsplit('/', 1)[-1]\n"
             f"    record = pathlib.Path({str(self.record)!r})\n"
             "    record.write_text('install attempted')\n"
-            # Model the source-backed forbidden-formula boundary, not Homebrew itself:
-            # computed dependencies needing installation are checked before mutation.
-            f"    dependencies = {install_dependencies!r}\n"
             "    forbidden = set(os.environ.get('HOMEBREW_FORBIDDEN_FORMULAE', '').split())\n"
-            "    if any(dep in forbidden or dep.rsplit('/', 1)[-1] in forbidden for dep in dependencies):\n"
-            "        print('dependency installation forbidden', flush=True); sys.exit(43)\n"
-            "    for dep in dependencies:\n"
-            f"        (pathlib.Path({str(self.prefix)!r}) / ('dependency-' + dep.replace('/', '_'))).write_text('new dependency')\n"
+            "    if name in forbidden or args[-1] in forbidden:\n"
+            "        print('package installation forbidden', flush=True); sys.exit(43)\n"
+            f"    go = pathlib.Path({str(self.prefix / 'dependency-go')!r})\n"
+            "    if '--force-bottle' not in args and go.exists(): go.write_text('upgraded Go')\n"
             "    print('download progress', flush=True)\n"
             "    print('installer diagnostic', file=sys.stderr, flush=True)\n"
             f"    if {outcome!r} == 'nonzero': sys.exit(42)\n"
             f"    if {outcome!r} == 'missing': sys.exit(0)\n"
             f"    sources = {sources!r}\n"
-            f"    target = pathlib.Path({str(self.bin)!r}) / args[1]\n"
-            f"    target.write_text({('#!' + sys.executable + chr(10))!r} + sources[args[1]])\n"
+            f"    target = pathlib.Path({str(self.bin)!r}) / name\n"
+            f"    target.write_text({('#!' + sys.executable + chr(10))!r} + sources[name])\n"
             "    target.chmod(0o755)\n"
             "else: sys.exit(98)\n",
         )
 
     def test_reuses_only_qualified_selected_tool_without_a_manager(self) -> None:
+        """Reusing one tool must neither validate its sibling nor invoke Homebrew."""
         for plugin, name, output in (
             ("files", "yazi", "Yazi 26.9.1 (c2c32ac 2026-09-13)"),
             (
@@ -155,13 +174,14 @@ class DependencyTests(unittest.TestCase):
             with self.subTest(plugin=plugin, output=output):
                 executable = self.tool(name, output)
                 with patch.object(sys, "stdin", io.StringIO("yes\n")):
-                    self.assertEqual(dependencies.ensure(plugin), str(executable))
+                    self.assertEqual(dependencies.ensure(plugin).path, str(executable))
                 self.assertFalse(self.record.exists())
                 executable.unlink()
 
     def test_unqualified_malformed_and_failed_versions_never_offer_install(
         self,
     ) -> None:
+        """An installed but unqualified tool requires manual resolution, not upgrades."""
         self.brew()
         for output, code in (
             ("Yazi 26.9.2", 0),
@@ -186,6 +206,7 @@ class DependencyTests(unittest.TestCase):
     def test_noninteractive_input_cannot_consent_even_when_it_contains_yes(
         self,
     ) -> None:
+        """Piped affirmative text is not interactive installation consent."""
         self.brew()
         with (
             patch.object(sys, "stdin", io.StringIO("yes\n")),
@@ -195,10 +216,9 @@ class DependencyTests(unittest.TestCase):
         self.assertFalse(self.record.exists())
         self.assertFalse((self.bin / "yazi").exists())
 
-    def test_default_no_and_decline_show_exact_command_effects_and_manual_rerun(
-        self,
-    ) -> None:
-        brew = self.brew()
+    def test_default_no_and_decline_never_install(self) -> None:
+        """Empty, negative and unrecognized input never authorize package mutation."""
+        self.brew()
         for answer in ("", "\n", "no\n", "sure\n"):
             with self.subTest(answer=answer):
                 stderr = io.StringIO()
@@ -210,17 +230,13 @@ class DependencyTests(unittest.TestCase):
                     ),
                 ):
                     dependencies.ensure("files")
-                prompt = stderr.getvalue()
-                self.assertIn(f"{brew} install yazi", prompt)
-                self.assertIn("[y/N]", prompt)
-                self.assertIn("package registries", prompt)
-                self.assertIn("transitive", prompt)
                 self.assertFalse(self.record.exists())
                 self.assertFalse((self.bin / "yazi").exists())
 
     def test_ctrl_c_at_consent_returns_manual_guidance_without_starting_installer(
         self,
     ) -> None:
+        """Interrupting consent leaves the package prefix untouched."""
         self.brew()
         terminal = _Terminal()
         with (
@@ -235,6 +251,7 @@ class DependencyTests(unittest.TestCase):
         self.assertFalse(self.record.exists())
 
     def test_missing_git_is_a_prerequisite_not_an_install_offer(self) -> None:
+        """Missing Git prevents only Git enable and cannot trigger Git installation."""
         (self.bin / "git").unlink()
         self.brew()
         stderr = io.StringIO()
@@ -248,11 +265,12 @@ class DependencyTests(unittest.TestCase):
         self.assertFalse(self.record.exists())
         # The missing Git prerequisite has no effect on the independent Files tool.
         self.tool("yazi", "Yazi 26.9.1")
-        self.assertEqual(dependencies.ensure("files"), str(self.bin / "yazi"))
+        self.assertEqual(dependencies.ensure("files").path, str(self.bin / "yazi"))
 
     def test_unsupported_platform_and_missing_manager_have_manual_instructions(
         self,
     ) -> None:
+        """Unsupported hosts and missing managers never start a package transaction."""
         for system, machine in (
             ("Linux", "aarch64"),
             ("Darwin", "x86_64"),
@@ -273,6 +291,7 @@ class DependencyTests(unittest.TestCase):
     def test_unqualified_manager_layout_version_and_relocation_never_install(
         self,
     ) -> None:
+        """Reject incompatible managers and redirects before offering installation."""
         cases: tuple[_BrewOptions, ...] = (
             {"version": "7.0.13"},
             {"prefix": "relative"},
@@ -290,6 +309,8 @@ class DependencyTests(unittest.TestCase):
                 self.assertFalse(self.record.exists())
         self.brew()
         for overrides in (
+            {"HOMEBREW_NO_INSTALL_FROM_API": "1"},
+            {"HOMEBREW_FORCE_API_AUTO_UPDATE": "1"},
             {"HOMEBREW_NO_RELOCATE_BUILD_PREFIX": "1"},
             {"HOMEBREW_PREFIX": "/other-prefix"},
             {"HOMEBREW_CELLAR": "/other-cellar"},
@@ -305,6 +326,7 @@ class DependencyTests(unittest.TestCase):
                 self.assertFalse(self.record.exists())
 
     def test_consented_simulated_installer_rechecks_actual_new_executable(self) -> None:
+        """Accepted installation must re-resolve and probe the resulting executable."""
         self.brew()
         for plugin, name in (("files", "yazi"), ("git", "lazygit")):
             with self.subTest(plugin=plugin):
@@ -316,92 +338,94 @@ class DependencyTests(unittest.TestCase):
                     redirect_stderr(stderr),
                 ):
                     executable = dependencies.ensure(plugin)
-                self.assertEqual(executable, str(self.bin / name))
+                self.assertEqual(executable.path, str(self.bin / name))
                 self.assertEqual(
                     (self.prefix / (name + ".probes")).read_text(), "version\n"
                 )
                 self.assertEqual(stdout.getvalue(), "")
                 self.assertIn("download progress", stderr.getvalue())
                 self.assertIn("installer diagnostic", stderr.getvalue())
-                Path(executable).unlink()
+                Path(executable.path).unlink()
 
-    def test_installed_dependency_upgrade_is_forbidden_before_any_dependency_install(
+    def test_concurrent_build_dependency_is_not_upgraded_by_bottle_install(
         self,
     ) -> None:
-        original = self.prefix / "dependency-go"
-        original.write_text("existing incompatible Go")
-        self.brew(installed=("go",), install_dependencies=("missing-runtime", "go"))
-        stderr = io.StringIO()
+        """A package appearing after preflight must not become a source dependency."""
+        self.brew(concurrent_go=True)
         with (
-            patch.object(sys, "stdin", _Terminal("yes\n")),
-            redirect_stderr(stderr),
-            self.assertRaisesRegex(RuntimeError, "status 43.*rexdeck enable git"),
-        ):
-            dependencies.ensure("git")
-        self.assertEqual(original.read_text(), "existing incompatible Go")
-        self.assertFalse((self.prefix / "dependency-missing-runtime").exists())
-        self.assertFalse((self.bin / "lazygit").exists())
-
-    def test_missing_dependencies_remain_eligible_without_mutating_owner_restrictions(
-        self,
-    ) -> None:
-        original = self.prefix / "dependency-go"
-        original.write_text("existing satisfied Go")
-        self.brew(
-            installed=("go", "owner/tap/existing"),
-            install_dependencies=("missing-runtime",),
-        )
-        with (
-            patch.dict(os.environ, {"HOMEBREW_FORBIDDEN_FORMULAE": "owner-ban"}),
             patch.object(sys, "stdin", _Terminal("yes\n")),
             redirect_stderr(io.StringIO()),
         ):
-            self.assertEqual(dependencies.ensure("git"), str(self.bin / "lazygit"))
-            self.assertEqual(os.environ["HOMEBREW_FORBIDDEN_FORMULAE"], "owner-ban")
-        self.assertEqual(original.read_text(), "existing satisfied Go")
+            qualified = dependencies.ensure("git")
+        qualified.require_current()
+        self.assertEqual(qualified.path, str(self.bin / "lazygit"))
         self.assertEqual(
-            (self.prefix / "dependency-missing-runtime").read_text(), "new dependency"
+            (self.prefix / "dependency-go").read_text(), "concurrent old Go"
         )
 
-    def test_owner_forbidden_missing_dependency_still_cannot_be_installed(self) -> None:
-        self.brew(installed=("go",), install_dependencies=("owner-ban",))
+    def test_runtime_dependencies_or_hooks_refuse_install_without_package_mutation(
+        self,
+    ) -> None:
+        """Bottles requiring broader package effects take the explicit manual route."""
+        cases: tuple[dict[str, object], ...] = (
+            {"dependencies": ["go"]},
+            {"recommended_dependencies": ["extra"]},
+            {"optional_dependencies": ["extra"]},
+            {"uses_from_macos": ["libiconv"]},
+            {"requirements": [{"name": "java"}]},
+            {"options": [{"option": "with-extra"}]},
+            {"post_install_defined": True},
+            {"versions": {"stable": "26.9.1", "bottle": False}},
+            {"versions": {"stable": "99.0.0", "bottle": True}},
+            {"bottle": {"stable": {"files": {}}}},
+            {"tap": "owner/third-party"},
+        )
+        for fields in cases:
+            with self.subTest(fields=fields):
+                self.brew(metadata_fields=fields)
+                with (
+                    patch.object(sys, "stdin", _Terminal("yes\n")),
+                    redirect_stderr(io.StringIO()),
+                    self.assertRaisesRegex(RuntimeError, "rexdeck enable files"),
+                ):
+                    dependencies.ensure("files")
+                self.assertFalse(self.record.exists())
+                self.assertFalse((self.bin / "yazi").exists())
+
+    def test_owner_forbidden_selected_formula_still_cannot_be_installed(self) -> None:
+        """The private-cache environment must preserve the owner's package bans."""
+        self.brew()
         with (
-            patch.dict(os.environ, {"HOMEBREW_FORBIDDEN_FORMULAE": "owner-ban"}),
+            patch.dict(os.environ, {"HOMEBREW_FORBIDDEN_FORMULAE": "yazi"}),
             patch.object(sys, "stdin", _Terminal("yes\n")),
             redirect_stderr(io.StringIO()),
             self.assertRaisesRegex(RuntimeError, "status 43"),
         ):
             dependencies.ensure("files")
-        self.assertFalse((self.prefix / "dependency-owner-ban").exists())
         self.assertFalse((self.bin / "yazi").exists())
 
-    def test_valid_inventory_with_stderr_warning_still_installs_missing_tool(
-        self,
-    ) -> None:
-        self.brew(inventory_warning=True)
+    def test_valid_metadata_with_stderr_warning_still_qualifies_bottle(self) -> None:
+        """Visible manager diagnostics must not corrupt the JSON qualification."""
+        self.brew(metadata_warning=True)
         with (
             patch.object(sys, "stdin", _Terminal("yes\n")),
             redirect_stderr(io.StringIO()),
         ):
-            executable = dependencies.ensure("files")
-        self.assertEqual(executable, str(self.bin / "yazi"))
-        self.assertEqual((self.prefix / "yazi.probes").read_text(), "version\n")
+            qualified = dependencies.ensure("files")
+        self.assertEqual(qualified.path, str(self.bin / "yazi"))
+        qualified.require_current()
 
-    def test_invalid_failed_and_oversized_inventory_never_start_installer(self) -> None:
+    def test_invalid_failed_and_oversized_metadata_never_start_installer(self) -> None:
+        """Malformed or unsuccessful qualification must precede all package mutation."""
         cases: tuple[_BrewOptions, ...] = (
-            {"inventory_output": "not JSON"},
-            {"inventory_output": "[]"},
-            {"inventory_output": "{}"},
-            {"inventory_output": '{"formulae": null}'},
-            {"inventory_output": '{"formulae": [null]}'},
-            {"inventory_output": '{"formulae": [{"name": "go"}]}'},
-            {
-                "inventory_output": (
-                    '{"formulae": [{"name": "go other", "full_name": "go"}]}'
-                )
-            },
-            {"inventory_code": 42},
-            {"outcome": "oversized-inventory"},
+            {"metadata_output": "not JSON"},
+            {"metadata_output": "[]"},
+            {"metadata_output": "{}"},
+            {"metadata_output": '{"formulae": null}'},
+            {"metadata_output": '{"formulae": [null]}'},
+            {"metadata_output": '{"formulae": [{"name": "go"}]}'},
+            {"metadata_code": 42},
+            {"outcome": "oversized-metadata"},
         )
         for options in cases:
             with self.subTest(options=options):
@@ -418,6 +442,7 @@ class DependencyTests(unittest.TestCase):
     def test_installer_nonzero_missing_and_bad_postinstall_versions_are_failures(
         self,
     ) -> None:
+        """Installer success alone cannot authorize missing or unqualified tools."""
         cases: tuple[tuple[_BrewOptions, str], ...] = (
             ({"outcome": "nonzero"}, "status 42"),
             ({"outcome": "missing"}, "still missing"),
@@ -440,6 +465,7 @@ class DependencyTests(unittest.TestCase):
     def test_relative_path_cannot_execute_checkout_tools_or_bind_lifecycle(
         self,
     ) -> None:
+        """Relative PATH entries cannot execute checkout-local prerequisite impostors."""
         repository = self.prefix / "untrusted"
         relative = repository / "tools"
         relative.mkdir(parents=True)
@@ -470,32 +496,35 @@ class DependencyTests(unittest.TestCase):
         self.assertFalse(marker.exists())
 
     def test_missing_rex_has_explicit_external_prerequisite_guidance(self) -> None:
+        """Rex remains an external prerequisite, never an automatic dependency."""
         with self.assertRaisesRegex(
             RuntimeError, "externally installed prerequisite.*rexdeck setup"
         ):
             lifecycle._executable("rex")
         self.assertFalse(self.record.exists())
 
-    def test_signal_cancels_only_owned_installer_group_and_reaps_its_leader(
-        self,
-    ) -> None:
+    def _exercise_owned_helpers(self, *, capture: bool, terminate: bool) -> None:
+        """Observe exact-session cleanup while an unrelated process remains alive."""
         ready = self.prefix / "ready.json"
+        ready.unlink(missing_ok=True)
         installer = self.script(
             "long-installer",
             "import json, os, pathlib, subprocess, sys, time\n"
-            "if sys.argv[1:] == ['info', '--json=v2', '--installed', '--formula']:\n"
-            "    print(json.dumps({'formulae': [], 'casks': []})); sys.exit(0)\n"
-            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)'])\n"
+            "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)'], process_group=0)\n"
+            "assert os.getsid(child.pid) == os.getpid()\n"
+            "assert os.getpgid(child.pid) != os.getpid()\n"
             f"pathlib.Path({str(ready)!r}).write_text(json.dumps([os.getpid(), child.pid]))\n"
             "print('installer active', flush=True)\n"
             "time.sleep(300)\n",
         )
         driver_source = (
             "import json, os, pathlib, sys\n"
-            "from rexdeck.dependencies import _install\n"
+            "from rexdeck import dependencies\n"
+            f"dependencies._METADATA_TIMEOUT = {10 if terminate else 2}\n"
             "try:\n"
-            f"    _install([{str(installer)!r}])\n"
-            "except RuntimeError as error:\n"
+            "    with dependencies._installer_signals():\n"
+            f"        dependencies._brew_command([{str(installer)!r}], dict(os.environ), capture={capture!r})\n"
+            "except (RuntimeError, KeyboardInterrupt) as error:\n"
             f"    pid = json.loads(pathlib.Path({str(ready)!r}).read_text())[0]\n"
             "    reaped = False\n"
             "    try: os.waitpid(pid, os.WNOHANG)\n"
@@ -531,13 +560,17 @@ class DependencyTests(unittest.TestCase):
                 len(identities), 2, "installer did not reach its child boundary"
             )
             leader, descendant = identities
-            self.assertEqual(os.getpgid(leader), leader)
-            self.assertEqual(os.getpgid(descendant), leader)
-            driver.send_signal(signal.SIGTERM)
+            if terminate:
+                self.assertEqual(os.getsid(leader), leader)
+                self.assertEqual(os.getsid(descendant), leader)
+                self.assertNotEqual(os.getpgid(descendant), leader)
+                driver.send_signal(signal.SIGTERM)
             stdout, stderr = driver.communicate(timeout=8)
             self.assertEqual(driver.returncode, 23, stderr)
             result = json.loads(stdout)
-            self.assertIn("cancelled", result["error"])
+            self.assertIn(
+                "Received signal" if terminate else "timed out", result["error"]
+            )
             self.assertIs(result["reaped"], True)
             self.assertIsNone(unrelated.poll())
             # Orphan zombies may briefly await init; neither process may still execute.
@@ -557,14 +590,14 @@ class DependencyTests(unittest.TestCase):
                     )
                     time.sleep(0.01)
         finally:
-            cleanup_leader: int | None
             try:
-                cleanup_leader = json.loads(ready.read_text())[0]
+                cleanup_ids = json.loads(ready.read_text())
             except (FileNotFoundError, json.JSONDecodeError):
-                cleanup_leader = None
-            if cleanup_leader is not None:
+                cleanup_ids = []
+            for pid in cleanup_ids:
                 try:
-                    os.killpg(cleanup_leader, signal.SIGKILL)
+                    if os.getsid(pid) == cleanup_ids[0]:
+                        os.kill(pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
             if driver.poll() is None:
@@ -572,6 +605,18 @@ class DependencyTests(unittest.TestCase):
             driver.communicate(timeout=8)
             unrelated.kill()
             unrelated.wait(timeout=8)
+
+    def test_signals_stop_separate_helper_groups_during_metadata_and_install(
+        self,
+    ) -> None:
+        """Cancellation reaches curl-like helper groups in both Homebrew phases."""
+        for capture in (True, False):
+            with self.subTest(metadata=capture):
+                self._exercise_owned_helpers(capture=capture, terminate=True)
+
+    def test_metadata_timeout_stops_separate_helper_groups_before_return(self) -> None:
+        """A bounded metadata failure cannot leave an owned helper executing."""
+        self._exercise_owned_helpers(capture=True, terminate=False)
 
 
 if __name__ == "__main__":

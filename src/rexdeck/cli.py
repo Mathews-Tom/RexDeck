@@ -191,10 +191,10 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
 
 
 def _enable(path: Path, target: settings.SavedTarget, plugin: str) -> dict[str, object]:
-    """Resolve dependencies before entering the existing owned-mutation path."""
+    """Carry one executable identity through both locked ownership transactions."""
     setup = target.setup(plugin)
     _selected_status(setup)
-    qualified_tool = dependencies.ensure(plugin)
+    qualified_tool: lifecycle.QualifiedTool = dependencies.ensure(plugin)
     # A download can take arbitrarily long. Never keep a config lock across it or
     # use a changed settings file, redirected path, or dead server afterwards.
     current = settings.load(path)

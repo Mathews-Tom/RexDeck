@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import codecs
+import errno
 import json
 import os
 import platform
 import re
+import select
+import selectors
 import shlex
 import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -44,6 +49,7 @@ _INSTALL_ENV = {
     "HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK": "1",
     "HOMEBREW_NO_INSTALL_CLEANUP": "1",
 }
+_METADATA_TIMEOUT = 120.0
 
 
 def _resolve(name: str) -> str | None:
@@ -79,7 +85,9 @@ def _manual(plugin: str) -> str:
     return (
         f"Manually install {tool} {' or '.join(_VERSIONS[tool])} from {_RELEASES[tool]}. "
         f"On macOS arm64 with existing qualified Homebrew {_VERSIONS['brew'][0]}, "
-        f"the install command is: brew install {tool}. "
+        f"the manual command is: brew install {tool}. Inspect its selected version "
+        "and dependency/source-build/upgrade effects first; RexDeck does not run "
+        "that manual route. "
         f"Verify with {tool} --version, then rerun: rexdeck enable {plugin}. "
         "RexDeck never upgrades or uninstalls existing packages."
     )
@@ -152,51 +160,178 @@ def _manager() -> str:
             "HOMEBREW_PATH redirects the selected manager's PATH; invoke Homebrew "
             "directly in a clean environment"
         )
+    for name in ("HOMEBREW_NO_INSTALL_FROM_API", "HOMEBREW_FORCE_API_AUTO_UPDATE"):
+        if os.environ.get(name):
+            raise RuntimeError(
+                f"{name} prevents frozen API metadata; install the tool manually"
+            )
+    _session_members(os.getsid(0))
     return brew
 
 
-def _install_environment(brew: str) -> dict[str, str]:
-    """Forbid replacing installed formulae, without excluding missing dependencies."""
-    environment = {**os.environ, **_INSTALL_ENV}
-    result = lifecycle._run(
-        [brew, "info", "--json=v2", "--installed", "--formula"],
-        environment,
-        inherit_stderr=True,
+def _session_members(session: int) -> list[int]:
+    """Find live same-user session members; never infer ownership from command text."""
+    result = subprocess.run(
+        ["/bin/ps", "-axo", "uid=,pid=,stat="],
+        capture_output=True,
+        check=True,
+        timeout=5,
     )
+    members = []
+    for row in result.stdout.splitlines():
+        uid, raw_pid, state = row.split()
+        pid = int(raw_pid)
+        if int(uid) != os.getuid() or state.startswith(b"Z"):
+            continue
+        try:
+            if os.getsid(pid) == session:
+                members.append(pid)
+        except ProcessLookupError:
+            continue
+    return members
+
+
+def _stop_session(child: subprocess.Popen[bytes]) -> None:
+    """Stop separate helper groups before reaping the session's reserved leader PID."""
+    deadline = time.monotonic() + 5
+    while True:
+        members = _session_members(child.pid)
+        if not members:
+            return
+        for pid in members:
+            try:
+                if os.getsid(pid) == child.pid:
+                    os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                continue
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Cannot confirm owned Homebrew helpers have stopped")
+        time.sleep(0.02)
+
+
+def _brew_command(
+    argv: list[str], environment: dict[str, str], *, capture: bool = False
+) -> bytes:
+    """Bound metadata output/time and own helpers across separate process groups."""
+    child: subprocess.Popen[bytes] | None = None
+    output = bytearray()
+    deadline = time.monotonic() + _METADATA_TIMEOUT if capture else None
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    exit_queue = select.kqueue()
     try:
-        inventory = json.loads(result.output)
-        if result.code != 0 or not isinstance(inventory, dict):
-            raise ValueError
-        formulae = inventory["formulae"]
-        if not isinstance(formulae, list):
-            raise ValueError
-        forbidden = set(environment.get("HOMEBREW_FORBIDDEN_FORMULAE", "").split())
-        for formula in formulae:
-            if not isinstance(formula, dict):
-                raise ValueError
-            for key in ("name", "full_name"):
-                name = formula[key]
-                if (
-                    not isinstance(name, str)
-                    or re.fullmatch(
-                        r"[A-Za-z0-9_+@.-]+(?:/[A-Za-z0-9_+@.-]+){0,2}", name
+        with lifecycle._defer_cancellation():
+            child = subprocess.Popen(
+                argv,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=None if capture else subprocess.STDOUT,
+                start_new_session=True,
+            )
+            events = exit_queue.control(
+                [
+                    select.kevent(
+                        child.pid,
+                        filter=select.KQ_FILTER_PROC,
+                        flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                        fflags=select.KQ_NOTE_EXIT,
                     )
-                    is None
-                ):
-                    raise ValueError
-                forbidden.add(name)
+                ],
+                1,
+                0,
+            )
+            # A fast child can already be an unreaped zombie when registered.
+            if events and events[0].flags & select.KQ_EV_ERROR:
+                if events[0].data != errno.ESRCH:
+                    raise OSError(events[0].data, "Cannot observe Homebrew exit")
+        assert child.stdout is not None
+        with selectors.DefaultSelector() as selector:
+            selector.register(child.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    raise RuntimeError("Homebrew metadata command timed out")
+                for key, _event in selector.select(remaining):
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        selector.unregister(key.fd)
+                    elif capture:
+                        output.extend(chunk)
+                        if len(output) > lifecycle._MAX_READ:
+                            raise RuntimeError(
+                                "Homebrew metadata output exceeded its limit"
+                            )
+                    else:
+                        sys.stderr.write(decoder.decode(chunk))
+                        sys.stderr.flush()
+        # kqueue observes exit without reaping, including on Python 3.12 macOS.
+        # The reserved leader PID/SID remains ours until helper cleanup completes.
+        if not events:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise RuntimeError("Homebrew metadata command timed out")
+            if not exit_queue.control(None, 1, remaining):
+                raise RuntimeError("Homebrew metadata command timed out")
+        if not capture:
+            sys.stderr.write(decoder.decode(b"", final=True))
+            sys.stderr.flush()
+    finally:
+        try:
+            if child is not None:
+                with lifecycle._defer_cancellation():
+                    try:
+                        _stop_session(child)
+                    finally:
+                        child.wait()
+                        if child.stdout is not None:
+                            child.stdout.close()
+        finally:
+            exit_queue.close()
+    if child.returncode != 0:
+        raise RuntimeError(
+            f"Installer exited with status {child.returncode}: {shlex.join(argv)}"
+        )
+    return bytes(output)
+
+
+def _qualify_bottle(output: bytes, tool: str) -> None:
+    """Accept qualified core bottles with no runtime dependencies or install hooks."""
+    try:
+        data = json.loads(output)
+        formulae = data["formulae"]
+        if not isinstance(formulae, list) or len(formulae) != 1:
+            raise ValueError
+        formula = formulae[0]
+        versions = formula["versions"]
+        files = formula["bottle"]["stable"]["files"]
+        if (
+            formula["name"] != tool
+            or formula["tap"] != "homebrew/core"
+            or versions["stable"] not in _VERSIONS[tool]
+            or versions["bottle"] is not True
+            or not isinstance(files, dict)
+            or not files
+            or formula["post_install_defined"] is not False
+            or formula["disabled"] is not False
+            or any(
+                formula[key] != []
+                for key in (
+                    "dependencies",
+                    "recommended_dependencies",
+                    "optional_dependencies",
+                    "uses_from_macos",
+                    "requirements",
+                    "options",
+                )
+            )
+        ):
+            raise ValueError
     except (KeyError, ValueError, TypeError) as exc:
         raise RuntimeError(
-            "Cannot inventory installed Homebrew formulae safely; no installer was "
-            "started. Inspect brew info --json=v2 --installed --formula, or install "
-            "the selected tool manually without replacing existing dependencies"
+            f"Cannot qualify a dependency-free {tool} core bottle; automatic source "
+            "builds, runtime dependencies and install hooks are unsupported. "
+            "No package installation was started"
         ) from exc
-    # Homebrew 7.0.12 checks this supported control against its computed install
-    # dependencies in FormulaInstaller#prelude, before installing any dependency.
-    # Satisfied dependencies are skipped; an installed but incompatible one is
-    # forbidden rather than upgraded, while missing dependencies remain eligible.
-    environment["HOMEBREW_FORBIDDEN_FORMULAE"] = " ".join(sorted(forbidden))
-    return environment
 
 
 @contextmanager
@@ -223,54 +358,35 @@ def _installer_signals() -> Iterator[None]:
 
 
 def _install(argv: list[str]) -> None:
-    """Protect installed formulae, stream progress, and reap only our installer group."""
-    child: subprocess.Popen[bytes] | None = None
+    """Install only a dependency-free bottle using frozen private API metadata."""
+    tool = argv[-1].rsplit("/", 1)[-1]
     try:
-        with _installer_signals():
-            environment = _install_environment(argv[0])
-            try:
-                with lifecycle._defer_cancellation():
-                    child = subprocess.Popen(
-                        argv,
-                        env=environment,
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        start_new_session=True,
-                    )
-                assert child.stdout is not None
-                decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-                while chunk := os.read(child.stdout.fileno(), 65536):
-                    sys.stderr.write(decoder.decode(chunk))
-                    sys.stderr.flush()
-                sys.stderr.write(decoder.decode(b"", final=True))
-                sys.stderr.flush()
-                code = child.wait()
-                if code != 0:
-                    raise RuntimeError(
-                        f"Installer exited with status {code}: {shlex.join(argv)}"
-                    )
-            except BaseException:
-                # The new session makes this group ours, including download/build children.
-                # Kill before reaping the leader; do not search for or touch other processes.
-                with lifecycle._defer_cancellation():
-                    if child is not None and child.returncode is None:
-                        try:
-                            os.killpg(child.pid, signal.SIGKILL)
-                        except ProcessLookupError:
-                            pass
-                        child.wait()
-                raise
+        with (
+            _installer_signals(),
+            tempfile.TemporaryDirectory(prefix="rexdeck-brew-") as cache,
+        ):
+            environment = {
+                **os.environ,
+                **_INSTALL_ENV,
+                "HOMEBREW_CACHE": cache,
+            }
+            # NO_AUTO_UPDATE freezes this private API cache between info and install.
+            # Bottles exclude build dependencies even when another transaction
+            # installs those formulae concurrently.
+            metadata = _brew_command(
+                [argv[0], "info", "--json=v2", "--formula", argv[-1]],
+                environment,
+                capture=True,
+            )
+            _qualify_bottle(metadata, tool)
+            _brew_command(argv, environment)
     except KeyboardInterrupt as exc:
         raise RuntimeError(
             "Dependency installation cancelled; no integration was registered"
         ) from exc
-    finally:
-        if child is not None and child.stdout is not None:
-            child.stdout.close()
 
 
-def ensure(plugin: str) -> str:
+def ensure(plugin: str) -> lifecycle.QualifiedTool:
     """Reuse a qualified selected tool or request default-No installation consent."""
     tool = _TOOLS[plugin]
     if plugin == "git" and _resolve("git") is None:
@@ -282,10 +398,12 @@ def ensure(plugin: str) -> str:
     executable = _resolve(tool)
     if executable is not None:
         try:
+            qualified = lifecycle.QualifiedTool.capture(executable)
             _probe(executable, tool)
+            qualified.require_current()
         except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
             raise RuntimeError(f"{exc}. {_manual(plugin)}") from exc
-        return executable
+        return qualified
     guidance = _manual(plugin)
     if not sys.stdin.isatty():
         raise RuntimeError(
@@ -295,15 +413,15 @@ def ensure(plugin: str) -> str:
         brew = _manager()
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"Missing {tool}: {exc}. {guidance}") from exc
-    argv = [brew, "install", tool]
+    argv = [brew, "install", "--formula", "--force-bottle", f"homebrew/core/{tool}"]
     print(
         f"Missing {tool}. Run {shlex.join(argv)}?\n"
         "This uses the existing Homebrew prefix, contacts package registries, downloads "
-        "and runs upstream package installation code, and may install transitive "
-        "dependencies. Installed formulae are protected from replacement; an "
-        "incompatible existing dependency makes installation fail instead of upgrading "
-        "it. Homebrew auto-update, install-upgrade, dependent checks and automatic "
-        "cleanup are disabled for this command. "
+        "and runs upstream package installation code. A temporary private Homebrew "
+        "cache freezes qualified core metadata. Only a qualified bottle with no runtime "
+        "dependencies or install hooks is allowed; source builds are refused. Existing "
+        "packages are not upgraded or removed. Homebrew auto-update, install-upgrade, "
+        "dependent checks and automatic cleanup are disabled for these commands. "
         "It does not install Rex or Homebrew.\n"
         "Install this dependency? [y/N]: ",
         end="",
@@ -327,7 +445,9 @@ def ensure(plugin: str) -> str:
             raise RuntimeError(
                 f"Installer completed but {tool} is still missing from PATH"
             )
+        qualified = lifecycle.QualifiedTool.capture(executable)
         _probe(executable, tool)
+        qualified.require_current()
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"{exc}. No integration was registered. {guidance}") from exc
-    return executable
+    return qualified

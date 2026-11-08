@@ -31,6 +31,55 @@ PLUGINS = ("files", "git")
 
 
 @dataclass(frozen=True)
+class QualifiedTool:
+    """Freeze a logical executable binding and its followed target's identity."""
+
+    path: str
+    identity: tuple[int, int, int, int, int, int, int]
+
+    @classmethod
+    def capture(cls, path: str | Path) -> QualifiedTool:
+        """Record target metadata without replacing the symlink-preserving binding."""
+        binding = str(Path(path).absolute())
+        try:
+            current = Path(binding).stat()
+            if not stat.S_ISREG(current.st_mode) or not os.access(binding, os.X_OK):
+                raise RuntimeError(
+                    f"Qualified tool is not an executable file: {binding}"
+                )
+        except OSError as exc:
+            raise RuntimeError(
+                f"Cannot capture executable identity for {binding}: {exc}"
+            ) from exc
+        return cls(
+            binding,
+            (
+                current.st_dev,
+                current.st_ino,
+                current.st_mode,
+                current.st_size,
+                current.st_mtime_ns,
+                current.st_ctime_ns,
+                current.st_uid,
+            ),
+        )
+
+    def require_current(self) -> None:
+        """Reject replacement, retargeting or mutation since version qualification."""
+        try:
+            current = self.capture(self.path)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"Executable changed after qualification ({self.path}): {exc}"
+            ) from exc
+        if current != self:
+            raise RuntimeError(
+                f"Executable changed after qualification ({self.path}); "
+                "rerun rexdeck enable for the selected integration"
+            )
+
+
+@dataclass(frozen=True)
 class Setup:
     project: Path
     workspace: Path
@@ -166,6 +215,7 @@ def _env(setup: Setup) -> dict[str, str]:
 
 
 def _executable(name: str) -> str:
+    """Resolve trusted absolute PATH entries and explain external prerequisites."""
     search_path = os.pathsep.join(
         entry
         for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
@@ -203,15 +253,19 @@ def _selected_tools(setup: Setup) -> dict[str, str]:
 
 
 def _require_qualified_tool(
-    setup: Setup, tools: dict[str, str], expected_tool: str | None
+    setup: Setup, tools: dict[str, str], expected_tool: QualifiedTool | None
 ) -> None:
-    """Check the exact binding being persisted, without resolving PATH again."""
+    """Require the persisted binding and followed target to retain qualification."""
     tool = "yazi" if setup.plugin == "files" else "lazygit"
-    if expected_tool is not None and tools[tool] != expected_tool:
+    if expected_tool is None:
+        return
+    if tools[tool] != expected_tool.path:
         raise RuntimeError(
             f"{tool} executable changed after qualification "
-            f"({expected_tool} -> {tools[tool]}); rerun rexdeck enable {setup.plugin}"
+            f"({expected_tool.path} -> {tools[tool]}); "
+            f"rerun rexdeck enable {setup.plugin}"
         )
+    expected_tool.require_current()
 
 
 def _run(
@@ -219,9 +273,8 @@ def _run(
     env: dict[str, str],
     *,
     timeout: float = _COMMAND_WAIT,
-    inherit_stderr: bool = False,
 ) -> _Result:
-    """Bound captured output/lifetime; optionally leave diagnostics on the terminal."""
+    """Bound merged diagnostic output and child lifetime."""
     child: subprocess.Popen[bytes] | None = None
     try:
         with _defer_cancellation():
@@ -230,7 +283,7 @@ def _run(
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=None if inherit_stderr else subprocess.STDOUT,
+                stderr=subprocess.STDOUT,
             )
         assert child.stdout is not None
         output = bytearray()
@@ -966,8 +1019,10 @@ def inspect_setup(setup: Setup, *, check_tools: bool = True) -> dict[str, object
     }
 
 
-def apply_setup(setup: Setup, *, expected_tool: str | None = None) -> dict[str, object]:
-    """Apply the current binding, optionally requiring a previously qualified path."""
+def apply_setup(
+    setup: Setup, *, expected_tool: QualifiedTool | None = None
+) -> dict[str, object]:
+    """Apply owned bindings only while any supplied qualification remains current."""
     paths = _paths(setup)
     _receipt(paths, setup)  # Refuse unknown ownership before creating even a lock.
     _endpoint_policy(setup)
@@ -994,7 +1049,6 @@ def apply_setup(setup: Setup, *, expected_tool: str | None = None) -> dict[str, 
             _expect_action(setup, False)
         source, launcher = _sources(paths)
         tools = _selected_tools(setup)
-        _require_qualified_tool(setup, tools, expected_tool)
         enabled = bool(receipt and receipt["applied"] and receipt["enabled"])
         module = _module(setup, source, launcher, tools, enabled)
         changes: list[_Change] = []
@@ -1032,6 +1086,7 @@ def apply_setup(setup: Setup, *, expected_tool: str | None = None) -> dict[str, 
             "loader_separator": separator,
             "conflicts": [],
         }
+        _require_qualified_tool(setup, tools, expected_tool)
         _transaction(setup, paths, changes, receipt, before, "Apply")
         return {
             "state": "applied",
@@ -1041,8 +1096,10 @@ def apply_setup(setup: Setup, *, expected_tool: str | None = None) -> dict[str, 
         }
 
 
-def start(setup: Setup, *, expected_tool: str | None = None) -> dict[str, object]:
-    """Enable a current bundle, optionally requiring its previously qualified path."""
+def start(
+    setup: Setup, *, expected_tool: QualifiedTool | None = None
+) -> dict[str, object]:
+    """Enable the current owned bundle without accepting stale qualification."""
     paths = _paths(setup)
     receipt = _receipt(paths, setup)
     if receipt is None or not receipt["applied"]:
@@ -1061,11 +1118,11 @@ def start(setup: Setup, *, expected_tool: str | None = None) -> dict[str, object
             _expect_action(setup, False)
         source, launcher = _sources(paths)
         tools = cast(dict[str, str], receipt["tools"])
-        _require_qualified_tool(setup, tools, expected_tool)
         module = _module(setup, source, launcher, tools, True)
         receipt["enabled"] = True
         receipt["module_sha256"] = _digest(module)
         changes = [_Change(paths.module, old, module)] if old.data != module else []
+        _require_qualified_tool(setup, tools, expected_tool)
         _transaction(setup, paths, changes, receipt, before, "Start")
         return {
             "state": "ready",
