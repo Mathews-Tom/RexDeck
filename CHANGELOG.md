@@ -4,6 +4,7 @@
 
 - `rexdeck plugins` and `rexdeck status` print a readable table at a terminal: one row per plugin with state, tool/versions and pane layout, then a **Needs attention** section that gives each problem and its fix once (shared causes such as Rex missing from `PATH` are not repeated per plugin). Server URLs are shown decoded; remote/receipt text is stripped of terminal control characters; state color follows `NO_COLOR`/`TERM=dumb`. `--json`, or piped output, keeps the full JSON document unchanged; exit codes are unchanged.
 - The ClickUp capability disclosure now lists the description and sprint-points writes added in 0.2.0.
+- Published the approved main-CI wheel/sdist (commit `08f0c32`, artifact `13638804830`) to GitHub and PyPI from tag `v0.2.1`; public asset and registry hashes match. A no-cache public-index install rendered the readable listing at a terminal and kept JSON when piped; the candidate wheel ran the ClickUp native action in a private Rex with exact-origin quit.
 
 ## 0.2.0 — 2026-11-09
 
