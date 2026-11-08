@@ -10,16 +10,16 @@ Files, local Git, Markdown, Usage, GitHub and rich-format viewing bring unmodifi
 | --- | --- | --- |
 | [Files](plugins/files/README.md) | Browse, preview, and manage files using unmodified Yazi in a native Rex terminal | Available |
 | [Git](plugins/git/README.md) | Inspect, stage, and commit in the invoking repository/worktree using unmodified lazygit | Available |
-| [Markdown](plugins/markdown/README.md) | Read a selected Markdown file or the invoking directory with in-pane Mermaid diagrams using unmodified markdown-reader | Unreleased (source checkout) |
-| [Usage](plugins/usage/README.md) | Watch machine-wide token usage, models, sessions and projects for omp with upstream online refresh using unmodified tokscale | Unreleased (source checkout) |
-| [GitHub](plugins/github/README.md) | Repository-scoped PRs/issues with explicit host/account using unmodified gh-dash | Unreleased (source checkout) |
-| [Viewer](plugins/viewer/README.md) | Selected PDF (page navigation), JPG, PNG and SVG previews using Yazi and Rex Kitty graphics | Unreleased (source checkout) |
-| [ClickUp](plugins/clickup/README.md) | Explicit account/workspace/list, engine reads and confirmed task changes, validated browser links | Unreleased (source checkout) |
-| [Native attention](plugins/attention/README.md) | Retain explicit native worker status, filter by project/location, and revalidate exact terminal navigation | Unreleased (source checkout); provider identity remains unknown |
-| [Provider subagents](plugins/attention/README.md#optional-provider-hooks-d11-implement-and-hold-for-owner) | Opt-in Claude Code/Codex start/stop metadata, parentage and exact inherited-terminal navigation | Unreleased; script-qualified, held for owner hook installation and real-event proof; omp interface missing |
+| [Markdown](plugins/markdown/README.md) | Read a selected Markdown file or the invoking directory with in-pane Mermaid diagrams using unmodified markdown-reader | New in 0.2.0 |
+| [Usage](plugins/usage/README.md) | Watch machine-wide token usage, models, sessions and projects for omp with upstream online refresh using unmodified tokscale | New in 0.2.0 |
+| [GitHub](plugins/github/README.md) | Repository-scoped PRs/issues with explicit host/account using unmodified gh-dash | New in 0.2.0; github.com with one account tested |
+| [Viewer](plugins/viewer/README.md) | Selected PDF (page navigation), JPG, PNG and SVG previews using Yazi and Rex Kitty graphics | New in 0.2.0 |
+| [ClickUp](plugins/clickup/README.md) | Explicit account/workspace/list, engine reads and confirmed task changes, validated browser links | New in 0.2.0 |
+| [Native attention](plugins/attention/README.md) | Retain explicit native worker status, filter by project/location, and revalidate exact terminal navigation | New in 0.2.0; provider identity remains unknown |
+| [Provider subagents](plugins/attention/README.md#optional-provider-hooks-d11-implement-and-hold-for-owner) | Opt-in Claude Code/Codex start/stop metadata, parentage and exact inherited-terminal navigation | New in 0.2.0; script-qualified, real provider events not yet observed; omp interface missing |
 | Linear | Independently selectable Linear workflows | Not implemented — help wanted |
 
-Published RexDeck releases are available on [PyPI](https://pypi.org/project/rexdeck/); `rexdeck plugins` is new in version 0.1.1.
+Published RexDeck releases are available on [PyPI](https://pypi.org/project/rexdeck/); `rexdeck plugins` is new in version 0.1.1, and every integration above except Files and Git is new in 0.2.0.
 
 ### Untested environments — feedback and PRs welcome
 
@@ -63,7 +63,7 @@ The installed command works from any directory; the package includes the shared 
 
 Each integration row's `state` is one of: `disabled` (not selected, or turned off), `ready` (its native action is registered in the running Rex; this says nothing about whether the upstream tool is currently open), `missing-dependency` (an applied integration's tool is not on the current `PATH`; `enabled` shows whether it is turned on. Make the tool available, reinstalling it yourself if it was removed, then rerun `status`, or `rexdeck enable <id>` if its path changed), `conflict`, or `fault` (ownership, refresh or registration problem, with an `error`). `plugins` additionally reports `not-configured` rows before setup. Command-level errors, including no saved target or an unknown/old receipt for `status <id>`, print `failed`. `missing-dependency`, `conflict`, `fault` and `failed` exit nonzero.
 
-Run `rexdeck plugins` to list every available plugin shipped with this installation and its current state as JSON. Configured rows include `enabled: true` or `enabled: false`; before setup, rows report `not-configured` rather than guessing that a target is disabled. Unreleased (source checkout until the next published version; 0.1.1 omits them): configured rows also report the saved pane `layout`, and every row's `integration` field discloses the hosted tool, qualified versions, upstream license, launch context, write/network/process capabilities and default layout. Plugin inspection faults remain visible alongside healthy sibling rows and return a nonzero exit status. Listing never enables integrations or installs dependencies. Planned integrations are not included.
+Run `rexdeck plugins` to list every available plugin shipped with this installation and its current state as JSON. Configured rows include `enabled: true` or `enabled: false`; before setup, rows report `not-configured` rather than guessing that a target is disabled. Since 0.2.0, configured rows also report the saved pane `layout`, and every row's `integration` field discloses the hosted tool, qualified versions, upstream license, launch context, write/network/process capabilities and default layout. Plugin inspection faults remain visible alongside healthy sibling rows and return a nonzero exit status. Listing never enables integrations or installs dependencies. Planned integrations are not included.
 
 `rexdeck attention observe --session session:… --block block:… --project my-project` captures one explicitly identified terminal's native OSC 7501 records and exit result. `rexdeck attention list --project my-project` shows retained source, timestamps, freshness and bound/unbound state; `rexdeck attention jump <observation-id>` revalidates the exact server incarnation/session/block before focus. This native extension needs setup but no `enable`, upstream executable, hooks or daemon. A terminal binding is not a provider agent identity. See [native attention](plugins/attention/README.md) for limits and privacy.
 
@@ -77,7 +77,7 @@ The uv-managed package remains the runtime source. Setup freezes the app data ro
 
 ### Pane placement and size
 
-Each integration opens its tool in a new native pane split from the invoking terminal: by default to the **right**, taking **50%** of that terminal's space. Choose a different side or share when enabling (unreleased: available from a source checkout until the next published version; 0.1.1 keeps the fixed default):
+Each integration opens its tool in a new native pane split from the invoking terminal: by default to the **right**, taking **50%** of that terminal's space. Choose a different side or share when enabling (since 0.2.0; 0.1.x keeps the fixed default):
 
 ```sh
 rexdeck enable git --placement below --size 35
@@ -145,7 +145,7 @@ The host suits programs that own an interactive TTY until the user quits. A one-
 
 ## Release workflow and owner gate
 
-Version **0.1.1** is published: its [GitHub Release](https://github.com/Mathews-Tom/RexDeck/releases/tag/v0.1.1) and [PyPI files](https://pypi.org/project/rexdeck/0.1.1/) carry the same approved wheel/sdist hashes. **0.1.0** was published and verified earlier. Do not rebuild, retag or republish either. A later release needs a separately named version target; its release-preparation change updates the package version and the version-specific names in the steps below. Local version metadata, a tag or a GitHub Release alone does not prove PyPI delivery.
+Versions **0.1.0** and **0.1.1** are published: their GitHub Releases and [PyPI files](https://pypi.org/project/rexdeck/#history) carry the same approved wheel/sdist hashes. Do not rebuild, retag or republish them. **0.2.0** is the current release target; the steps below name it. A later release needs a separately named version target; its release-preparation change updates the package version and the version-specific names in the steps below. Local version metadata, a tag or a GitHub Release alone does not prove PyPI delivery.
 
 The manual [`publish.yml`](.github/workflows/publish.yml) workflow supports [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) using [uv](https://docs.astral.sh/uv/guides/package/#publishing-your-package). No ordinary push, PR, or tag publishes anything; no release-time rebuild occurs.
 
@@ -153,14 +153,14 @@ Before dispatch, the owner must configure a PyPI project or pending publisher fo
 
 The S1 publication boundary assumes this remains a personal-account repository with Mathews-Tom as its sole administrator. Owner-controlled bypass/configuration is trusted; transfer to an organization requires re-evaluating that gate.
 
-1. Merge only the reviewed candidate. A successful **push on main** `checks.yml` run builds wheel/sdist once and retains the exact pair as `rexdeck-0.1.1`; download and inspect them, record both SHA-256 hashes, immutable artifact ID, full commit SHA, run URL, and runtime/security/review evidence. Artifacts expire; a rebuild requires fresh hashes and approval.
-2. Obtain explicit owner approval naming that exact commit, artifact ID, both filenames/hashes, and reviewed evidence. Any changed input requires renewed approval. After this approval only, create/verify the annotated `v0.1.1` tag and GitHub Release at that commit, attaching the same files; never rebuild for a tag.
-3. Dispatch `publish.yml` **from main at that approved commit**, entering the exact SHA, artifact ID, hashes and approval-evidence URL. The protected-environment reviewer must compare the dispatch inputs/run summary against the approval before approving the deployment. The workflow verifies repository/run provenance, tag target and hashes, then publishes only `approved/rexdeck-0.1.1.tar.gz` and `approved/rexdeck-0.1.1-py3-none-any.whl` with `uv publish --trusted-publishing always` (no token secret or broad `dist/*` upload).
-4. Verify [PyPI JSON](https://pypi.org/pypi/rexdeck/0.1.1/json) exposes both approved hashes. Then run an isolated no-cache public-index install, allowing index propagation, and repeat actual private Rex use/quit/refresh/disable. Only then claim `rexdeck==0.1.1` is published:
+1. Merge only the reviewed candidate. A successful **push on main** `checks.yml` run builds wheel/sdist once and retains the exact pair as `rexdeck-0.2.0`; download and inspect them, record both SHA-256 hashes, immutable artifact ID, full commit SHA, run URL, and runtime/security/review evidence. Artifacts expire; a rebuild requires fresh hashes and approval.
+2. Obtain explicit owner approval naming that exact commit, artifact ID, both filenames/hashes, and reviewed evidence. Any changed input requires renewed approval. After this approval only, create/verify the annotated `v0.2.0` tag and GitHub Release at that commit, attaching the same files; never rebuild for a tag.
+3. Dispatch `publish.yml` **from main at that approved commit**, entering the exact SHA, artifact ID, hashes and approval-evidence URL. The protected-environment reviewer must compare the dispatch inputs/run summary against the approval before approving the deployment. The workflow verifies repository/run provenance, tag target and hashes, then publishes only `approved/rexdeck-0.2.0.tar.gz` and `approved/rexdeck-0.2.0-py3-none-any.whl` with `uv publish --trusted-publishing always` (no token secret or broad `dist/*` upload).
+4. Verify [PyPI JSON](https://pypi.org/pypi/rexdeck/0.2.0/json) exposes both approved hashes. Then run an isolated no-cache public-index install, allowing index propagation, and repeat actual private Rex use/quit/refresh/disable. Only then claim `rexdeck==0.2.0` is published:
 
    ```sh
    uv --no-cache run --isolated --no-project --index https://pypi.org/simple \
-     --with rexdeck==0.1.1 rexdeck plugins
+     --with rexdeck==0.2.0 rexdeck plugins
    ```
 
 CI and private endpoint/TUI captures do not prove owner-app palette, glyph, or desktop visual approval. Successful package installation does not prove native interaction; successful local builds do not prove registry publication. Keep those evidence claims separate.
