@@ -191,7 +191,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual([row["name"] for row in self.actions], ["rexdeck_files"])
         life.apply_setup(self.setup)
         self.assertEqual(life.status(self.setup)["state"], "ready")
-        self.assertEqual(life.stop(self.setup)["state"], "stopped")
+        self.assertEqual(life.disable(self.setup)["state"], "disabled")
         self.assertEqual(self.actions, [])
         life.apply_setup(self.setup)
         self.assertEqual(life.status(self.setup)["state"], "disabled")
@@ -212,11 +212,11 @@ class LifecycleTests(unittest.TestCase):
         life.apply_setup(self.setup)
         self.assertFalse(self.receipt()["enabled"])
 
-    def test_stop_never_starts_or_kills_processes(self) -> None:
+    def test_disable_never_starts_or_kills_processes(self) -> None:
         life.apply_setup(self.setup)
         life.start(self.setup)
         with patch.object(os, "kill") as kill, patch.object(life, "_run") as run:
-            life.stop(self.setup)
+            life.disable(self.setup)
         kill.assert_not_called()
         run.assert_not_called()
         self.assertEqual(self.actions, [])
@@ -279,8 +279,9 @@ class LifecycleTests(unittest.TestCase):
         )
         life.apply_setup(self.setup)
         life.start(self.setup)
-        life.stop(self.setup)
-        self.assertEqual([row["name"] for row in self.actions], ["foreign"])
+        self.assertEqual(
+            [row["name"] for row in self.actions], ["foreign", "rexdeck_files"]
+        )
         life.disable(self.setup)
         self.assertEqual([row["name"] for row in self.actions], ["foreign"])
 
@@ -291,7 +292,6 @@ class LifecycleTests(unittest.TestCase):
         original = self.target.read_bytes()
         life.apply_setup(self.setup)
         life.start(self.setup)
-        life.stop(self.setup)
         life.disable(self.setup)
         self.assertEqual(foreign.read_bytes(), b"-- unrelated owner file\n")
         self.assertEqual(self.target.read_bytes(), original)
@@ -406,16 +406,6 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.actions, [])
         self.assertEqual(life.status(self.setup)["state"], "disabled")
-
-    def test_failed_stop_restores_action_and_enabled_receipt(self) -> None:
-        life.apply_setup(self.setup)
-        life.start(self.setup)
-        before = self.snapshot()
-        self.fail_reload = True
-        with self.assertRaises(RuntimeError):
-            life.stop(self.setup)
-        self.assertEqual(self.snapshot(), before)
-        self.assertEqual(life.status(self.setup)["state"], "ready")
 
     def test_failed_disable_restores_enabled_action_and_config(self) -> None:
         life.apply_setup(self.setup)
@@ -561,7 +551,6 @@ class LifecycleTests(unittest.TestCase):
                 life.inspect_setup,
                 life.apply_setup,
                 life.start,
-                life.stop,
                 life.status,
                 life.disable,
             ):

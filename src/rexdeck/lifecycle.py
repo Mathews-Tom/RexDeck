@@ -846,13 +846,11 @@ def apply_setup(setup: Setup) -> dict[str, object]:
         }
 
 
-def _select(setup: Setup, enabled: bool) -> dict[str, object]:
+def start(setup: Setup) -> dict[str, object]:
     paths = _paths(setup)
     receipt = _receipt(paths, setup)
     if receipt is None or not receipt["applied"]:
-        raise RuntimeError(
-            "Native Files is not applied; explicitly apply before start/stop"
-        )
+        raise RuntimeError("Files is not installed; run rexdeck enable files")
     _endpoint_policy(setup)
     with _operation_lock(paths):
         before = _file(paths.receipt)
@@ -864,27 +862,17 @@ def _select(setup: Setup, enabled: bool) -> dict[str, object]:
             _expect_action(setup, False)
         source, _ = _sources(paths)
         tools = cast(dict[str, str], receipt["tools"])
-        module = _module(setup, paths, source, tools, enabled)
+        module = _module(setup, paths, source, tools, True)
         old = _file(paths.module)
-        receipt["enabled"] = enabled
+        receipt["enabled"] = True
         receipt["module_sha256"] = _digest(module)
         changes = [_Change(paths.module, old, module)] if old.data != module else []
-        _transaction(
-            setup, paths, changes, receipt, before, "Start" if enabled else "Stop"
-        )
+        _transaction(setup, paths, changes, receipt, before, "Start")
         return {
-            "state": "ready" if enabled else "stopped",
-            "enabled": enabled,
+            "state": "ready",
+            "enabled": True,
             "server": setup.server,
         }
-
-
-def start(setup: Setup) -> dict[str, object]:
-    return _select(setup, True)
-
-
-def stop(setup: Setup) -> dict[str, object]:
-    return _select(setup, False)
 
 
 def status(setup: Setup) -> dict[str, object]:

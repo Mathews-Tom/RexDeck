@@ -65,7 +65,7 @@ Use the actual original workspace if it differs. Do not rename or discard an app
 
 ### Previous LazyRex-based Files
 
-Do not reuse its workspace with native Files. Close the old Files/previews and use the **previous implementation's** disable command or the frozen cleanup helper supplied for that installation, with its original target and required approval. Preserve its old workspace/runtime files. If cleanup already returned `"state": "disabled"` with `"conflicts": []`, do not repeat it. Continue with a fresh native setup.
+Do not reuse its workspace with native Files. Close the identified old Files/previews and use the **previous implementation's** disable command or approved frozen cleanup helper with its original target and required approval. If cleanup already returned `"state": "disabled"` with `"conflicts": []`, do not repeat it. Keep ownership evidence until disabled state and rollback safety are verified; obsolete owned workspace/runtime artifacts may then be removed under explicit cleanup authority. Continue with a fresh native setup, not an adopted legacy receipt.
 
 The native CLI refuses legacy receipts; it does not stop or adopt an old hub automatically.
 
