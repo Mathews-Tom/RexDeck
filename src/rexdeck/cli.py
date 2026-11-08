@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Never
 
-from rexdeck import attention, dependencies, integrations, lifecycle, settings
+from rexdeck import attention, dependencies, integrations, lifecycle, report, settings
 
 _FAILURES = {"conflict", "failed", "fault", "missing-dependency"}
 
@@ -271,6 +271,18 @@ def _plugins(target: settings.SavedTarget | None) -> dict[str, object]:
     }
 
 
+def _print_report(command: str, result: dict[str, object], plugin: str | None) -> None:
+    """Interactive listing; a single-plugin status is shown as a one-row table."""
+    if plugin is not None:
+        row = {**result, "integration": integrations.get(plugin).describe()}
+        result = {"state": result.get("state"), "plugins": {plugin: row}}
+    print(
+        report.render(
+            f"RexDeck {command}", result, color=report.use_color(sys.stdout.isatty())
+        )
+    )
+
+
 def main() -> int:
     """Dispatch lifecycle commands and isolate faults in aggregate status rows."""
     # Hook invocations must bypass argparse/settings error output even when malformed.
@@ -283,8 +295,11 @@ def main() -> int:
 
         return clickup.configure(sys.argv[2:])
     subcommands = parser.add_subparsers(dest="command", required=True)
-    subcommands.add_parser(
+    listing = subcommands.add_parser(
         "plugins", help="List available plugins and their enabled/disabled state"
+    )
+    listing.add_argument(
+        "--json", action="store_true", help="Print the full JSON document"
     )
     subcommands.add_parser(
         "clickup", help="Explicit account/workspace/list selection (select or status)"
@@ -332,6 +347,10 @@ def main() -> int:
         command.add_argument(
             "plugin", choices=lifecycle.PLUGINS, nargs="?" if name == "status" else None
         )
+        if name == "status":
+            command.add_argument(
+                "--json", action="store_true", help="Print the full JSON document"
+            )
         if name == "enable":
             command.add_argument(
                 "--placement",
@@ -400,7 +419,14 @@ def main() -> int:
                     result = lifecycle.status(target.setup(args.plugin))
                 else:
                     result = _plugins(target)
-        print(json.dumps(result, ensure_ascii=True, indent=2))
+        if (
+            args.command in {"plugins", "status"}
+            and not args.json
+            and sys.stdout.isatty()
+        ):
+            _print_report(args.command, result, getattr(args, "plugin", None))
+        else:
+            print(json.dumps(result, ensure_ascii=True, indent=2))
         return 1 if result.get("state") in _FAILURES else 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(
