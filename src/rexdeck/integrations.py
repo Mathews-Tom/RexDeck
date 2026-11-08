@@ -118,6 +118,8 @@ class Integration:
     args: tuple[str, ...] = ()
     # Extra preinstalled executables and where the owner installs them from.
     prerequisites: tuple[tuple[str, str], ...] = ()
+    # Owned frontends run from this distribution's interpreter, not a PATH tool.
+    owned_module: str | None = None
 
     def __post_init__(self) -> None:
         if not _ID.match(self.id):
@@ -137,8 +139,16 @@ class Integration:
             raise ValueError(f"Unknown integration context: {self.context}")
         if self.tool in _RESERVED or not _TOOL.match(self.tool):
             raise ValueError(f"Invalid tool executable name: {self.tool}")
-        if not self.versions:
+        if self.owned_module is None and not self.versions:
             raise ValueError(f"{self.id} must qualify at least one tool version")
+        if self.owned_module is not None and (
+            not self.owned_module.startswith("rexdeck.")
+            or self.args != ("-I", "-m", self.owned_module)
+            or self.versions
+        ):
+            raise ValueError(
+                "Owned frontends must use isolated in-package module launch"
+            )
 
     @property
     def loader_markers(self) -> tuple[bytes, bytes]:
@@ -161,6 +171,7 @@ class Integration:
             "context": self.context,
             "capabilities": list(self.capabilities),
             "default_layout": self.default_layout.document(),
+            "owned_module": self.owned_module,
         }
 
 
@@ -339,6 +350,28 @@ INTEGRATIONS: dict[str, Integration] = {
                 ("pdftoppm", "https://poppler.freedesktop.org/"),
                 ("resvg", "https://github.com/linebender/resvg/releases/tag/v0.49.0"),
             ),
+        ),
+        Integration(
+            id="clickup",
+            title="ClickUp",
+            tool="rexdeck-clickup",
+            tool_label="ClickUp engine and pane",
+            description="Inspect tasks and deliberately confirm changes in an explicit ClickUp selection",
+            keywords="clickup tasks status comments confirmed changes",
+            context="directory",
+            versions=(),
+            version_pattern="",
+            release="https://github.com/Mathews-Tom/RexDeck",
+            license="MIT",
+            capabilities=(
+                "owned MIT engine/frontend; confirmed status/assignee/due/field/comment writes",
+                "explicit account/workspace/list; credential environment-name reference",
+                "all task pages, native statuses, complete comments/replies and engine projections",
+                "explicit validated browser deep link; never opens automatically",
+            ),
+            default_layout=Layout("right", 50),
+            args=("-I", "-m", "rexdeck.clickup"),
+            owned_module="rexdeck.clickup",
         ),
     )
 }
