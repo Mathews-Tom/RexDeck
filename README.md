@@ -2,7 +2,7 @@
 
 A collection of independently selectable plugins and extensions that bring existing tools into your own Rex application.
 
-Files, local Git, Markdown, Usage and GitHub bring unmodified Yazi, lazygit, markdown-reader, tokscale and gh-dash into native Rex terminals. PDF/image viewers, agent/subagent views, and task-provider integrations remain planned. Select the tools you need without installing an unrelated default suite.
+Files, local Git, Markdown, Usage and GitHub bring unmodified Yazi, lazygit, markdown-reader, tokscale and gh-dash into native Rex terminals. Native attention retains explicit terminal status and exact navigation. PDF/image viewers, provider-specific subagent views, and task-provider integrations remain planned. Select the tools you need without installing an unrelated default suite.
 
 ## Plugins and extensions
 
@@ -14,7 +14,8 @@ Files, local Git, Markdown, Usage and GitHub bring unmodified Yazi, lazygit, mar
 | [Usage](plugins/usage/README.md) | Watch machine-wide token usage, models, sessions and projects for omp with upstream online refresh using unmodified tokscale | Unreleased (source checkout) |
 | [GitHub](plugins/github/README.md) | Repository-scoped PRs/issues with explicit host/account using unmodified gh-dash | Unreleased (source checkout) |
 | Rich viewers | PDF and image viewing | Planned |
-| Agents and subagents | Attention, observed state, and navigation to agent work | Planned |
+| [Native attention](plugins/attention/README.md) | Retain explicit native worker status, filter by project/location, and revalidate exact terminal navigation | Unreleased (source checkout); provider identity remains unknown |
+| Provider subagents | Provider-specific lifecycle and parentage | Planned |
 | Tasks | Independently selectable Linear and ClickUp workflows | Planned |
 
 Planned integrations are not implemented or installable yet. Published RexDeck releases are available on [PyPI](https://pypi.org/project/rexdeck/); `rexdeck plugins` is new in version 0.1.1.
@@ -52,6 +53,10 @@ The installed command works from any directory; the package includes the shared 
 Each integration row's `state` is one of: `disabled` (not selected, or turned off), `ready` (its native action is registered in the running Rex; this says nothing about whether the upstream tool is currently open), `missing-dependency` (an applied integration's tool is not on the current `PATH`; `enabled` shows whether it is turned on. Make the tool available, reinstalling it yourself if it was removed, then rerun `status`, or `rexdeck enable <id>` if its path changed), `conflict`, or `fault` (ownership, refresh or registration problem, with an `error`). `plugins` additionally reports `not-configured` rows before setup. Command-level errors, including no saved target or an unknown/old receipt for `status <id>`, print `failed`. `missing-dependency`, `conflict`, `fault` and `failed` exit nonzero.
 
 Run `rexdeck plugins` to list every available plugin shipped with this installation and its current state as JSON. Configured rows include `enabled: true` or `enabled: false`; before setup, rows report `not-configured` rather than guessing that a target is disabled. Unreleased (source checkout until the next published version; 0.1.1 omits them): configured rows also report the saved pane `layout`, and every row's `integration` field discloses the hosted tool, qualified versions, upstream license, launch context, write/network/process capabilities and default layout. Plugin inspection faults remain visible alongside healthy sibling rows and return a nonzero exit status. Listing never enables integrations or installs dependencies. Planned integrations are not included.
+
+`rexdeck attention observe --session session:… --block block:… --project my-project` captures one explicitly identified terminal's native OSC 7501 records and exit result. `rexdeck attention list --project my-project` shows retained source, timestamps, freshness and bound/unbound state; `rexdeck attention jump <observation-id>` revalidates the exact server incarnation/session/block before focus. This native extension needs setup but no `enable`, upstream executable, hooks or daemon. A terminal binding is not a provider agent identity. See [native attention](plugins/attention/README.md) for limits and privacy.
+
+Refresh a retained row explicitly with `rexdeck attention observe <observation-id>`: **list → observe ID → jump ID**, without a watcher. Observations live under the setup-owned workspace's `attention/` directory. Untrusted status text and each serialized row are capped and disclose `truncated: true`; a newly observed server incarnation invalidates all older-instance rows on that endpoint without changing their last observed placement.
 
 The uv-managed package remains the runtime source. Setup freezes the app data root from `$XDG_DATA_HOME/rexdeck` (default `~/.local/share/rexdeck`); each integration deploys `plugins/<id>/rexdeck_<id>.lua` there with an independently owned tracked loader in Rex's `init.lua`. Approved preferences remain in `$XDG_CONFIG_HOME/rexdeck/config.json`. Files receipt/lock paths remain in the saved `$XDG_STATE_HOME/rexdeck/files` workspace; every other integration uses its `<id>/` subdirectory. Later `XDG_DATA_HOME` changes do not retarget the saved installation. Run `disable` for every applied integration before uninstalling RexDeck or deliberately resetting a saved target, including integrations reported as disabled after a failed enable.
 

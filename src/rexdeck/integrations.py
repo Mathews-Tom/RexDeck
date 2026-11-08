@@ -123,6 +123,9 @@ class Integration:
             raise ValueError(
                 f"Integration id must be lowercase alphanumeric: {self.id}"
             )
+        # Native attention owns `<workspace>/attention`; no integration may share it.
+        if self.id == "attention":
+            raise ValueError("Integration id 'attention' is reserved")
         # The title is embedded verbatim in the loader's markers and error string.
         if not _TITLE.match(self.title):
             raise ValueError(f"Integration title must be plain words: {self.title!r}")
