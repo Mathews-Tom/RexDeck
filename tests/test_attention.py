@@ -1172,6 +1172,28 @@ def test_stuck_provider_writer_returns_native_rows_with_bounded_fault(
     assert attention.listing(target)["provider_state"] == "ready"
 
 
+def test_receipt_reserved_before_store_reset_is_dropped_not_corrupting(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    for _ in range(3):
+        attention._receive_hook(target, "codex", hook_payload())
+    reserve = attention._reserve_receipt
+
+    def reserve_then_reset(
+        store_target: settings.SavedTarget, identity: str
+    ) -> int | None:
+        sequence = reserve(store_target, identity)
+        attention._path(store_target, provider_store=True).unlink()
+        return sequence
+
+    monkeypatch.setattr(attention, "_reserve_receipt", reserve_then_reset)
+    attention._receive_hook(target, "codex", hook_payload())
+    listing = attention.listing(target)
+    assert listing["provider_state"] == "ready"
+
+
 def test_hook_deadline_during_endpoint_validation_is_not_swallowed(
     native: tuple[Native, settings.SavedTarget],
     monkeypatch: pytest.MonkeyPatch,

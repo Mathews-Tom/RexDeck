@@ -736,6 +736,8 @@ def _receive_hook(target: settings.SavedTarget, provider: str, payload: object) 
     with _store(target, provider_store=True, lock_timeout=_hook_lock_budget()) as rows:
         if identity not in rows and len(rows) >= _MAX_PROVIDER_ROWS:
             return
+        if sequence > cast(_ProviderRows, rows).sequence:
+            return  # The store was reset after this receipt reserved its order.
         previous = rows.get(identity)
         if (
             previous is not None
