@@ -2,12 +2,16 @@
 return function(opts)
   if type(opts) ~= 'table' then error('RexDeck Files requires installation options', 0) end
   local paths = {}
-  for _, key in ipairs({'python', 'rex', 'yazi', 'launcher'}) do
+  for _, key in ipairs({'python', 'rex', 'yazi'}) do
     local value = opts[key]
     if type(value) ~= 'string' or value:sub(1, 1) ~= '/' or value:find('%z') then
       error('RexDeck Files requires an absolute ' .. key .. ' path', 0)
     end
     paths[key] = value
+  end
+  local launcher = opts.launcher_code
+  if type(launcher) ~= 'string' or launcher == '' or launcher:find('%z') then
+    error('RexDeck Files requires its applied Python launcher', 0)
   end
   local server = opts.server
   if type(server) ~= 'string' or server == '' or server:find('%z') then
@@ -40,7 +44,7 @@ return function(opts)
       if type(reported.pwd) ~= 'string' or reported.pwd == '' then
         error('RexDeck Files: the invoking terminal has not reported a cwd', 0)
       end
-      local checked, exec_error = rex.exec({paths.python, paths.launcher, 'cwd', reported.pwd}, {timeout = 10})
+      local checked, exec_error = rex.exec({paths.python, '-I', '-c', launcher, 'cwd', reported.pwd}, {timeout = 10})
       if not checked then
         error('RexDeck Files cannot validate the invoking cwd: ' .. tostring(exec_error), 0)
       end
@@ -68,7 +72,7 @@ return function(opts)
             shell = 'none',
             login = false,
             exit = {on_completion = true},
-            command = {paths.python, paths.launcher, 'run', paths.yazi, paths.rex,
+            command = {paths.python, '-I', '-c', launcher, 'run', paths.yazi, paths.rex,
               server, session, origin, cwd},
           },
         }},

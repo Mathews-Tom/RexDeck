@@ -24,3 +24,23 @@ jobs:
           for file in src/rexdeck/plugins/files/*.lua; do
             luajit -b "$file" "$RUNNER_TEMP/$(basename "$file").out"
           done
+      - name: Build installable wheel
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/rexdeck-dist"
+          uv venv "$RUNNER_TEMP/rexdeck-wheel"
+          uv pip install --python "$RUNNER_TEMP/rexdeck-wheel/bin/python" "$RUNNER_TEMP"/rexdeck-dist/*.whl
+      - name: Installed CLI and packaged Lua
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$RUNNER_TEMP/rexdeck-wheel/bin/rexdeck" --help
+          "$RUNNER_TEMP/rexdeck-wheel/bin/python" -m rexdeck.plugins.files.launch cwd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/rexdeck-wheel/bin/python" - <<'PY'
+          import os
+          import subprocess
+          from importlib.resources import files
+          from pathlib import Path
+
+          source = files("rexdeck").joinpath("plugins/files/main.lua")
+          output = Path(os.environ["RUNNER_TEMP"]) / "rexdeck-installed-files.out"
+          subprocess.run(["luajit", "-b", str(source), str(output)], check=True)
+          PY

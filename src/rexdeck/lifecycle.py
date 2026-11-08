@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 from typing import NoReturn, cast
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 _BEGIN = b"-- BEGIN REXDECK (owned native Files loader)\n"
 _END = b"-- END REXDECK\n"
@@ -84,6 +84,10 @@ def _socket_path(endpoint: str) -> Path:
         raise RuntimeError(
             f"Cannot resolve the selected Rex socket endpoint: {exc}"
         ) from exc
+
+
+def _canonical_server(endpoint: str) -> str:
+    return "unix://" + quote(str(_socket_path(endpoint)), safe="/")
 
 
 def _validate_data_root(root: Path) -> None:
@@ -173,7 +177,7 @@ def _run(
     """Bound helper output/lifetime and hand off cancellation to exact-child cleanup."""
     child: subprocess.Popen[bytes] | None = None
     try:
-        with _defer_sigint():
+        with _defer_cancellation():
             child = subprocess.Popen(
                 argv,
                 env=env,
@@ -206,7 +210,7 @@ def _run(
             child.wait(timeout=max(0.01, deadline - time.monotonic())), bytes(output)
         )
     except (RuntimeError, OSError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
-        with _defer_sigint():
+        with _defer_cancellation():
             if child is not None:
                 if child.poll() is None:
                     child.kill()
@@ -324,11 +328,18 @@ def _is_real_endpoint(setup: Setup) -> bool:
 
 def _endpoint_policy(setup: Setup) -> None:
     is_real = _is_real_endpoint(setup)
-    if is_real != setup.real_server:
+    if is_real and not setup.real_server:
         raise RuntimeError(
             "Selected endpoint is the real Rex server; explicit --real-server approval is required"
-            if is_real
-            else "--real-server was selected for an isolated server; remove the flag"
+        )
+    keymap = _rex(setup, "api", "call", "client.keymap", "{}")
+    config = keymap.get("config")
+    path = config.get("path") if isinstance(config, dict) else None
+    if not isinstance(path, str) or not Path(path).is_absolute() or "\x00" in path:
+        raise RuntimeError("Running Rex server did not identify its config path")
+    if Path(path).resolve(strict=True) != setup.config.resolve(strict=True):
+        raise RuntimeError(
+            f"Selected Rex config does not match the running server config: {path}"
         )
 
 
@@ -487,17 +498,18 @@ def _sources(paths: _Paths) -> tuple[bytes, bytes]:
         raise RuntimeError("Canonical native Files main.lua and launch.py are required")
     try:
         source.decode("utf-8")
+        launcher.decode("utf-8")
     except UnicodeError as exc:
-        raise RuntimeError("Native Files module must be UTF-8") from exc
+        raise RuntimeError("Native Files module and launcher must be UTF-8") from exc
     return source, launcher
 
 
 def _module(
-    setup: Setup, paths: _Paths, source: bytes, tools: dict[str, str], enabled: bool
+    setup: Setup, source: bytes, launcher: bytes, tools: dict[str, str], enabled: bool
 ) -> bytes:
     opts = tools | {
         "server": setup.server,
-        "launcher": str(paths.project / "plugins/files/launch.py"),
+        "launcher_code": launcher.decode("utf-8"),
     }
     quoted = ", ".join(f"{key} = {_lua(value)}" for key, value in sorted(opts.items()))
     return (
@@ -587,7 +599,7 @@ def _current_bundle(setup: Setup, paths: _Paths, receipt: dict[str, object]) -> 
         _digest(source) != receipt["source_sha256"]
         or _digest(launcher) != receipt["launcher_sha256"]
         or tools != receipt["tools"]
-        or _digest(_module(setup, paths, source, tools, bool(receipt["enabled"])))
+        or _digest(_module(setup, source, launcher, tools, bool(receipt["enabled"])))
         != receipt["module_sha256"]
     ):
         raise RuntimeError(
@@ -597,24 +609,33 @@ def _current_bundle(setup: Setup, paths: _Paths, receipt: dict[str, object]) -> 
 
 
 @contextmanager
-def _defer_sigint() -> Iterator[None]:
-    """Finish a short ownership handoff or recovery before delivering Ctrl-C."""
+def _defer_cancellation() -> Iterator[None]:
+    """Finish an ownership handoff or recovery before delivering cancellation."""
     if threading.current_thread() is not threading.main_thread():
         yield
         return
-    interrupted = False
+    signals: tuple[int, ...] = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    previous = {signum: signal.getsignal(signum) for signum in signals}
+    interrupted: int | None = None
 
-    def defer(_signum: int, _frame: FrameType | None) -> None:
+    def defer(signum: int, _frame: FrameType | None) -> None:
         nonlocal interrupted
-        interrupted = True
+        if interrupted is None and previous[signum] != signal.SIG_IGN:
+            interrupted = signum
 
-    previous = signal.signal(signal.SIGINT, defer)
     try:
+        for signum in signals:
+            signal.signal(signum, defer)
         yield
     finally:
-        signal.signal(signal.SIGINT, previous)
-        if interrupted and callable(previous):
-            previous(signal.SIGINT, None)
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+        if interrupted is not None:
+            handler = previous[interrupted]
+            if callable(handler):
+                handler(interrupted, None)
+            elif handler == signal.SIG_DFL:
+                raise KeyboardInterrupt(f"Received signal {interrupted}")
 
 
 def _rollback(changes: list[_Change], data_root: Path) -> list[str]:
@@ -652,7 +673,7 @@ def _rollback(changes: list[_Change], data_root: Path) -> list[str]:
                 _replace(
                     change.path, current, change.before.data, mode=change.before.mode
                 )
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
             conflicts.append(str(exc))
     return conflicts
 
@@ -666,7 +687,7 @@ def _recover_changes(
     conflicts: list[str] = []
     cancellation: KeyboardInterrupt | None = None
     try:
-        with _defer_sigint():
+        with _defer_cancellation():
             conflicts = _rollback(changes, setup.data_root)
             try:
                 _reload(setup)
@@ -718,9 +739,23 @@ def _operation_lock(paths: _Paths) -> Iterator[None]:
                 raise RuntimeError(
                     "Another RexDeck lifecycle operation is in progress; inspect status"
                 ) from exc
+            terminating = (signal.SIGTERM, signal.SIGHUP)
+            previous = (
+                {signum: signal.getsignal(signum) for signum in terminating}
+                if threading.current_thread() is threading.main_thread()
+                else {}
+            )
+
+            def interrupt(signum: int, _frame: FrameType | None) -> None:
+                raise KeyboardInterrupt(f"Received signal {signum}")
+
             try:
+                for signum in previous:
+                    signal.signal(signum, interrupt)
                 yield
             finally:
+                for signum, handler in previous.items():
+                    signal.signal(signum, handler)
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
     except OSError as exc:
         raise RuntimeError(f"Cannot lock the owned lifecycle operation: {exc}") from exc
@@ -737,6 +772,11 @@ def _transaction(
     before: _File,
     operation: str,
 ) -> None:
+    for change in changes:
+        if change.after is not None and len(change.after) > _MAX_READ:
+            raise RuntimeError(
+                f"Planned owned file exceeds {_MAX_READ} bytes: {change.path}"
+            )
     applied: list[_Change] = []
     try:
         for change in changes:
@@ -852,7 +892,7 @@ def apply_setup(setup: Setup) -> dict[str, object]:
         source, launcher = _sources(paths)
         tools = _tools()
         enabled = bool(receipt and receipt["applied"] and receipt["enabled"])
-        module = _module(setup, paths, source, tools, enabled)
+        module = _module(setup, source, launcher, tools, enabled)
         changes: list[_Change] = []
         if previous_module.data != module:
             changes.append(_Change(paths.module, previous_module, module))
@@ -908,13 +948,13 @@ def start(setup: Setup) -> dict[str, object]:
         receipt = _receipt(paths, setup)
         if receipt is None or not receipt["applied"]:
             raise RuntimeError("Setup ownership changed before selection")
+        old = _file(paths.module)
         _current_bundle(setup, paths, receipt)
         if not receipt["enabled"]:
             _expect_action(setup, False)
-        source, _ = _sources(paths)
+        source, launcher = _sources(paths)
         tools = cast(dict[str, str], receipt["tools"])
-        module = _module(setup, paths, source, tools, True)
-        old = _file(paths.module)
+        module = _module(setup, source, launcher, tools, True)
         receipt["enabled"] = True
         receipt["module_sha256"] = _digest(module)
         changes = [_Change(paths.module, old, module)] if old.data != module else []
@@ -964,6 +1004,12 @@ def disable(setup: Setup) -> dict[str, object]:
         before = _file(paths.receipt)
         receipt = _receipt(paths, setup)
         assert receipt is not None
+        if not receipt["applied"]:
+            return {
+                "state": "conflict" if receipt["conflicts"] else "disabled",
+                "server": setup.server,
+                "conflicts": receipt["conflicts"],
+            }
         config = _file(paths.config)
         assert config.data is not None
         changes: list[_Change] = []

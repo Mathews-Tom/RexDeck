@@ -23,13 +23,12 @@ def directory(raw: str) -> str:
         if any(ord(char) < 32 or ord(char) == 127 for char in raw):
             raise ValueError("File URI contains unescaped control characters")
         uri = urlsplit(raw)
-        local_hosts = {
-            "",
-            "localhost",
-            socket.gethostname().casefold(),
-            socket.getfqdn().casefold(),
-        }
-        if uri.netloc.casefold() not in local_hosts:
+        authority = uri.netloc.casefold()
+        if (
+            authority not in ("", "localhost")
+            and authority != socket.gethostname().casefold()
+            and authority != socket.getfqdn().casefold()
+        ):
             raise ValueError("Remote or credentialed file URI is not supported")
         if "?" in raw or "#" in raw:
             raise ValueError("File URI must not contain a query or fragment")
@@ -38,7 +37,11 @@ def directory(raw: str) -> str:
         raw = unquote(uri.path, encoding="utf-8", errors="strict")
     if "\x00" in raw or not raw.startswith("/") or raw.startswith("//"):
         raise ValueError("An absolute local directory is required")
-    path = Path(raw).resolve(strict=True)
+    try:
+        path = Path(raw).resolve(strict=True)
+    except RuntimeError as error:
+        # Python 3.12 reports symlink loops as RuntimeError rather than OSError.
+        raise ValueError(str(error)) from error
     if not path.is_dir():
         raise ValueError("The invoking terminal's cwd is not a directory")
     return str(path)
@@ -57,6 +60,7 @@ def restore_focus(rex: str, server: str, session: str, origin: str) -> None:
     environment = dict(os.environ)
     environment.pop("REX_SESSION", None)
     environment.pop("REX_BLOCK", None)
+    environment.pop("REX_CLIENT", None)
     result = subprocess.run(
         [
             rex,
@@ -110,6 +114,14 @@ def run(yazi: str, rex: str, server: str, session: str, origin: str, cwd: str) -
                 "Cannot restore focus without explicit Rex origin and executable"
             )
         restore_focus(rex, server, session, origin)
+    except KeyboardInterrupt:
+        print(
+            f"RexDeck Files: return focus to original pane {origin!r} interrupted; "
+            "focus outcome is unknown. No replacement pane was selected.",
+            file=sys.stderr,
+        )
+        acknowledge()
+        return exit_code or 1
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         print(
             f"RexDeck Files: cannot return focus to original pane {origin!r}: {error}. "

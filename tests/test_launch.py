@@ -42,6 +42,37 @@ def test_cwd_decodes_local_spaces_unicode_and_literal_uri_characters(
     assert not (tmp_path / "nope").exists()
 
 
+@pytest.mark.parametrize("authority", ["", "localhost", "LOCALHOST", "LOCAL-HOST"])
+def test_local_file_uri_does_not_require_dns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, authority: str
+) -> None:
+    def unavailable_dns() -> str:
+        raise OSError("DNS unavailable")
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "local-host")
+    monkeypatch.setattr(socket, "getfqdn", unavailable_dns)
+    uri = tmp_path.as_uri().replace("file://", f"file://{authority}", 1)
+    assert launch.directory(uri) == str(tmp_path.resolve())
+
+
+def test_file_uri_accepts_local_fqdn_without_accepting_remote_or_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(socket, "gethostname", lambda: "local-host")
+    monkeypatch.setattr(socket, "getfqdn", lambda: "local-host.example")
+    uri = tmp_path.as_uri().replace("file://", "file://LOCAL-HOST.EXAMPLE", 1)
+    assert launch.directory(uri) == str(tmp_path.resolve())
+    for authority in (
+        "remote.example",
+        "user@local-host.example",
+        "local-host.example:123",
+    ):
+        with pytest.raises(ValueError, match="Remote or credentialed"):
+            launch.directory(
+                tmp_path.as_uri().replace("file://", f"file://{authority}", 1)
+            )
+
+
 @pytest.mark.parametrize(
     "value",
     [
@@ -84,6 +115,21 @@ def test_cwd_refuses_missing_file_nul_and_invalid_unicode(tmp_path: Path) -> Non
             launch.directory(value)
 
 
+def test_cwd_reports_real_symlink_loop_without_traceback(tmp_path: Path) -> None:
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop.name)
+    result = subprocess.run(
+        [sys.executable, str(LAUNCHER), "cwd", str(loop)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "invalid invoking cwd" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 @pytest.fixture
 def tools(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Executable local consumers with persistent pane state, never a Rex server."""
@@ -115,12 +161,16 @@ def tools(tmp_path: Path) -> tuple[Path, Path, Path]:
         "target = json.loads(args[7])\n"
         "if target['session_id'] != state['session']:\n"
         "    sys.exit('Wrong session')\n"
-        "if 'REX_SESSION' in os.environ or 'REX_BLOCK' in os.environ:\n"
+        "if any(key in os.environ for key in ('REX_SESSION', 'REX_BLOCK', 'REX_CLIENT')):\n"
         "    sys.exit('Inherited target leaked')\n"
         "if state.get('failure'):\n"
         "    sys.exit('Private transport or focus denied')\n"
         "if target['block_id'] not in state['blocks']:\n"
         "    sys.exit('Original pane no longer exists')\n"
+        "if state.get('interrupt_focus'):\n"
+        "    import signal\n"
+        "    os.kill(os.getppid(), signal.SIGINT)\n"
+        "    sys.exit(0)\n"
         "state['focused'] = target['block_id']\n"
         "path.write_text(json.dumps(state))\n"
         "print('{}')\n",
@@ -140,6 +190,10 @@ def tools(tmp_path: Path) -> tuple[Path, Path, Path]:
         "if state.get('remove_origin'):\n"
         "    state['blocks'].remove(state['remove_origin'])\n"
         "path.write_text(json.dumps(state))\n"
+        "if state.get('interrupt_yazi'):\n"
+        "    import signal\n"
+        "    os.kill(os.getppid(), signal.SIGINT)\n"
+        "    sys.exit(0)\n"
         "if state.get('signal'):\n"
         "    os.kill(os.getpid(), state['signal'])\n"
         "sys.exit(state.get('exit', 0))\n",
@@ -160,6 +214,7 @@ def start(
         YAZI_CONFIG_HOME=str(cwd / "user config"),
         REX_SESSION="unrelated-session",
         REX_BLOCK="unrelated-block",
+        REX_CLIENT="unrelated-client",
     )
     try:
         child = subprocess.Popen(
@@ -298,6 +353,116 @@ def test_missing_yazi_reports_failure_before_restoring_origin(
         assert child.poll() is None
         os.write(master, b"\n")
         assert child.wait(timeout=5) == 1
+        assert json.loads(tools[2].read_text())["focused"] == "origin-a"
+    finally:
+        cleanup(child, master)
+
+
+def test_real_symlink_loop_acknowledges_before_restoring_origin(
+    tmp_path: Path, tools: tuple[Path, Path, Path]
+) -> None:
+    loop = tmp_path / "loop"
+    loop.symlink_to(loop.name)
+    child, master = start(tools, loop)
+    try:
+        output = terminal_output(master, b"Press Enter")
+        assert b"cannot launch Yazi" in output
+        assert b"Traceback" not in output
+        assert child.poll() is None
+        state = json.loads(tools[2].read_text())
+        assert "cwd" not in state, "Yazi must not start with an invalid directory"
+        assert state["focused"] == "files"
+        os.write(master, b"\n")
+        assert child.wait(timeout=5) == 1
+        assert json.loads(tools[2].read_text())["focused"] == "origin-a"
+    finally:
+        cleanup(child, master)
+
+
+@pytest.mark.parametrize("command", ["cwd", "run"])
+def test_python312_symlink_loop_reaches_existing_error_boundary(
+    tmp_path: Path,
+    tools: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    loop = tmp_path / "loop"
+    original_resolve = Path.resolve
+
+    def resolve(path: Path, strict: bool = False) -> Path:
+        if path == loop:
+            raise RuntimeError(f"Symlink loop from {str(path)!r}")
+        return original_resolve(path, strict=strict)
+
+    acknowledgements: list[bool] = []
+    monkeypatch.setattr(Path, "resolve", resolve)
+    monkeypatch.setattr(launch, "acknowledge", lambda: acknowledgements.append(True))
+    args = [str(LAUNCHER), command]
+    if command == "run":
+        args += [
+            str(tools[0]),
+            str(tools[1]),
+            "unix:///private server.sock",
+            "session-exact",
+            "origin-a",
+        ]
+    monkeypatch.setattr(sys, "argv", [*args, str(loop)])
+    assert launch.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Symlink loop" in captured.err
+    assert "Traceback" not in captured.err
+    state = json.loads(tools[2].read_text())
+    assert "cwd" not in state
+    if command == "run":
+        assert "cannot launch Yazi" in captured.err
+        assert acknowledgements == [True]
+        assert state["focused"] == "origin-a"
+    else:
+        assert "invalid invoking cwd" in captured.err
+        assert acknowledgements == []
+        assert state["focused"] == "files"
+
+
+def test_focus_interrupt_reports_unknown_outcome_and_waits_for_acknowledgement(
+    tmp_path: Path, tools: tuple[Path, Path, Path]
+) -> None:
+    state = json.loads(tools[2].read_text())
+    state["interrupt_focus"] = True
+    tools[2].write_text(json.dumps(state), encoding="utf-8")
+    child, master = start(tools, tmp_path)
+    try:
+        output = terminal_output(master, b"Press Enter")
+        assert b"focus outcome is unknown" in output
+        assert b"origin-a" in output
+        assert b"No replacement pane was selected" in output
+        assert b"Yazi interrupted" not in output
+        assert b"Traceback" not in output
+        assert child.poll() is None, "Focus interrupt vanished before acknowledgement"
+        assert json.loads(tools[2].read_text())["focused"] == "origin-b"
+        os.write(master, b"\n")
+        assert child.wait(timeout=5) == 1
+        assert json.loads(tools[2].read_text())["focused"] == "origin-b"
+    finally:
+        cleanup(child, master)
+
+
+def test_yazi_interrupt_still_acknowledges_then_restores_origin(
+    tmp_path: Path, tools: tuple[Path, Path, Path]
+) -> None:
+    state = json.loads(tools[2].read_text())
+    state["interrupt_yazi"] = True
+    tools[2].write_text(json.dumps(state), encoding="utf-8")
+    child, master = start(tools, tmp_path)
+    try:
+        output = terminal_output(master, b"Press Enter")
+        assert b"Yazi interrupted" in output
+        assert b"focus outcome is unknown" not in output
+        assert child.poll() is None
+        assert json.loads(tools[2].read_text())["focused"] == "origin-b"
+        os.write(master, b"\n")
+        assert child.wait(timeout=5) == 130
         assert json.loads(tools[2].read_text())["focused"] == "origin-a"
     finally:
         cleanup(child, master)

@@ -56,7 +56,7 @@ rex = {
     return {block_ids = {id}}
   end},
 }
-install{python = '/python', rex = '/rex', yazi = '/yazi', server = 'unix:///private.sock', launcher = '/launch.py'}
+install{python = '/python', rex = '/rex', yazi = '/yazi', server = 'unix:///private.sock', launcher_code = 'pass'}
 assert(action.name == 'rexdeck_files' and type(action.run) == 'function')
 
 for _, invalid in ipairs({{}, {session_id = 'session-a'}, {block_id = 'origin-a'},

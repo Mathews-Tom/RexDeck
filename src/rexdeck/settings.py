@@ -45,9 +45,10 @@ def default_workspace() -> Path:
 
 
 def default_data_root() -> Path:
-    return (
-        xdg_path("XDG_DATA_HOME", Path.home() / ".local/share") / "rexdeck"
-    ).resolve()
+    root = xdg_path("XDG_DATA_HOME", Path.home() / ".local/share") / "rexdeck"
+    if root.is_symlink():
+        raise RuntimeError(f"Files deployment directory is redirected: {root}")
+    return root.resolve()
 
 
 def _absolute(value: object, name: str) -> Path:
@@ -86,6 +87,8 @@ class SavedTarget:
         if self.workspace.resolve() != self.workspace:
             raise RuntimeError("Saved Files workspace target changed; restore its path")
         lifecycle._validate_data_root(self.data_root)
+        if lifecycle._canonical_server(self.server) != self.server:
+            raise RuntimeError("Saved Rex socket target changed; restore its path")
         return lifecycle.Setup(
             project=Path(__file__).resolve().parent,
             workspace=self.workspace,

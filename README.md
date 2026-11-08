@@ -45,9 +45,10 @@ Each available integration owns its requirements and usage instructions. There i
 
 ## Development
 
-Run from the repository root:
+Install LuaJIT before running the suite: native Lua behavior tests require `lua` or `luajit` and otherwise skip. On macOS:
 
 ```sh
+brew install luajit
 uv sync --locked
 uv run ruff check .
 uv run ruff format --check .

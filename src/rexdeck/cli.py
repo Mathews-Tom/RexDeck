@@ -109,7 +109,7 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
             settings.xdg_path("XDG_CONFIG_HOME", Path.home() / ".config")
             / "rex/init.lua"
         )
-    config = Path(os.path.abspath(config))
+    config = config.parent.resolve(strict=True) / config.name
     config_target = config.resolve(strict=True)
     if not config_target.is_file():
         raise RuntimeError("Selected Rex config must be a regular file")
@@ -121,7 +121,7 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
         else workspace_default
     )
     data_root = old.data_root if old is not None else settings.default_data_root()
-    server = (
+    server = lifecycle._canonical_server(
         args.server
         if args.server is not None
         else (old.server if old is not None else _discover(config))

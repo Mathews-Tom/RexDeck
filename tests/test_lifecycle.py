@@ -186,6 +186,186 @@ class LifecycleTests(unittest.TestCase):
         shutil.rmtree(self.project)
         return replace(self.setup, project=project)
 
+    def test_applied_launcher_does_not_import_from_the_invoking_directory(self) -> None:
+        project = self.root / "untrusted-project"
+        project.mkdir()
+        marker = project / "imported-project-code"
+        (project / "json.py").write_text(
+            "from pathlib import Path\n"
+            f"Path({str(marker)!r}).write_text('executed')\n"
+            "raise RuntimeError('project code imported by launcher')\n"
+        )
+        harness = self.root / "execute-action.lua"
+        harness.write_text(
+            r"""
+local action
+local function quote(value)
+  return "'" .. value:gsub("'", "'\\''") .. "'"
+end
+local function execute(argv)
+  local words = {}
+  for _, value in ipairs(argv) do words[#words + 1] = quote(value) end
+  local ok = os.execute(table.concat(words, " ") .. " >" .. quote(arg[3]) .. " 2>&1")
+  local stream = assert(io.open(arg[3], "rb"))
+  local output = stream:read("*a")
+  stream:close()
+  return {ok = ok == 0 or ok == true, stdout = output, stderr = output}
+end
+rex = {
+  action = function(value) action = value end,
+  call = function(name)
+    if name == "session.attach" then return {} end
+    assert(name == "com.superlogical.terminal.pwd")
+    return {pwd = arg[2]}
+  end,
+  exec = execute,
+  json = {decode = function(raw)
+    local cwd = raw:match('^{"cwd": "([^"]+)"}%s*$')
+    assert(cwd == arg[2], raw)
+    return {cwd = cwd}
+  end},
+  session = {new_split = function(request)
+    local result = execute(request.layout.block.options.command)
+    assert(result.ok, result.stderr)
+    return {block_ids = {"launched"}}
+  end},
+}
+dofile(arg[1])
+action.run({session_id = "session", block_id = "origin"})
+"""
+        )
+        # Real Python runs both entry points; true substitutes only external tools.
+        with patch.object(
+            life,
+            "_tools",
+            return_value={
+                "python": sys.executable,
+                "rex": "/usr/bin/true",
+                "yazi": "/usr/bin/true",
+            },
+        ):
+            life.apply_setup(self.setup)
+            life.start(self.setup)
+        result = subprocess.run(
+            [
+                self.lua,
+                str(harness),
+                str(self.module),
+                str(project),
+                str(self.root / "out"),
+            ],
+            cwd=project,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(marker.exists(), "Opening Files imported project code")
+
+    def test_oversized_planned_config_is_rejected_before_owned_writes(self) -> None:
+        self.target.write_bytes(b"--" + b"x" * (life._MAX_READ - 2))
+        before = self.snapshot()
+        with self.assertRaises(RuntimeError):
+            life.apply_setup(self.setup)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
+        self.assertEqual(self.actions, [])
+
+    def test_rollback_collects_unlink_failure_and_restores_other_artifacts(
+        self,
+    ) -> None:
+        unlink = Path.unlink
+
+        def deny_module(path: Path, missing_ok: bool = False) -> None:
+            if path == self.module:
+                raise PermissionError(f"Cannot remove {path}")
+            unlink(path, missing_ok=missing_ok)
+
+        def leave_stale_registration() -> None:
+            self.on_reload = None
+            self.actions = [{"name": "stale-registration-from-failed-reload"}]
+
+        self.on_reload = leave_stale_registration
+        self.fail_reload = True
+        with patch.object(Path, "unlink", deny_module):
+            with self.assertRaises(RuntimeError) as failure:
+                life.apply_setup(self.setup)
+        self.assertIn(str(self.module), str(failure.exception))
+        self.assertEqual(self.target.read_bytes(), self.original)
+        self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
+        self.assertFalse(self.receipt_path.exists())
+        self.assertTrue(self.module.is_file())
+        self.assertEqual(self.actions, [])
+
+    def test_repeated_disable_preserves_a_later_workspace_installation(self) -> None:
+        life.apply_setup(self.setup)
+        life.start(self.setup)
+        life.disable(self.setup)
+        old_receipt = self.receipt_path.read_bytes()
+        other = replace(self.setup, workspace=self.root / "another-workspace")
+        life.apply_setup(other)
+        life.start(other)
+        other_receipt = other.workspace / "setup.json"
+        before = (
+            self.target.read_bytes(),
+            self.module.read_bytes(),
+            other_receipt.read_bytes(),
+        )
+        self.assertEqual(life.disable(self.setup)["state"], "disabled")
+        self.assertEqual(
+            (
+                self.target.read_bytes(),
+                self.module.read_bytes(),
+                other_receipt.read_bytes(),
+            ),
+            before,
+        )
+        self.assertEqual(self.receipt_path.read_bytes(), old_receipt)
+        self.assertEqual(life.status(other)["state"], "ready")
+
+    def test_real_termination_after_reload_recovers_before_exit(self) -> None:
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(signal=signum):
+                before = self.snapshot()
+
+                def terminate() -> None:
+                    self.on_reload = None
+                    os.kill(os.getpid(), signum)
+
+                self.on_reload = terminate
+                child = os.fork()
+                if child == 0:
+                    try:
+                        life.apply_setup(self.setup)
+                    except KeyboardInterrupt:
+                        os._exit(0)
+                    except BaseException:
+                        os._exit(3)
+                    os._exit(2)
+                _, status = os.waitpid(child, 0)
+                self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+                self.assertEqual(self.snapshot(), before)
+                self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o640)
+
+    def test_start_preserves_module_edited_during_registration_check(self) -> None:
+        life.apply_setup(self.setup)
+        changed = self.module.read_bytes() + b"-- concurrent operator edit\n"
+        receipt = self.receipt_path.read_bytes()
+        expect_action = life._expect_action
+
+        def edit_module(setup: life.Setup, enabled: bool) -> None:
+            expect_action(setup, enabled)
+            if not enabled:
+                self.module.write_bytes(changed)
+
+        with patch.object(life, "_expect_action", edit_module):
+            with self.assertRaises(RuntimeError):
+                life.start(self.setup)
+        self.assertEqual(self.module.read_bytes(), changed)
+        self.assertEqual(self.receipt_path.read_bytes(), receipt)
+        self.assertEqual(self.actions, [])
+
     def test_apply_starts_disabled_and_native_selection_survives_reapply(self) -> None:
         life.apply_setup(self.setup)
         self.assertFalse((self.target.parent / "rexdeck_files.lua").exists())
@@ -745,7 +925,6 @@ class LifecycleTests(unittest.TestCase):
             "return function(opts)\n"
             'assert(opts.python == "/a python/\\195\\169")\n'
             'assert(opts.rex == "/a \\"rex\\"")\n'
-            'assert(opts.launcher:find("checkout", 1, true))\n'
             'rex.action {name="rexdeck_files",title="RexDeck Files",category="RexDeck",run=function() end}\n'
             "end\n"
         )
@@ -765,7 +944,7 @@ class ProcessBoundaryTests(unittest.TestCase):
         previous = signal.signal(signal.SIGINT, interrupt)
         self.addCleanup(signal.signal, signal.SIGINT, previous)
         with self.assertRaises(KeyboardInterrupt):
-            with life._defer_sigint():
+            with life._defer_cancellation():
                 os.kill(os.getpid(), signal.SIGINT)
                 events.append("owned")
         self.assertEqual(events, ["owned", "delivered"])

@@ -48,6 +48,10 @@ Settings are stored in `$XDG_CONFIG_HOME/rexdeck/config.json` (default `~/.confi
 
 The generated module is `$XDG_DATA_HOME/rexdeck/plugins/files/rexdeck_files.lua` (default `~/.local/share/rexdeck/plugins/files/rexdeck_files.lua`). Setup resolves, validates, and saves the app data root (`…/rexdeck`) once; later commands reuse it even if ambient `XDG_DATA_HOME` changes. The uv-managed package remains the action/launcher source. Only the owned tracked `require` loader is added to the canonical Rex config target, including when the selected config is a symlink; it restores module search path/cache state and lets Rex detect action changes. The module data directory—not the config parent—cannot contain `;` or `?`, which have special module-search meanings. Symlinked or redirecting deployment subdirectories, conflicting files, and changed owned bytes are refused rather than overwritten or silently redirected to config-adjacent storage.
 
+Setup freezes the resolved Unix socket as well as the config target; redirecting an input socket alias cannot retarget later commands. The generated module embeds the applied Lua action and Python launcher together. Updating package files does not change an already applied launcher; `rexdeck enable files` explicitly refreshes both.
+
+The selected config must resolve to the running server's startup config, as reported by its read-only `client.keymap` API. Setting the CLI's `REX_CONFIG` alone cannot change what that server reloads. Setup and later lifecycle commands reject a mismatch or missing server config identity before owned writes; restart the intended server with the correct config before selecting it.
+
 ### Existing native Files setup
 
 This pre-release cutover uses settings schema **2** and receipt schema **3**, binding ownership to the saved app data root. Old or unknown settings/receipts and foreign formats are refused, not automatically adopted. Reinstalling the package alone does not migrate an existing config-adjacent module.
@@ -77,6 +81,8 @@ rexdeck disable files
 ```
 
 Disable removes only unchanged owned loader/module state and reloads the selected config. It preserves config symlinks/modes, unrelated edits, user tool configuration, existing Yazi panes, and data. Changed artifacts produce conflicts for judgment. Failed operations recover owned state without overwriting concurrent edits. Disable never enables the historical Files POC or touches unrelated LazyRex instances. Saved target settings remain available for the next `rexdeck enable files`.
+
+Ctrl-C, SIGTERM, and SIGHUP during a lifecycle mutation run the same rollback path; further cancellation is deferred until recovery finishes. SIGKILL, power loss, and OS crashes cannot run Python recovery, and there is no durable crash-recovery journal. Retain ownership records and inspect artifacts before manual recovery after an uncatchable interruption.
 
 After updating the source checkout, reinstall and refresh the integration before launching Files again:
 

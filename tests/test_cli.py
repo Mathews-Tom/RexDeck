@@ -29,8 +29,10 @@ class CliTests(unittest.TestCase):
         self.config = self.root / "init.lua"
         self.original = b"-- personal config\n"
         self.config.write_bytes(self.original)
-        self.endpoint = "unix:///tmp/rexdeck-cli-private.sock"
-        self.personal = "unix:///tmp/rexdeck-cli-personal.sock"
+        self.endpoint = "unix://" + str(Path("/tmp/rexdeck-cli-private.sock").resolve())
+        self.personal = "unix://" + str(
+            Path("/tmp/rexdeck-cli-personal.sock").resolve()
+        )
         self.settings = self.root / "config/rexdeck/config.json"
         self.workspace = self.root / "state/rexdeck/files"
         self.data_root = self.root / "data/rexdeck"
@@ -39,6 +41,7 @@ class CliTests(unittest.TestCase):
         self.reject_check = False
         self.status_failure = False
         self.reported_endpoint: str | None = None
+        self.running_config = self.config
         environment = {
             "HOME": str(self.root),
             "XDG_CONFIG_HOME": str(self.root / "config"),
@@ -80,6 +83,10 @@ class CliTests(unittest.TestCase):
             )
             return lifecycle._Result(
                 0, json.dumps({"endpoint": reported, "instance_id": endpoint}).encode()
+            )
+        if "client.keymap" in argv:
+            return lifecycle._Result(
+                0, json.dumps({"config": {"path": str(self.running_config)}}).encode()
             )
         if "check" in argv:
             return lifecycle._Result(
@@ -186,6 +193,7 @@ class CliTests(unittest.TestCase):
         native_config = self.root / "config/rex/init.lua"
         native_config.parent.mkdir(parents=True)
         native_config.write_bytes(self.original)
+        self.running_config = native_config
         code, result = self.invoke("setup")
         self.assertEqual(code, 1)
         self.assertIn("approval", str(result["error"]))
@@ -234,6 +242,136 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.invoke("disable", "files")[1]["state"], "disabled")
         self.assertEqual(self.config.read_bytes(), self.original)
 
+    def test_config_parent_traversal_follows_filesystem_not_lexical_target(
+        self,
+    ) -> None:
+        physical = self.root / "physical"
+        (physical / "nested").mkdir(parents=True)
+        alias = self.root / "alias"
+        alias.symlink_to(physical / "nested", target_is_directory=True)
+        actual = self.root / "actual.lua"
+        original = b"-- selected through a directory symlink\n"
+        actual.write_bytes(original)
+        self.running_config = actual
+        leaf = physical / "init.lua"
+        leaf.symlink_to(actual)
+        selected = alias / ".." / "init.lua"
+        for source in ("argument", "environment"):
+            with self.subTest(source=source):
+                if source == "argument":
+                    code, result = self.invoke(
+                        "setup", "--config", str(selected), "--server", self.endpoint
+                    )
+                else:
+                    with patch.dict(os.environ, {"REX_CONFIG": str(selected)}):
+                        code, result = self.invoke("setup", "--server", self.endpoint)
+                self.assertEqual((code, result["state"]), (0, "configured"))
+                self.assertEqual(self.document()["config"], str(leaf))
+                self.assertEqual(self.document()["config_target"], str(actual))
+                self.assertEqual(self.invoke("enable", "files")[0], 0)
+                self.assertNotEqual(actual.read_bytes(), original)
+                self.assertEqual(self.config.read_bytes(), self.original)
+                self.assertEqual(self.invoke("disable", "files")[0], 0)
+                self.assertEqual(actual.read_bytes(), original)
+                self.assertTrue(leaf.is_symlink())
+                self.settings.unlink()
+
+    def test_socket_alias_is_frozen_before_it_can_be_redirected(self) -> None:
+        alias = self.root / "selected.sock"
+        alias.symlink_to(lifecycle._socket_path(self.endpoint))
+        code, result = self.invoke(
+            "setup", "--config", str(self.config), "--server", "unix://" + str(alias)
+        )
+        self.assertEqual((code, result["state"]), (0, "configured"))
+        self.assertEqual(self.document()["server"], self.endpoint)
+        alias.unlink()
+        alias.symlink_to(lifecycle._socket_path(self.personal))
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        self.assertEqual(self.invoke("status")[1]["state"], "ready")
+        self.assertEqual(self.invoke("disable", "files")[0], 0)
+        self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_saved_real_approval_survives_a_change_to_the_default_server(self) -> None:
+        old_default = self.personal
+        self.personal = self.endpoint
+        self.configure("--real-server")
+        self.personal = old_default
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        self.assertEqual(self.invoke("status")[1]["state"], "ready")
+        self.assertTrue(self.document()["real_server"])
+        self.assertEqual(self.invoke("disable", "files")[0], 0)
+        self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_matching_default_instance_requires_approval_even_at_another_socket(
+        self,
+    ) -> None:
+        transport = self.transport
+
+        def same_instance(
+            argv: list[str], env: dict[str, str], *, timeout: float = 8.0
+        ) -> lifecycle._Result:
+            result = transport(argv, env, timeout=timeout)
+            if "status" in argv and "server" in argv:
+                status = json.loads(result.output)
+                status["instance_id"] = "same-personal-instance"
+                return lifecycle._Result(result.code, json.dumps(status).encode())
+            return result
+
+        with patch.object(lifecycle, "_run", same_instance):
+            code, result = self.invoke(
+                "setup", "--config", str(self.config), "--server", self.endpoint
+            )
+        self.assertEqual((code, result["state"]), (1, "failed"))
+        self.assertIn("approval", str(result["error"]).lower())
+        self.assertFalse(self.settings.exists())
+        self.assertFalse(self.module.exists())
+        self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_mismatched_running_config_is_rejected_before_saving_setup(self) -> None:
+        self.running_config = self.root / "another-server-config.lua"
+        self.running_config.write_bytes(b"-- actual server config\n")
+        code, result = self.invoke(
+            "setup", "--config", str(self.config), "--server", self.endpoint
+        )
+        self.assertEqual((code, result["state"]), (1, "conflict"))
+        self.assertFalse(self.settings.exists())
+        self.assertFalse(self.module.exists())
+        self.assertFalse(self.workspace.exists())
+        self.assertEqual(self.config.read_bytes(), self.original)
+        self.assertEqual(self.running_config.read_bytes(), b"-- actual server config\n")
+
+    def test_saved_target_cannot_mutate_a_server_restarted_with_another_config(
+        self,
+    ) -> None:
+        self.configure()
+        self.running_config = self.root / "another-server-config.lua"
+        self.running_config.write_bytes(b"-- actual server config\n")
+        code, _ = self.invoke("enable", "files")
+        self.assertEqual(code, 1)
+        self.assertFalse(self.module.exists())
+        self.assertFalse(self.workspace.exists())
+        self.assertEqual(self.config.read_bytes(), self.original)
+        self.assertEqual(self.running_config.read_bytes(), b"-- actual server config\n")
+
+    def test_missing_running_config_identity_is_not_treated_as_a_match(self) -> None:
+        transport = self.transport
+
+        def no_config_identity(
+            argv: list[str], env: dict[str, str], *, timeout: float = 8.0
+        ) -> lifecycle._Result:
+            if "client.keymap" in argv:
+                return lifecycle._Result(0, b"{}")
+            return transport(argv, env, timeout=timeout)
+
+        with patch.object(lifecycle, "_run", no_config_identity):
+            code, result = self.invoke(
+                "setup", "--config", str(self.config), "--server", self.endpoint
+            )
+        self.assertEqual((code, result["state"]), (1, "conflict"))
+        self.assertFalse(self.settings.exists())
+        self.assertFalse(self.module.exists())
+        self.assertEqual(self.config.read_bytes(), self.original)
+
     def test_symlink_target_is_frozen_for_every_saved_command(self) -> None:
         selected = self.root / "selected.lua"
         selected.symlink_to(self.config)
@@ -243,6 +381,8 @@ class CliTests(unittest.TestCase):
             ],
             0,
         )
+        self.assertEqual(self.document()["config"], str(selected))
+        self.assertEqual(self.document()["config_target"], str(self.config))
         other = self.root / "other.lua"
         other.write_bytes(b"-- other\n")
         selected.unlink()
@@ -317,6 +457,7 @@ class CliTests(unittest.TestCase):
         self.settings.unlink()
         other = self.root / "other.lua"
         other.write_bytes(b"-- other target\n")
+        self.running_config = other
         fresh = self.root / "new-target-state"
         code, result = self.invoke(
             "setup",
@@ -358,6 +499,48 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn("rexdeck setup", str(result["error"]))
         self.assertFalse(self.calls)
+
+    def test_initial_symlinked_app_root_is_rejected_before_any_writes(self) -> None:
+        self.data_root.parent.mkdir()
+        for existing in (True, False):
+            with self.subTest(existing=existing):
+                target = self.root / ("foreign-data" if existing else "missing-data")
+                marker = target / "keep.txt"
+                if existing:
+                    target.mkdir()
+                    marker.write_bytes(b"foreign data\n")
+                self.data_root.symlink_to(target, target_is_directory=True)
+                code, result = self.invoke(
+                    "setup", "--config", str(self.config), "--server", self.endpoint
+                )
+                self.assertEqual((code, result["state"]), (1, "failed"))
+                self.assertIn("directory is redirected", str(result["error"]))
+                self.assertFalse(self.settings.parent.exists())
+                self.assertFalse(self.workspace.exists())
+                self.assertFalse(self.calls)
+                self.assertTrue(self.data_root.is_symlink())
+                self.assertEqual(self.config.read_bytes(), self.original)
+                if existing:
+                    self.assertEqual(list(target.iterdir()), [marker])
+                    self.assertEqual(marker.read_bytes(), b"foreign data\n")
+                else:
+                    self.assertFalse(target.exists())
+                self.data_root.unlink()
+
+    def test_xdg_data_base_alias_saves_canonical_root_and_allows_lifecycle(
+        self,
+    ) -> None:
+        self.data_root.parent.mkdir()
+        alias = self.root / "data-alias"
+        alias.symlink_to(self.data_root.parent, target_is_directory=True)
+        with patch.dict(os.environ, {"XDG_DATA_HOME": str(alias)}):
+            self.configure()
+            self.assertEqual(self.document()["data_root"], str(self.data_root))
+            self.assertEqual(self.invoke("enable", "files")[1]["state"], "ready")
+            self.assertTrue(self.module.is_file())
+            self.assertEqual(self.invoke("disable", "files")[1]["state"], "disabled")
+        self.assertTrue(alias.is_symlink())
+        self.assertEqual(self.config.read_bytes(), self.original)
 
     def test_saved_data_destination_survives_ambient_xdg_changes(self) -> None:
         self.configure()
