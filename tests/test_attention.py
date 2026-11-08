@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
+import io
 import json
 import os
 import stat
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -530,3 +533,596 @@ def test_cli_refresh_exit_codes_streams_and_recursive_json_failure(
     captured = capsys.readouterr()
     assert not captured.out and json.loads(captured.err)["state"] == "failed"
     assert "Traceback" not in captured.err
+
+
+def hook_payload(event: str = "SubagentStart") -> dict[str, object]:
+    return {
+        "hook_event_name": event,
+        "session_id": "parent-provider-id",
+        "agent_id": "child-provider-id",
+        "agent_type": "Explore",
+        "cwd": "/project/worktree",
+        "turn_id": "must-not-retain",
+        "transcript_path": "/private/parent-transcript",
+        "agent_transcript_path": "/private/child-transcript",
+        "last_assistant_message": "private response must not be retained",
+    }
+
+
+def hook_environment(
+    monkeypatch: pytest.MonkeyPatch, target: settings.SavedTarget, *, bound: bool = True
+) -> None:
+    for variable, value in (
+        ("REX_SERVER", target.server),
+        ("REX_SESSION", "session:one"),
+        ("REX_BLOCK", "block:one"),
+    ):
+        if bound:
+            monkeypatch.setenv(variable, value)
+        else:
+            monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(settings, "load", lambda path: target)
+
+
+def invoke_hook(
+    monkeypatch: pytest.MonkeyPatch, raw: bytes, provider: str = "claude-code"
+) -> int:
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw)))
+    monkeypatch.setattr(sys, "argv", ["rexdeck", "attention", "hook", provider])
+    return cli.main()
+
+
+@pytest.mark.parametrize("provider", attention.PROVIDERS)
+def test_provider_lifecycle_parentage_privacy_and_exact_navigation(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    provider: str,
+) -> None:
+    backend, target = native
+    hook_environment(monkeypatch, target)
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode(), provider) == 0
+    row = rows(target, provider=provider, parent="parent-provider-id")[0]
+    assert row["state"] == "started" and row["outcome"] == "unknown"
+    assert row["agent_id"] == "child-provider-id"
+    assert row["rex_server"] == target.server
+    assert row["session_id"] == "session:one" and row["block_id"] == "block:one"
+    assert row["instance_id"] == "instance-one" and row["binding"] == "bound"
+    assert row["last_message_present"] and row["agent_transcript_present"]
+    assert row["transcript_present"]
+    assert not rows(target, provider=provider, agent="another-child")
+    document = attention._path(target, provider_store=True).read_text()
+    for secret in (
+        "private response",
+        "/private/parent-transcript",
+        "/private/child-transcript",
+        "must-not-retain",
+        "turn_id",
+    ):
+        assert secret not in document
+    listing = attention.listing(target, provider=provider)
+    parents = cast(list[dict[str, object]], listing["parents"])
+    assert parents[0]["parent_session_id"] == "parent-provider-id"
+    assert parents[0]["children"] == [row["id"]]
+    attention.jump(target, str(row["id"]))
+    assert backend.focused == [{"block_id": "block:one"}]
+    with pytest.raises(RuntimeError, match="Unknown attention"):
+        attention.refresh(target, str(row["id"]))
+    assert (
+        invoke_hook(
+            monkeypatch, json.dumps(hook_payload("SubagentStop")).encode(), provider
+        )
+        == 0
+    )
+    stopped = rows(target, provider=provider)[0]
+    assert stopped["id"] == row["id"] and stopped["state"] == "stopped"
+    assert stopped["outcome"] == "unknown"
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.mark.parametrize(
+    "failure", ["unbound", "foreign", "closed", "detached", "offline"]
+)
+def test_provider_unfocusable_binding_preserves_metadata(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    backend, target = native
+    hook_environment(monkeypatch, target, bound=failure != "unbound")
+    if failure == "foreign":
+        monkeypatch.setenv("REX_SERVER", "unix:///different.sock")
+    elif failure == "closed":
+        backend.present = False
+    elif failure == "detached":
+        backend.placement = "detached"
+    elif failure == "offline":
+        backend.connected = False
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    row = rows(target, provider="claude-code")[0]
+    assert row["binding"] == "unbound" and row["agent_id"] == "child-provider-id"
+    with pytest.raises(RuntimeError, match="unbound"):
+        attention.jump(target, str(row["id"]))
+    assert not backend.focused
+
+
+@pytest.mark.parametrize("change", ["instance", "host", "closure", "placement"])
+def test_provider_jump_revalidates_captured_binding(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    backend, target = native
+    hook_environment(monkeypatch, target)
+    invoke_hook(monkeypatch, json.dumps(hook_payload()).encode())
+    row = rows(target, provider="claude-code")[0]
+    if change == "instance":
+        backend.instance = "replacement-instance"
+    elif change == "host":
+        backend.host = "replacement-host"
+    elif change == "closure":
+        backend.present = False
+    else:
+        backend.placement = "detached"
+    with pytest.raises(RuntimeError, match="no focus attempted"):
+        attention.jump(target, str(row["id"]))
+    assert not backend.focused
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"not JSON",
+        b"[]",
+        b"\xff",
+        b"[" * 2000,
+        b"x" * (attention._MAX_HOOK_BYTES + 1),
+        b'{"hook_event_name":"SubagentStart"}',
+        b'{"hook_event_name":"Stop"}',
+    ],
+)
+def test_hook_malformed_input_is_silent_and_does_not_corrupt(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    raw: bytes,
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    attention.observe(target, "session:one", "block:one")
+    before = attention._path(target).read_bytes()
+    assert invoke_hook(monkeypatch, raw) == 0
+    assert attention._path(target).read_bytes() == before
+    assert capsys.readouterr() == ("", "")
+
+
+def test_hook_timeout_lock_and_native_deadline_are_fail_open(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    attention.observe(target, "session:one", "block:one")
+    invoke_hook(monkeypatch, json.dumps(hook_payload()).encode())
+    path = attention._path(target, provider_store=True)
+    before = path.read_bytes()
+    with path.with_suffix(".lock").open("r+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        monkeypatch.setattr(attention, "_HOOK_SAVE_MARGIN", 0.98)
+        assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    assert path.read_bytes() == before
+    monkeypatch.setattr(attention, "_HOOK_SAVE_MARGIN", 0.05)
+    monkeypatch.setattr(attention, "_BINDING_SECONDS", 0.02)
+
+    def blocked(setup: lifecycle.Setup) -> str:
+        time.sleep(1)
+        raise AssertionError("Hook deadline did not interrupt native lookup")
+
+    monkeypatch.setattr(attention, "_status", blocked)
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    timed_out = rows(target, provider="claude-code")[0]
+    assert timed_out["binding"] == "unbound"
+    assert timed_out["binding_reason"] == "verification-timeout"
+    assert len(rows(target)) == 2
+    assert capsys.readouterr() == ("", "")
+
+
+def test_hook_stdin_deadline_and_missing_setup_are_silent(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    monkeypatch.setattr(settings, "load", lambda path: None)
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    assert not attention._path(target).exists()
+    read_fd, write_fd = os.pipe()
+    try:
+        with os.fdopen(read_fd, "r") as source:
+            monkeypatch.setattr(sys, "stdin", source)
+            monkeypatch.setattr(attention, "_HOOK_SECONDS", 0.02)
+            assert attention.hook("codex") == 0
+    finally:
+        os.close(write_fd)
+    assert capsys.readouterr() == ("", "")
+
+
+def test_native_v1_unchanged_and_provider_rollback_preserves_native_and_sibling(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    native_id = attention.observe(target, "session:one", "block:one")["id"]
+    path = attention._path(target)
+    before = path.read_bytes()
+    document = json.loads(before)
+    assert document["version"] == 1
+    assert all("row_type" not in row for row in document["rows"].values())
+    for provider in attention.PROVIDERS:
+        invoke_hook(monkeypatch, json.dumps(hook_payload()).encode(), provider)
+    assert path.read_bytes() == before
+    provider_document = json.loads(
+        attention._path(target, provider_store=True).read_text()
+    )
+    assert provider_document["version"] == 1
+    assert provider_document["kind"] == "provider-subagents"
+    result = attention.clear_provider(target, "claude-code")
+    assert result["removed"] == 1
+    assert not rows(target, provider="claude-code")
+    assert len(rows(target, provider="codex")) == 1
+    assert any(row["id"] == native_id for row in rows(target))
+    assert path.read_bytes() == before
+    with attention._store(target, provider_store=True) as retained:
+        for row in retained.values():
+            row["observed_at"] = time.time() - 61
+        attention._save(target, retained, provider_store=True)
+    assert rows(target, provider="codex")[0]["freshness"] == "stale"
+
+
+def test_provider_nullable_fields_empty_agent_type_and_namespaced_ids(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    payload = hook_payload("SubagentStop")
+    payload.update(
+        agent_type="",
+        transcript_path=None,
+        agent_transcript_path=None,
+        last_assistant_message=None,
+    )
+    for provider in attention.PROVIDERS:
+        invoke_hook(monkeypatch, json.dumps(payload).encode(), provider)
+    retained = rows(target)
+    assert len(retained) == 2 and retained[0]["id"] != retained[1]["id"]
+    assert all(row["agent_type"] == "" for row in retained)
+    assert all(not row["last_message_present"] for row in retained)
+    assert all(not row["transcript_present"] for row in retained)
+
+
+def test_hook_exact_saved_endpoint_verification_without_rex_server(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend, target = native
+    hook_environment(monkeypatch, target)
+    monkeypatch.delenv("REX_SERVER")
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    row = rows(target, provider="claude-code")[0]
+    assert row["rex_server"] is None
+    assert row["endpoint"] == target.server
+    assert row["binding"] == "bound" and row["binding_reason"] == "verified"
+    attention.jump(target, str(row["id"]))
+    assert backend.focused == [{"block_id": "block:one"}]
+
+
+@pytest.mark.parametrize("endpoint", ["unix:///foreign.sock", "not-a-unix-endpoint"])
+def test_hook_conflicting_endpoint_retains_unbound_reason(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    monkeypatch.setenv("REX_SERVER", endpoint)
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    row = rows(target, provider="claude-code")[0]
+    assert row["binding"] == "unbound" and row["binding_reason"] == "endpoint-mismatch"
+    assert row["rex_server"] == endpoint
+
+
+@pytest.mark.parametrize("failure", ["id-size", "cwd-size", "row-limit", "provider"])
+def test_hook_invalid_fields_and_retention_limits_cannot_poison_native_evidence(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    attention.observe(target, "session:one", "block:one")
+    before = attention._path(target).read_bytes()
+    payload = hook_payload()
+    if failure == "id-size":
+        payload["agent_id"] = "a" * 1025
+    elif failure == "cwd-size":
+        payload["cwd"] = "a" * 4097
+    elif failure == "row-limit":
+        monkeypatch.setattr(attention, "_MAX_PROVIDER_ROWS", 0)
+    provider = "omp" if failure == "provider" else "claude-code"
+    assert invoke_hook(monkeypatch, json.dumps(payload).encode(), provider) == 0
+    assert attention._path(target).read_bytes() == before
+    assert capsys.readouterr() == ("", "")
+
+
+def test_older_provider_receipt_cannot_overwrite_newer_snapshot(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    invoke_hook(monkeypatch, json.dumps(hook_payload("SubagentStop")).encode())
+    with attention._store(target, provider_store=True) as retained:
+        for row in retained.values():
+            row["observed_at"] = time.time() + 10
+        attention._save(target, retained, provider_store=True)
+    before = attention._path(target, provider_store=True).read_bytes()
+    invoke_hook(monkeypatch, json.dumps(hook_payload()).encode())
+    assert attention._path(target, provider_store=True).read_bytes() == before
+    assert rows(target)[0]["state"] == "stopped"
+
+
+def test_full_provider_quota_never_consumes_native_capacity(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    for index in range(attention._MAX_PROVIDER_ROWS):
+        payload = hook_payload()
+        payload["agent_id"] = f"child-{index}"
+        attention._receive_hook(target, "codex", payload)
+    provider_path = attention._path(target, provider_store=True)
+    before = provider_path.read_bytes()
+    overflow = hook_payload()
+    overflow["agent_id"] = "one-too-many"
+    attention._receive_hook(target, "codex", overflow)
+    assert provider_path.read_bytes() == before
+    result = attention.observe(target, "session:one", "block:one")
+    assert result["state"] == "observed"
+    assert len(rows(target, provider="codex")) == attention._MAX_PROVIDER_ROWS
+    assert attention.clear_provider(target, "codex")["removed"] == 64
+    attention._receive_hook(target, "codex", overflow)
+    assert len(rows(target, provider="codex")) == 1
+
+
+def test_hook_large_stop_message_keeps_metadata_and_drains_oversize_input(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    payload = hook_payload("SubagentStop")
+    payload["last_assistant_message"] = "private-message-" * 10000
+    assert invoke_hook(monkeypatch, json.dumps(payload).encode()) == 0
+    assert rows(target)[0]["state"] == "stopped"
+    assert rows(target)[0]["last_message_present"]
+    path = attention._path(target, provider_store=True)
+    assert "private-message-" not in path.read_text()
+    before = path.read_bytes()
+    source = io.TextIOWrapper(io.BytesIO(b"x" * (attention._MAX_HOOK_BYTES + 65536)))
+    monkeypatch.setattr(sys, "stdin", source)
+    assert attention.hook("claude-code") == 0
+    assert source.buffer.read() == b""
+    assert path.read_bytes() == before
+
+
+def test_native_near_16k_v1_row_is_not_changed_by_provider_receipts(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    attention.observe(target, "session:one", "block:one")
+    path = attention._path(target)
+    document = json.loads(path.read_text())
+    row = next(iter(document["rows"].values()))
+    row["project"] = ""
+    size = len(json.dumps(row, ensure_ascii=True).encode())
+    row["project"] = "x" * (attention._MAX_ROW_BYTES - size)
+    assert len(json.dumps(row, ensure_ascii=True).encode()) == attention._MAX_ROW_BYTES
+    path.write_text(json.dumps(document))
+    before = path.read_bytes()
+    assert rows(target)[0]["row_type"] == "native"
+    invoke_hook(monkeypatch, json.dumps(hook_payload()).encode())
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("variable", ["REX_SERVER", "REX_SESSION", "REX_BLOCK"])
+def test_empty_inherited_rex_value_retains_unbound_receipt(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    monkeypatch.setenv(variable, "")
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    row = rows(target)[0]
+    assert row["binding"] == "unbound"
+    expected = (
+        "endpoint-mismatch" if variable == "REX_SERVER" else "missing-identifiers"
+    )
+    assert row["binding_reason"] == expected
+
+
+def test_parallel_hook_receivers_wait_for_remaining_deadline_and_both_retain(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    attention._receive_hook(target, "codex", hook_payload())
+    path = attention._path(target, provider_store=True)
+    code = (
+        "from pathlib import Path; from rexdeck import attention,lifecycle,settings; "
+        f"target=settings.SavedTarget(Path({str(target.workspace)!r}),"
+        f"Path({str(target.data_root)!r}),Path({str(target.config)!r}),"
+        f"Path({str(target.config_target)!r}),{target.server!r},False); "
+        "settings.SavedTarget.setup=lambda self: lifecycle.Setup("
+        "Path('/tmp'),target.workspace,target.config,target.data_root,target.server); "
+        "settings.load=lambda path: target; raise SystemExit(attention.hook('codex'))"
+    )
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("REX_")
+    }
+    env["PYTHONPATH"] = str(Path(attention.__file__).parent.parent)
+    children: list[subprocess.Popen[bytes]] = []
+    try:
+        with path.with_suffix(".lock").open("r+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            for index in range(2):
+                payload = hook_payload()
+                payload["agent_id"] = f"parallel-child-{index}"
+                child = subprocess.Popen(
+                    [sys.executable, "-c", code],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                )
+                children.append(child)
+                assert child.stdin is not None
+                child.stdin.write(json.dumps(payload).encode())
+                child.stdin.close()
+                child.stdin = None
+            time.sleep(0.3)
+        for child in children:
+            stdout, stderr = child.communicate(timeout=3)
+            assert child.returncode == 0 and not stdout and not stderr
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+    assert len(rows(target, provider="codex")) == 3
+
+
+def test_provider_byte_limit_does_not_reduce_native_byte_budget(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    monkeypatch.setattr(attention, "_MAX_PROVIDER_BYTES", 4096)
+    for index in range(10):
+        payload = hook_payload()
+        payload["agent_id"] = f"byte-cap-child-{index}"
+        invoke_hook(monkeypatch, json.dumps(payload).encode())
+    provider_path = attention._path(target, provider_store=True)
+    assert provider_path.stat().st_size <= 4096
+    assert 0 < len(rows(target, provider="claude-code")) < 10
+    assert attention._MAX_BYTES == 2 * 1024 * 1024
+    assert attention.observe(target, "session:one", "block:one")["state"] == "observed"
+
+
+@pytest.mark.parametrize(
+    "kind", ["storage-symlink", "storage-fifo", "lock-symlink", "lock-fifo"]
+)
+def test_provider_store_rejects_redirected_files_without_blocking_native_observe(
+    native: tuple[Native, settings.SavedTarget], kind: str
+) -> None:
+    _, target = native
+    path = attention._path(target, provider_store=True)
+    path.parent.mkdir(parents=True)
+    selected = path.with_suffix(".lock") if kind.startswith("lock") else path
+    if kind.endswith("fifo"):
+        os.mkfifo(selected)
+    else:
+        foreign = path.with_name("foreign-file")
+        foreign.write_text("{}")
+        selected.symlink_to(foreign)
+    with (
+        pytest.raises((RuntimeError, OSError)),
+        attention._store(target, provider_store=True),
+    ):
+        raise AssertionError("Provider store accepted a redirected file")
+    assert attention.observe(target, "session:one", "block:one")["state"] == "observed"
+    listing = attention.listing(target)
+    assert listing["state"] == "fault" and listing["provider_state"] == "fault"
+    assert listing["provider_error"]
+    assert len(cast(list[dict[str, object]], listing["rows"])) == 1
+    cleared = attention.clear_provider(target, "codex")
+    assert cleared["state"] == "fault" and cleared["provider_state"] == "fault"
+    assert cleared["provider_error"] and "removed" not in cleared
+
+
+@pytest.mark.parametrize("fault", ["malformed-json", "invalid-kind", "bad-row", "size"])
+def test_provider_store_faults_preserve_native_cli_output_and_allow_explicit_recovery(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fault: str,
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    native_id = attention.observe(target, "session:one", "block:one")["id"]
+    attention._receive_hook(target, "codex", hook_payload())
+    path = attention._path(target, provider_store=True)
+    if fault == "malformed-json":
+        path.write_text("{")
+    elif fault == "invalid-kind":
+        path.write_text('{"version":1,"kind":"foreign","rows":{}}')
+    elif fault == "bad-row":
+        document = json.loads(path.read_text())
+        next(iter(document["rows"].values()))["binding_reason"] = []
+        path.write_text(json.dumps(document))
+    else:
+        path.write_bytes(b"x" * (attention._MAX_PROVIDER_BYTES + 1))
+    provider_before = path.read_bytes()
+    native_before = attention._path(target).read_bytes()
+    monkeypatch.setattr(sys, "argv", ["rexdeck", "attention", "list"])
+    assert cli.main() == 1
+    captured = capsys.readouterr()
+    assert not captured.err
+    result = json.loads(captured.out)
+    assert result["provider_state"] == "fault" and result["provider_error"]
+    assert result["rows"][0]["id"] == native_id
+    monkeypatch.setattr(
+        sys, "argv", ["rexdeck", "attention", "clear", "--provider", "codex"]
+    )
+    assert cli.main() == 1
+    captured = capsys.readouterr()
+    assert not captured.err and json.loads(captured.out)["provider_state"] == "fault"
+    assert path.read_bytes() == provider_before
+    assert attention._path(target).read_bytes() == native_before
+    path.unlink()  # Explicit operator recovery, with no hooks/writers running.
+    assert attention.clear_provider(target, "codex")["provider_state"] == "ready"
+    assert attention.listing(target)["provider_state"] == "ready"
+    assert attention._path(target).read_bytes() == native_before
+
+
+def test_provider_jump_releases_store_lock_before_all_native_ipc(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend, target = native
+    hook_environment(monkeypatch, target)
+    invoke_hook(monkeypatch, json.dumps(hook_payload()).encode())
+    identity = str(rows(target, provider="claude-code")[0]["id"])
+    path = attention._path(target, provider_store=True).with_suffix(".lock")
+    checked: list[str] = []
+
+    def assert_unlocked(stage: str) -> None:
+        with path.open("r+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            checked.append(stage)
+
+    def status(setup: lifecycle.Setup, *, selected: bool) -> dict[str, object]:
+        assert_unlocked("status")
+        return backend.status(setup, selected=selected)
+
+    def rex(setup: lifecycle.Setup, *args: str) -> dict[str, object]:
+        assert_unlocked("rex")
+        return backend.rex(setup, *args)
+
+    monkeypatch.setattr(lifecycle, "_server_status", status)
+    monkeypatch.setattr(lifecycle, "_rex", rex)
+    attention.jump(target, identity)
+    assert checked == ["status", "rex", "rex", "rex"]
+    assert backend.focused == [{"block_id": "block:one"}]
