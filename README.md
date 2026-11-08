@@ -15,22 +15,21 @@ Files and local Git bring unmodified Yazi and lazygit into native Rex terminals.
 | Agents and subagents | Attention, observed state, and navigation to agent work | Planned |
 | Tasks | Independently selectable Linear and ClickUp workflows | Planned |
 
-Planned integrations are not implemented or installable yet. RexDeck is not published on PyPI; install the current source package as described below.
+Planned integrations are not implemented or installable yet. Published RexDeck releases are available on [PyPI](https://pypi.org/project/rexdeck/); `rexdeck plugins` is new in version 0.1.1.
 
 ## Getting started
 
 The qualified platform is **macOS arm64, Rex API revision 10 baseline, and Python 3.12+**. Revision 10 is not an exact-version compatibility gate. Rex must already be installed and running; RexDeck does not bootstrap Rex, Homebrew, Python, or uv. Other platforms, remote hosts, and multi-device operation are not qualified.
 
-Until the approved PyPI release is published, install the pinned public source baseline (Files and Git; before S1 dependency onboarding):
+Install the latest published release from PyPI:
 
 ```sh
-uv tool install 'git+https://github.com/Mathews-Tom/RexDeck.git@d7f934e31d2becf53bc435ac931fa6e1b984bbd0'
+uv tool install --default-index https://pypi.org/simple rexdeck
 ```
 
-For the S1 candidate, use its reviewed checkout and record the exact commit:
+Then save your target and enable only the integrations you need:
 
 ```sh
-uv tool install .
 rexdeck setup
 rexdeck enable files
 rexdeck status
@@ -54,7 +53,7 @@ Install dependencies yourself using qualified upstream releases: [Yazi 26.9.1](h
 
 If you choose Homebrew, first run `brew info yazi` or `brew info lazygit` yourself and inspect the selected version and dependency/source-build/upgrade effects. **Skip Homebrew if its selected version is not qualified**; use the qualified upstream release instead. Only if the version qualifies and you accept the package effects, run the selected `brew install yazi` or `brew install lazygit` yourself. RexDeck does not qualify a Homebrew version, prefix or transaction; all package effects remain owner-controlled.
 
-Check `yazi --version` or `lazygit --version` (and `git --version` for Git), then rerun `rexdeck enable files` or `rexdeck enable git`. The pinned pre-S1 source baseline above requires manual dependency provisioning too, but does not contain S1's selected-tool qualification/guidance behavior.
+Check `yazi --version` or `lazygit --version` (and `git --version` for Git), then rerun `rexdeck enable files` or `rexdeck enable git`.
 
 Rex, Yazi, lazygit, Git, Homebrew, Python and uv remain externally managed prerequisites. No install-all, sudo, silent upgrade, tool configuration change, or upstream package removal is performed. `disable` and Python package uninstall leave upstream tools installed.
 
@@ -81,9 +80,9 @@ uv run pytest
 
 Plugin-specific syntax checks and real interaction verification belong in each plugin's README. Keep plugin documentation under `plugins/<name>/README.md` and packaged runtime assets under `src/rexdeck/plugins/<name>/`. Link available integrations from the table above. Do not create empty plugin folders for planned features.
 
-## Release preparation and owner gate
+## Release workflow and owner gate
 
-Version **0.1.0 is prepared, not evidence of publication**. Do not use a PyPI install command until the release's public registry files and hashes have been verified. A PyPI name lookup returning 404 does not establish ownership, name eligibility, or publishing access.
+Source version **0.1.1** targets the plugin-listing patch release. Confirm publication using its public registry files and hashes; local version metadata, a tag or a GitHub Release alone does not prove PyPI delivery. The previous **0.1.0** release is already published and verified.
 
 The manual [`publish.yml`](.github/workflows/publish.yml) workflow supports [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) using [uv](https://docs.astral.sh/uv/guides/package/#publishing-your-package). No ordinary push, PR, or tag publishes anything; no release-time rebuild occurs.
 
@@ -91,14 +90,14 @@ Before dispatch, the owner must configure a PyPI project or pending publisher fo
 
 The S1 publication boundary assumes this remains a personal-account repository with Mathews-Tom as its sole administrator. Owner-controlled bypass/configuration is trusted; transfer to an organization requires re-evaluating that gate.
 
-1. Merge only the reviewed candidate. A successful **push on main** `checks.yml` run builds wheel/sdist once and retains the exact pair as `rexdeck-0.1.0`; download and inspect them, record both SHA-256 hashes, immutable artifact ID, full commit SHA, run URL, and runtime/security/review evidence. Artifacts expire; a rebuild requires fresh hashes and approval.
-2. Obtain explicit owner approval naming that exact commit, artifact ID, both filenames/hashes, and reviewed evidence. Any changed input requires renewed approval. After this approval only, create/verify the annotated `v0.1.0` tag and GitHub Release at that commit, attaching the same files; never rebuild for a tag.
-3. Dispatch `publish.yml` **from main at that approved commit**, entering the exact SHA, artifact ID, hashes and approval-evidence URL. The protected-environment reviewer must compare the dispatch inputs/run summary against the approval before approving the deployment. The workflow verifies repository/run provenance, tag target and hashes, then publishes only `approved/rexdeck-0.1.0.tar.gz` and `approved/rexdeck-0.1.0-py3-none-any.whl` with `uv publish --trusted-publishing always` (no token secret or broad `dist/*` upload).
-4. Verify [PyPI JSON](https://pypi.org/pypi/rexdeck/0.1.0/json) exposes both approved hashes. Then run an isolated no-cache public-index install, allowing index propagation, and repeat actual private Rex use/quit/refresh/disable. Only then document `uv tool install 'rexdeck==0.1.0'` as available:
+1. Merge only the reviewed candidate. A successful **push on main** `checks.yml` run builds wheel/sdist once and retains the exact pair as `rexdeck-0.1.1`; download and inspect them, record both SHA-256 hashes, immutable artifact ID, full commit SHA, run URL, and runtime/security/review evidence. Artifacts expire; a rebuild requires fresh hashes and approval.
+2. Obtain explicit owner approval naming that exact commit, artifact ID, both filenames/hashes, and reviewed evidence. Any changed input requires renewed approval. After this approval only, create/verify the annotated `v0.1.1` tag and GitHub Release at that commit, attaching the same files; never rebuild for a tag.
+3. Dispatch `publish.yml` **from main at that approved commit**, entering the exact SHA, artifact ID, hashes and approval-evidence URL. The protected-environment reviewer must compare the dispatch inputs/run summary against the approval before approving the deployment. The workflow verifies repository/run provenance, tag target and hashes, then publishes only `approved/rexdeck-0.1.1.tar.gz` and `approved/rexdeck-0.1.1-py3-none-any.whl` with `uv publish --trusted-publishing always` (no token secret or broad `dist/*` upload).
+4. Verify [PyPI JSON](https://pypi.org/pypi/rexdeck/0.1.1/json) exposes both approved hashes. Then run an isolated no-cache public-index install, allowing index propagation, and repeat actual private Rex use/quit/refresh/disable. Only then claim `rexdeck==0.1.1` is published:
 
    ```sh
    uv --no-cache run --isolated --no-project --index https://pypi.org/simple \
-     --with rexdeck==0.1.0 rexdeck --help
+     --with rexdeck==0.1.1 rexdeck plugins
    ```
 
 CI and private endpoint/TUI captures do not prove owner-app palette, glyph, or desktop visual approval. Successful package installation does not prove native interaction; successful local builds do not prove registry publication. Keep those evidence claims separate.
