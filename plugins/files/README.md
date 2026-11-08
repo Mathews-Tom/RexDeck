@@ -6,9 +6,9 @@ Launch unmodified [Yazi](https://yazi-rs.github.io/) from Rex's native palette i
 
 ## Requirements
 
-- macOS arm64 and an existing Rex CLI/server using API revision 10.
-- Python 3.12+, `uv`, and Yazi available on `PATH`. Yazi 26.9.1 is the verified local navigation baseline.
-- Terminal/font support required by your Yazi configuration. RexDeck does not install tools/fonts or change their settings.
+- macOS arm64 and an existing Rex CLI/server; API revision 10 is the established baseline, not an exact-version compatibility gate.
+- Python 3.12+, `uv`, and Yazi on `PATH` at qualified version **26.9.1**. Other installed versions require manual resolution, not an implicit upgrade.
+- Terminal/font support required by your Yazi configuration. RexDeck does not install fonts or change tool settings.
 
 Other platforms, remote hosts, and multi-device use are not qualified. RexDeck is not published on PyPI; install from the source checkout.
 
@@ -31,6 +31,10 @@ rexdeck status
 ```
 
 `setup` discovers the current Rex endpoint and uses `REX_CONFIG`, or the standard `$XDG_CONFIG_HOME/rex/init.lua` / `~/.config/rex/init.lua` configuration. It displays the target and requests approval before remembering a personal-server selection. It does not install an action, change Rex configuration, or start a missing server. `enable files` performs the owned installation and enables the native action; no separate apply/start commands or shell wrapper are needed.
+
+Setup/status never install tools. `enable files` validates preinstalled Yazi **26.9.1**, reuses its qualified executable and revalidates metadata identity and the saved target before registration. Missing or unqualified Yazi returns actionable nonzero manual-install/version-check/rerun guidance without a prompt or partial registration. RexDeck never installs, upgrades or removes Yazi, or probes/executes Homebrew.
+
+Install [Yazi 26.9.1](https://github.com/sxyazi/yazi/releases/tag/v26.9.1) yourself following [upstream installation](https://yazi-rs.github.io/docs/installation/). If choosing Homebrew, inspect `brew info yazi` yourself first; skip Homebrew if its selected version is not 26.9.1 and use that upstream release instead. Only run `brew install yazi` yourself if the selected version qualifies and you accept its dependency/source-build/upgrade effects. Check `yazi --version`, then rerun `rexdeck enable files`. RexDeck qualifies neither Homebrew's version nor its prefix and never owns package transactions. Rex, Homebrew, Python and uv also remain externally managed; disable/uninstall leaves Yazi and its settings intact.
 
 For a custom target or noninteractive setup, select and approve it explicitly once:
 
@@ -105,3 +109,5 @@ luajit -b src/rexdeck/plugins/files/main.lua /tmp/rexdeck-files-syntax.out
 ```
 
 Lua compilation is not runtime proof. Build and install the wheel outside the checkout, then exercise setup/enable/status, native action/Yazi navigation and quit focus, reinstall/refresh, and disable on a private Rex server. Owner-app palette, glyphs, and visual behavior require owner-led checking rather than a CLI-only GUI claim.
+
+Yazi is an unbundled [MIT-licensed upstream tool](https://github.com/sxyazi/yazi/blob/main/LICENSE); Rex remains an external, separately licensed prerequisite. See the root [release owner gate](../../README.md#release-preparation-and-owner-gate) for pinned source installation and publication/evidence limits.

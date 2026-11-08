@@ -6,11 +6,11 @@ Launch unmodified [lazygit](https://github.com/jesseduffield/lazygit) in a nativ
 
 ## Requirements and capabilities
 
-- macOS arm64, Rex CLI/server API revision 10, Python 3.12+, and `uv`.
-- `git` and `lazygit` on `PATH`. Private runtime qualification used Git 2.56.0 and lazygit 0.66.2; other versions/platforms are not qualified.
+- macOS arm64, existing Rex CLI/server (API revision 10 baseline, not an exact-version gate), Python 3.12+, and `uv`.
+- `git` and `lazygit` on `PATH`. Lazygit **0.66.2 and 0.66.3** are qualified versions; other installed versions require manual resolution, never implicit upgrade. Private runtime qualification used Git 2.56.0; other platforms are not qualified.
 - An invoking terminal that reports its current local directory to Rex. A normal repository subdirectory or linked worktree is supported; a bare repository, missing directory, or unavailable cwd is rejected.
 
-Lazygit is **write-capable**, runs as your OS account, and retains its normal keys, settings, editor, custom commands, authentication, and network operations. RexDeck neither sandboxes it nor makes it read-only. Upstream Git hooks and configured commands retain their effects. Enable does not fetch, stage, commit, push, log in, install tools, or change Git settings. The initial directory is not a filesystem jail.
+Lazygit is **write-capable**, runs as your OS account, and retains its normal keys, settings, editor, custom commands, authentication, and network operations. RexDeck neither sandboxes it nor makes it read-only. Upstream Git hooks and configured commands retain their effects. Enable does not fetch, stage, commit, push, log in, or change Git settings. The initial directory is not a filesystem jail.
 
 ## Enable and use
 
@@ -21,6 +21,10 @@ rexdeck setup
 rexdeck enable git
 rexdeck status git
 ```
+
+Setup/status never install packages. `enable git` validates preinstalled Git and qualified lazygit **0.66.2 or 0.66.3**, reusing the qualified executable and revalidating metadata identity plus the saved target before registration. Missing or unqualified selected tools return actionable nonzero manual-install/version-check/rerun guidance without prompts or partial registration. RexDeck never installs, upgrades or removes Git/lazygit, or probes/executes Homebrew.
+
+Install [lazygit 0.66.2](https://github.com/jesseduffield/lazygit/releases/tag/v0.66.2) or [0.66.3](https://github.com/jesseduffield/lazygit/releases/tag/v0.66.3) yourself using [upstream instructions](https://github.com/jesseduffield/lazygit#installation); provision Git separately. If choosing Homebrew, inspect `brew info lazygit` yourself first; skip Homebrew if its selected version is not qualified and use a qualified upstream release instead. Only run `brew install lazygit` yourself when its version qualifies and you accept its dependency/source-build/upgrade effects. Check `lazygit --version` and `git --version`, then rerun `rexdeck enable git`. RexDeck qualifies neither Homebrew's version nor its prefix; the owner controls all package effects. Disable/uninstall leaves Git/lazygit and their configuration intact.
 
 From the intended repository terminal, choose **RexDeck Git** in Rex's native palette. The terminal split runs lazygit with structured argv and the validated invoking cwd. Git performs its normal repository discovery; RexDeck does not manufacture a `.git` directory or collapse linked worktrees to their common repository.
 
@@ -55,3 +59,5 @@ Run `disable` for **every applied** integration before uninstalling RexDeck or d
 ## Verification
 
 Run the root Ruff/format/strict-mypy/full-pytest chain and compile the shared packaged `src/rexdeck/plugins/files/main.lua` asset. Build/install the wheel outside the checkout and use a private native Rex endpoint with disposable repositories. Exercise actual diff/stage/commit, normal subdirectory and linked-worktree origins, independent quits after focus changes, closed-origin failure, missing tools, both sibling enable/disable orders, and open-pane survival. Native terminal captures prove the private TUI interaction; they do not claim owner-app palette/font/desktop visual approval.
+
+Lazygit is an unbundled [MIT-licensed upstream tool](https://github.com/jesseduffield/lazygit/blob/master/LICENSE). Rex is external and separately licensed. Publication is held until the root [release owner gate](../../README.md#release-preparation-and-owner-gate) is satisfied; source install remains supported while unpublished.
