@@ -116,7 +116,11 @@ class CliTests(unittest.TestCase):
             actions: list[dict[str, str]] = []
             # Model only the external Rex registration boundary. Ownership, settings,
             # config edits, bundle generation, receipts and rollback remain real.
-            for plugin, title in (("files", "Files"), ("git", "Git")):
+            for plugin, title in (
+                ("files", "Files"),
+                ("git", "Git"),
+                ("markdown", "Markdown"),
+            ):
                 module = self.data_root / f"plugins/{plugin}/rexdeck_{plugin}.lua"
                 if (
                     module.exists()
@@ -615,7 +619,7 @@ class CliTests(unittest.TestCase):
         code, result = self.invoke("plugins")
         self.assertEqual((code, result["state"]), (0, "ready"))
         plugins = cast(dict[str, dict[str, object]], result["plugins"])
-        self.assertEqual(set(plugins), {"files", "git"})
+        self.assertEqual(set(plugins), {"files", "git", "markdown"})
         self.assertEqual(plugins["files"]["state"], "ready")
         self.assertIs(plugins["files"]["enabled"], True)
         self.assertEqual(plugins["git"]["state"], "disabled")

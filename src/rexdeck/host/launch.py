@@ -13,12 +13,10 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
-def directory(raw: str) -> str:
-    """Decode only an explicit absolute local directory, never a fallback."""
+def _local(raw: str) -> Path:
+    """Decode only an explicit absolute local path or file URI, never a fallback."""
     if not raw or "\x00" in raw:
-        raise ValueError(
-            "An explicit local directory without NUL characters is required"
-        )
+        raise ValueError("An explicit local path without NUL characters is required")
     raw.encode("utf-8", errors="strict")
     if raw.lower().startswith("file:"):
         if any(ord(char) < 32 or ord(char) == 127 for char in raw):
@@ -37,15 +35,47 @@ def directory(raw: str) -> str:
             raise ValueError("File URI contains invalid percent encoding")
         raw = unquote(uri.path, encoding="utf-8", errors="strict")
     if "\x00" in raw or not raw.startswith("/") or raw.startswith("//"):
-        raise ValueError("An absolute local directory is required")
+        raise ValueError("An absolute local path is required")
     try:
-        path = Path(raw).resolve(strict=True)
+        return Path(raw).resolve(strict=True)
     except RuntimeError as error:
         # Python 3.12 reports symlink loops as RuntimeError rather than OSError.
         raise ValueError(str(error)) from error
+
+
+def directory(raw: str) -> str:
+    """Decode only an explicit absolute local directory, never a fallback."""
+    path = _local(raw)
     if not path.is_dir():
         raise ValueError("The invoking terminal's cwd is not a directory")
     return str(path)
+
+
+MARKDOWN_SUFFIXES = (".md", ".markdown")
+
+
+def document(raw: str, selected: str | None = None) -> str:
+    """Resolve an explicitly selected Markdown file or else the invoking directory.
+
+    A relative selection is joined to the invoking directory; a cwd alone never
+    names a document, so without a selection the directory itself is browsed.
+    """
+    if selected is None:
+        return directory(raw)
+    if not selected or "\x00" in selected:
+        raise ValueError("The selected file must be a nonempty path")
+    if selected.startswith("/") or selected.lower().startswith("file:"):
+        raw = selected
+    else:
+        raw = str(Path(directory(raw)) / selected)
+    path = _local(raw)
+    if path.is_dir():
+        return str(path)
+    if path.is_file() and path.suffix.lower() in MARKDOWN_SUFFIXES:
+        return str(path)
+    raise ValueError(
+        "Select a Markdown file (" + ", ".join(MARKDOWN_SUFFIXES) + ") or a directory"
+    )
 
 
 def git_directory(raw: str) -> str:
@@ -98,7 +128,11 @@ def git_directory(raw: str) -> str:
 
 
 # Mirrors rexdeck.integrations.CONTEXTS; this file runs standalone under ``python -I``.
-CONTEXTS = {"directory": directory, "git-worktree": git_directory}
+CONTEXTS = {
+    "directory": directory,
+    "git-worktree": git_directory,
+    "document": document,
+}
 
 
 def acknowledge() -> None:
@@ -137,11 +171,21 @@ def restore_focus(rex: str, server: str, session: str, origin: str) -> None:
         raise RuntimeError(f"Rex exited {result.returncode}: {result.stderr.strip()}")
 
 
-def resolve(context: str, raw: str) -> str:
+def resolve(context: str, raw: str, selected: str | None = None) -> str:
     """Resolve one declared context; arbitrary cwd never selects a file or account."""
     if context not in CONTEXTS:
         raise ValueError(f"Unknown integration context: {context!r}")
+    if context == "document":
+        return document(raw, selected)
+    if selected is not None:
+        raise ValueError(f"The {context} context does not accept a selected file")
     return CONTEXTS[context](raw)
+
+
+def workdir(target: str) -> str:
+    """Run in the target directory, or a selected file's directory."""
+    path = Path(target)
+    return str(path if path.is_dir() else path.parent)
 
 
 def run(
@@ -165,10 +209,14 @@ def run(
             )
         if not Path(tool).is_absolute() or not Path(rex).is_absolute():
             raise ValueError("Absolute tool and Rex executable paths are required")
-        checked_cwd = resolve(context, cwd)
+        # A document target was validated as an explicit absolute selection or the
+        # invoking directory; re-check it in that same form at launch time.
+        checked = resolve(context, cwd, cwd if context == "document" else None)
+        # A document integration receives its validated target as the last argument.
+        target = (checked,) if context == "document" else ()
         # Inherit the actual pane TTY and the tool's normal configuration.
         exit_code = subprocess.run(
-            [tool, *args], cwd=checked_cwd, check=False
+            [tool, *args, *target], cwd=workdir(checked), check=False
         ).returncode
         if exit_code < 0:
             exit_code = 128 - exit_code
@@ -210,12 +258,13 @@ def run(
 def main() -> int:
     """Dispatch standalone context validation and native pane launch commands."""
     args = sys.argv[1:]
-    if len(args) == 3 and args[0] == "context":
+    if len(args) in (3, 4) and args[0] == "context":
         try:
-            print(json.dumps({"cwd": resolve(args[1], args[2])}))
+            target = resolve(args[1], args[2], args[3] if len(args) == 4 else None)
+            print(json.dumps({"cwd": workdir(target), "target": target}))
             return 0
         except (OSError, ValueError, subprocess.SubprocessError) as error:
-            print(f"RexDeck: invalid invoking cwd: {error}", file=sys.stderr)
+            print(f"RexDeck: invalid invoking context: {error}", file=sys.stderr)
             return 1
     if len(args) >= 10 and args[0] == "run":
         context, title, label, tool, rex, server, session, origin, cwd = args[1:10]
@@ -232,8 +281,8 @@ def main() -> int:
             args=tuple(args[10:]),
         )
     print(
-        "Use context CONTEXT RAW_PWD or run CONTEXT TITLE LABEL TOOL REX SERVER "
-        "SESSION ORIGIN CWD [ARG...]",
+        "Use context CONTEXT RAW_PWD [SELECTED] or run CONTEXT TITLE LABEL TOOL REX "
+        "SERVER SESSION ORIGIN TARGET [ARG...]",
         file=sys.stderr,
     )
     return 2

@@ -77,6 +77,7 @@ class DependencyTests(unittest.TestCase):
             ),
             ("git", "lazygit", "commit=abc, version=0.66.2, os=darwin, arch=arm64"),
             ("git", "lazygit", "commit=abc, version=0.66.3, os=darwin, arch=arm64"),
+            ("markdown", "markdown-reader", "markdown-reader 1.35.4"),
         ):
             with self.subTest(plugin=plugin, output=output):
                 executable = self.tool(name, output)
@@ -87,6 +88,22 @@ class DependencyTests(unittest.TestCase):
                 self.assertEqual(executable.read_bytes(), before)
                 self.assertFalse(self.manager_marker.exists())
                 executable.unlink()
+
+    def test_markdown_reader_rejects_unqualified_versions(self) -> None:
+        for output in (
+            "markdown-reader 1.35.3",
+            "markdown-reader 1.35.5",
+            "markdown-reader 1.35.4-beta",
+            "markdown-reader 1.35.4 extra",
+            "1.35.4",
+        ):
+            with self.subTest(output=output):
+                executable = self.tool("markdown-reader", output)
+                before = executable.read_bytes()
+                with self.assertRaises(RuntimeError):
+                    dependencies.ensure("markdown")
+                self.assertEqual(executable.read_bytes(), before)
+                self.assertFalse(self.manager_marker.exists())
 
     def test_missing_tools_never_read_consent_or_execute_available_managers(
         self,
@@ -112,6 +129,7 @@ class DependencyTests(unittest.TestCase):
         for plugin, name, output in (
             ("files", "yazi", "Yazi 26.9.1"),
             ("git", "lazygit", "version=0.66.3, os=darwin, arch=arm64"),
+            ("markdown", "markdown-reader", "markdown-reader 1.35.4"),
         ):
             with self.subTest(plugin=plugin):
                 with self.assertRaises(RuntimeError):

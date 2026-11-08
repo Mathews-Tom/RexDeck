@@ -38,7 +38,10 @@ def test_cwd_decodes_local_spaces_unicode_and_literal_uri_characters(
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"cwd": str(cwd.resolve())}
+    assert json.loads(result.stdout) == {
+        "cwd": str(cwd.resolve()),
+        "target": str(cwd.resolve()),
+    }
     assert not (tmp_path / "nope").exists()
 
 
@@ -126,7 +129,7 @@ def test_cwd_reports_real_symlink_loop_without_traceback(tmp_path: Path) -> None
     )
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "invalid invoking cwd" in result.stderr
+    assert "invalid invoking context" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -449,7 +452,7 @@ def test_python312_symlink_loop_reaches_existing_error_boundary(
         assert acknowledgements == [True]
         assert state["focused"] == "origin-a"
     else:
-        assert "invalid invoking cwd" in captured.err
+        assert "invalid invoking context" in captured.err
         assert acknowledgements == []
         assert state["focused"] == "files"
 
@@ -510,3 +513,94 @@ def test_native_action_refuses_invalid_context_before_opening_panes() -> None:
         text=True,
         timeout=10,
     )
+
+
+@pytest.mark.parametrize(
+    "selection",
+    ["none", "absolute", "relative", "uri", "uppercase", "directory", "symlink"],
+)
+def test_document_context_resolves_target_and_workdir(
+    tmp_path: Path, selection: str
+) -> None:
+    invoking = tmp_path / "invoking"
+    invoking.mkdir()
+    folder = invoking / "nested.md"
+    folder.mkdir()
+    document = folder / ("雪 notes.MD" if selection == "uppercase" else "雪 notes.md")
+    document.write_text("# Markdown\n", encoding="utf-8")
+    target = invoking if selection == "none" else document
+    selected = str(document)
+    if selection == "relative":
+        selected = str(document.relative_to(invoking))
+    elif selection == "uri":
+        selected = document.as_uri()
+    elif selection == "directory":
+        target = folder
+        selected = str(folder)
+    elif selection == "symlink":
+        link = invoking / "linked.md"
+        link.symlink_to(document)
+        selected = str(link)
+    argv = [sys.executable, str(LAUNCHER), "context", "document", str(invoking)]
+    if selection != "none":
+        argv.append(selected)
+    result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "cwd": str((target if target.is_dir() else target.parent).resolve()),
+        "target": str(target.resolve()),
+    }
+
+
+@pytest.mark.parametrize("selected", ["", "\x00", "notes.txt", "missing.md"])
+def test_document_refuses_invalid_selection(tmp_path: Path, selected: str) -> None:
+    (tmp_path / "notes.txt").write_text("not Markdown", encoding="utf-8")
+    with pytest.raises((OSError, ValueError)):
+        launch.resolve("document", str(tmp_path), selected)
+
+
+def test_reported_cwd_naming_a_markdown_file_is_not_a_document(
+    tmp_path: Path,
+) -> None:
+    """A terminal-reported cwd must be a directory; only a selection names a file."""
+    document = tmp_path / "x.md"
+    document.write_text("# not a cwd\n", encoding="utf-8")
+    for raw in (str(document), document.as_uri()):
+        with pytest.raises(ValueError, match="not a directory"):
+            launch.resolve("document", raw)
+    assert launch.resolve("document", str(tmp_path), str(document)) == str(
+        document.resolve()
+    )
+
+
+@pytest.mark.parametrize("context", ["directory", "git-worktree"])
+def test_nondocument_context_refuses_selection(tmp_path: Path, context: str) -> None:
+    with pytest.raises(ValueError, match="does not accept a selected file"):
+        launch.resolve(context, str(tmp_path), "notes.md")
+
+
+def test_document_run_passes_arguments_and_target_in_parent_directory(
+    tmp_path: Path, tools: tuple[Path, Path, Path]
+) -> None:
+    tool, rex, state_path = tools
+    target = tmp_path / "雪 notes.md"
+    target.write_text("# Markdown\n", encoding="utf-8")
+    assert (
+        launch.run(
+            "document",
+            "Markdown",
+            "markdown-reader",
+            str(tool),
+            str(rex),
+            "unix:///private server.sock",
+            "session-exact",
+            "origin-a",
+            str(target),
+            ("--theme", "dark"),
+        )
+        == 0
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["argv"] == ["--theme", "dark", str(target.resolve())]
+    assert state["cwd"] == str(target.parent.resolve())
+    assert state["focused"] == "origin-a"

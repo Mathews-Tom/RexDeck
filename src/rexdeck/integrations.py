@@ -14,8 +14,11 @@ from dataclasses import dataclass
 # How the host resolves the invoking terminal's reported cwd before launch.
 # "directory" opens the tool in that exact directory. "git-worktree" also
 # requires cwd-based Git discovery to find a non-bare worktree and rejects
-# inherited repository redirection.
-CONTEXTS = ("directory", "git-worktree")
+# inherited repository redirection. "document" accepts an explicitly selected
+# Markdown file (the action's ``file`` argument, absolute or relative to the
+# invoking directory) and otherwise browses the invoking directory; the
+# validated target is passed to the tool as its final argument.
+CONTEXTS = ("directory", "git-worktree", "document")
 PLACEMENTS = ("right", "left", "below", "above")
 MIN_SIZE = 20
 MAX_SIZE = 80
@@ -199,6 +202,36 @@ INTEGRATIONS: dict[str, Integration] = {
             ),
             default_layout=Layout("right", 50),
             prerequisites=(("git", "https://git-scm.com/downloads"),),
+        ),
+        Integration(
+            id="markdown",
+            title="Markdown",
+            tool="markdown-reader",
+            tool_label="markdown-reader",
+            description=(
+                "Open markdown-reader on a selected Markdown file or the invoking "
+                "directory, with Mermaid diagrams rendered in the pane"
+            ),
+            keywords="markdown md mermaid docs readme reader",
+            context="document",
+            versions=("1.35.4",),
+            version_pattern=r"^markdown-reader (\d+\.\d+\.\d+)\s*$",
+            release="https://github.com/leboiko/markdown-reader/releases/tag/v1.35.4",
+            license="MIT",
+            capabilities=(
+                "file writes: hybrid (i) and fullscreen (I) edit modes save Markdown "
+                "in place with :w",
+                "reads the browsed directory tree; stores its own config, session "
+                "and cache under the user's Library",
+                "runs `git status` (PATH git, inherited GIT_* environment and "
+                "repository config honoured) in the browsed root at launch and on file "
+                "changes to colour the tree; this may refresh the Git index",
+                "network: checks crates.io for a newer version at most daily unless "
+                "[updates] check_for_updates = false; --check-external is not used",
+                "renders Mermaid in-process; in Rex panes it selects Unicode text "
+                "diagrams, with no browser or hosted renderer",
+            ),
+            default_layout=Layout("right", 50),
         ),
     )
 }

@@ -35,14 +35,15 @@ rex = {
     effects = effects + 1
     if mode == 'exec-error' then return nil, 'python unavailable' end
     if mode == 'refused-cwd' then return {ok = false, stderr = 'remote cwd refused'} end
-    return {ok = true, stdout = '{"cwd":"/exact origin"}'}
+    return {ok = true, stdout = '{"cwd":"/exact origin","target":"/exact origin"}'}
   end,
   json = {decode = function()
     if mode == 'invalid-json' then return nil, 'invalid JSON' end
     if mode == 'null-json' then return nil end
     if mode == 'relative-cwd' then return {cwd = 'relative'} end
     if mode == 'missing-cwd' then return {} end
-    return {cwd = '/exact origin'}
+    if mode == 'missing-target' then return {cwd = '/exact origin'} end
+    return {cwd = '/exact origin', target = '/exact origin'}
   end},
   session = {new_split = function(request)
     effects = effects + 1
@@ -70,6 +71,7 @@ for _, ratio in ipairs({'0.7', 0 / 0, 0.1, 0.9}) do
 end
 options.layout.ratio = 0.7
 install(options)
+assert(action.args == nil, 'non-document action declares arguments')
 assert(action.name == 'rexdeck_files' and type(action.run) == 'function')
 
 for _, invalid in ipairs({{}, {session_id = 'session-a'}, {block_id = 'origin-a'},
@@ -80,7 +82,7 @@ for _, invalid in ipairs({{}, {session_id = 'session-a'}, {block_id = 'origin-a'
 end
 
 for _, failure in ipairs({'attach-error', 'pwd-error', 'no-pwd', 'exec-error', 'refused-cwd',
-    'invalid-json', 'null-json', 'relative-cwd', 'missing-cwd', 'split-error'}) do
+    'invalid-json', 'null-json', 'relative-cwd', 'missing-cwd', 'missing-target', 'split-error'}) do
   reset()
   mode = failure
   local ok, err = pcall(action.run, context, {})
@@ -111,3 +113,41 @@ reset()
 local forwarded = panes[action.run(context, {}).block_ids[1]].command
 assert(#forwarded == 17 and forwarded[15] == 'tui' and forwarded[16] == '--client'
   and forwarded[17] == 'omp', 'descriptor args were not forwarded after the fixed fields')
+
+options.plugin, options.title, options.context = 'markdown', 'Markdown', 'document'
+options.tool, options.tool_label = 'markdown-reader', 'markdown-reader'
+options['markdown-reader'] = '/markdown-reader'
+options.args = {'--theme', 'dark'}
+install(options)
+assert(action.args.file == 'string?', 'document action lacks optional file argument')
+local selected = '/selected/雪 notes.md'
+rex.exec = function(argv)
+  assert(argv[5] == 'context' and argv[6] == 'document')
+  assert(argv[7] == 'file:///exact%20origin' and argv[8] == selected,
+    'selected file did not reach context validation')
+  return {ok = true, stdout = 'validated'}
+end
+rex.json.decode = function()
+  return {cwd = '/selected', target = selected}
+end
+rex.session.new_split = function(request)
+  opened = opened + 1
+  local pane = request.layout.block.options
+  assert(pane.cwd == '/selected', 'pane did not use decoded workdir')
+  assert(pane.command[14] == selected, 'launcher did not use decoded target')
+  assert(pane.command[15] == '--theme' and pane.command[16] == 'dark')
+  return {block_ids = {'markdown-1'}}
+end
+reset()
+action.run(context, {file = selected})
+assert(opened == 1)
+reset()
+rex.json.decode = function() return {cwd = '/selected'} end
+local ok, err = pcall(action.run, context, {file = selected})
+assert(not ok and tostring(err):find('invalid context validation result', 1, true))
+assert(opened == 0, 'missing target opened a pane')
+for _, invalid in ipairs({'', false, 1, {}}) do
+  reset()
+  assert(not pcall(action.run, context, {file = invalid}))
+  assert(effects == 0 and opened == 0, 'invalid selection caused effects')
+end
