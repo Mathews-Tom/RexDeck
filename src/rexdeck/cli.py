@@ -215,10 +215,43 @@ def _enable(path: Path, target: settings.SavedTarget, plugin: str) -> dict[str, 
     return result
 
 
+def _plugins(target: settings.SavedTarget | None) -> dict[str, object]:
+    """List available integrations without hiding sibling faults or requiring setup."""
+    if target is None:
+        return {
+            "state": "not-configured",
+            "plugins": {
+                plugin: {"state": "not-configured"} for plugin in lifecycle.PLUGINS
+            },
+        }
+    plugins: dict[str, dict[str, object]] = {}
+    for plugin in lifecycle.PLUGINS:
+        try:
+            plugins[plugin] = lifecycle.status(target.setup(plugin))
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            plugins[plugin] = {
+                "state": "fault",
+                "server": target.server,
+                "error": f"Cannot inspect {plugin}: {error}",
+            }
+    failed = any(row.get("state") in _FAILURES for row in plugins.values())
+    return {
+        "state": "fault"
+        if failed
+        else "ready"
+        if any(row.get("enabled") for row in plugins.values())
+        else "disabled",
+        "plugins": plugins,
+    }
+
+
 def main() -> int:
     """Dispatch lifecycle commands and isolate faults in aggregate status rows."""
     parser = _Parser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
+    subcommands.add_parser(
+        "plugins", help="List available plugins and their enabled/disabled state"
+    )
     configure = subcommands.add_parser("setup")
     configure.add_argument("--config", type=Path)
     configure.add_argument("--server")
@@ -240,6 +273,8 @@ def main() -> int:
         path = settings.settings_path()
         if args.command == "setup":
             result = _configure(args, path)
+        elif args.command == "plugins":
+            result = _plugins(settings.load(path))
         else:
             target = settings.load(path)
             if target is None:
@@ -252,32 +287,7 @@ def main() -> int:
                 if args.plugin:
                     result = lifecycle.status(target.setup(args.plugin))
                 else:
-                    plugins: dict[str, dict[str, object]] = {}
-                    for plugin in lifecycle.PLUGINS:
-                        try:
-                            plugins[plugin] = lifecycle.status(target.setup(plugin))
-                        except (
-                            OSError,
-                            ValueError,
-                            RuntimeError,
-                            subprocess.SubprocessError,
-                        ) as error:
-                            plugins[plugin] = {
-                                "state": "fault",
-                                "server": target.server,
-                                "error": f"Cannot inspect {plugin}: {error}",
-                            }
-                    failed = any(
-                        row.get("state") in _FAILURES for row in plugins.values()
-                    )
-                    result = {
-                        "state": "fault"
-                        if failed
-                        else "ready"
-                        if any(row.get("enabled") for row in plugins.values())
-                        else "disabled",
-                        "plugins": plugins,
-                    }
+                    result = _plugins(target)
         print(json.dumps(result, ensure_ascii=True, indent=2))
         return 1 if result.get("state") in _FAILURES else 0
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:

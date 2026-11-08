@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add `rexdeck plugins` to list all available integrations and their enabled/disabled state as JSON. Discovery works before setup, reporting `not-configured`; configured inspection reuses aggregate status, preserving healthy siblings and nonzero failure reporting when a plugin cannot be inspected. Listing does not change registration or install dependencies.
+
 ## 0.1.0 — prepared, unpublished
 
 - Add manual-only selected dependency validation: setup/status never install; enable reuses qualified preinstalled Yazi/lazygit (and requires Git for Git integration), or returns actionable nonzero manual-install/version-check/rerun guidance without registration. RexDeck never runs Homebrew or installs, upgrades, removes or supervises upstream package transactions. Preserve qualified executable metadata identity, frozen-target checks, siblings and upstream settings; owner-run Homebrew is optional only when its selected version qualifies and the owner accepts its effects, otherwise use the qualified upstream release.

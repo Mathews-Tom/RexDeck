@@ -494,6 +494,52 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), self.original)
         self.assertEqual((self.workspace / "setup.json").read_bytes(), old_receipt)
 
+    def test_plugins_before_setup_is_read_only_and_lists_unconfigured_plugins(
+        self,
+    ) -> None:
+        """Discover integrations without creating a target or contacting Rex."""
+        code, result = self.invoke("plugins")
+        self.assertEqual((code, result["state"]), (0, "not-configured"))
+        self.assertEqual(
+            result["plugins"],
+            {
+                "files": {"state": "not-configured"},
+                "git": {"state": "not-configured"},
+            },
+        )
+        self.assertFalse(self.settings.exists())
+        self.assertFalse(self.workspace.exists())
+        self.assertFalse(self.data_root.exists())
+        self.assertFalse(self.calls)
+        self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_plugins_reports_enabled_and_disabled_without_mutating_ownership(
+        self,
+    ) -> None:
+        """List a mixed deployment without enabling its disabled sibling."""
+        self.configure()
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        before = {
+            path: path.read_bytes()
+            for path in (
+                self.config,
+                self.settings,
+                self.module,
+                self.workspace / "setup.json",
+            )
+        }
+        code, result = self.invoke("plugins")
+        self.assertEqual((code, result["state"]), (0, "ready"))
+        plugins = cast(dict[str, dict[str, object]], result["plugins"])
+        self.assertEqual(set(plugins), {"files", "git"})
+        self.assertEqual(plugins["files"]["state"], "ready")
+        self.assertIs(plugins["files"]["enabled"], True)
+        self.assertEqual(plugins["git"]["state"], "disabled")
+        self.assertIs(plugins["git"]["enabled"], False)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        self.assertFalse((self.workspace / "git/setup.json").exists())
+        self.assertFalse((self.data_root / "plugins/git").exists())
+
     def test_aggregate_status_preserves_sibling_with_malformed_receipt(self) -> None:
         """Keep enabled Files visible when Git's saved receipt cannot be decoded."""
         self.configure()
@@ -503,17 +549,19 @@ class CliTests(unittest.TestCase):
         receipt = workspace / "setup.json"
         receipt.write_text("{malformed")
 
-        code, result = self.invoke("status")
-        self.assertEqual((code, result["state"]), (1, "fault"))
-        plugins = cast(dict[str, dict[str, object]], result["plugins"])
-        self.assertEqual(set(plugins), set(lifecycle.PLUGINS))
-        self.assertEqual(plugins["git"]["state"], "fault")
-        self.assertEqual(plugins["git"]["server"], self.endpoint)
-        self.assertIn("git", str(plugins["git"]["error"]))
-        self.assertIn(str(receipt), str(plugins["git"]["error"]))
-        self.assertEqual(plugins["files"]["state"], "ready")
-        self.assertIs(plugins["files"]["enabled"], True)
-        self.assertEqual(plugins["files"]["server"], self.endpoint)
+        for command in ("status", "plugins"):
+            with self.subTest(command=command):
+                code, result = self.invoke(command)
+                self.assertEqual((code, result["state"]), (1, "fault"))
+                plugins = cast(dict[str, dict[str, object]], result["plugins"])
+                self.assertEqual(set(plugins), set(lifecycle.PLUGINS))
+                self.assertEqual(plugins["git"]["state"], "fault")
+                self.assertEqual(plugins["git"]["server"], self.endpoint)
+                self.assertIn("git", str(plugins["git"]["error"]))
+                self.assertIn(str(receipt), str(plugins["git"]["error"]))
+                self.assertEqual(plugins["files"]["state"], "ready")
+                self.assertIs(plugins["files"]["enabled"], True)
+                self.assertEqual(plugins["files"]["server"], self.endpoint)
         code, explicit = self.invoke("status", "git")
         self.assertEqual((code, explicit["state"]), (1, "failed"))
         self.assertIn(str(receipt), str(explicit["error"]))
