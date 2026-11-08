@@ -23,6 +23,7 @@ class _Terminal(io.StringIO):
 
 class CliTests(unittest.TestCase):
     def setUp(self) -> None:
+        """Freeze private paths and substitute only executable/Rex boundaries."""
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
@@ -57,10 +58,10 @@ class CliTests(unittest.TestCase):
             ("_executable", lambda name: sys.executable),
             (
                 "_tools",
-                lambda: {
+                lambda tool="yazi": {
                     "python": sys.executable,
                     "rex": sys.executable,
-                    "yazi": sys.executable,
+                    tool: sys.executable,
                 },
             ),
         ):
@@ -71,6 +72,7 @@ class CliTests(unittest.TestCase):
     def transport(
         self, argv: list[str], env: dict[str, str], *, timeout: float = 8.0
     ) -> lifecycle._Result:
+        """Model native registration for both plugins while ownership stays real."""
         self.calls.append((argv.copy(), env.copy()))
         if "status" in argv and "server" in argv:
             if self.status_failure:
@@ -98,20 +100,24 @@ class CliTests(unittest.TestCase):
         if "reload" in argv:
             return lifecycle._Result(0, b'{"diagnostics": []}')
         if "actions" in argv:
-            module = self.module
             actions: list[dict[str, str]] = []
             # Model only the external Rex registration boundary. Ownership, settings,
             # config edits, bundle generation, receipts and rollback remain real.
-            if module.exists() and b"\nif true then install(" in module.read_bytes():
-                actions.append(
-                    {
-                        "name": "rexdeck_files",
-                        "kind": "lua",
-                        "title": "RexDeck Files",
-                        "category": "RexDeck",
-                        "source": str(module) + ":1",
-                    }
-                )
+            for plugin, title in (("files", "Files"), ("git", "Git")):
+                module = self.data_root / f"plugins/{plugin}/rexdeck_{plugin}.lua"
+                if (
+                    module.exists()
+                    and b"\nif true then install(" in module.read_bytes()
+                ):
+                    actions.append(
+                        {
+                            "name": f"rexdeck_{plugin}",
+                            "kind": "lua",
+                            "title": f"RexDeck {title}",
+                            "category": "RexDeck",
+                            "source": str(module) + ":1",
+                        }
+                    )
             return lifecycle._Result(0, json.dumps({"actions": actions}).encode())
         raise AssertionError(f"Unexpected Rex command: {argv}")
 
@@ -403,6 +409,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.config.read_bytes(), self.original)
 
     def test_retarget_never_overwrites_an_existing_saved_identity(self) -> None:
+        """Refuse target replacement while retaining the original ownership record."""
         self.configure()
         self.assertEqual(self.invoke("enable", "files")[0], 0)
         previous = self.settings.read_bytes()
@@ -473,6 +480,31 @@ class CliTests(unittest.TestCase):
         self.assertEqual(other.read_bytes(), b"-- other target\n")
         self.assertEqual(self.config.read_bytes(), self.original)
         self.assertEqual((self.workspace / "setup.json").read_bytes(), old_receipt)
+
+    def test_aggregate_status_preserves_sibling_with_malformed_receipt(self) -> None:
+        """Keep enabled Files visible when Git's saved receipt cannot be decoded."""
+        self.configure()
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        workspace = self.workspace / "git"
+        workspace.mkdir()
+        receipt = workspace / "setup.json"
+        receipt.write_text("{malformed")
+
+        code, result = self.invoke("status")
+        self.assertEqual((code, result["state"]), (1, "fault"))
+        plugins = cast(dict[str, dict[str, object]], result["plugins"])
+        self.assertEqual(set(plugins), set(lifecycle.PLUGINS))
+        self.assertEqual(plugins["git"]["state"], "fault")
+        self.assertEqual(plugins["git"]["server"], self.endpoint)
+        self.assertIn("git", str(plugins["git"]["error"]))
+        self.assertIn(str(receipt), str(plugins["git"]["error"]))
+        self.assertEqual(plugins["files"]["state"], "ready")
+        self.assertIs(plugins["files"]["enabled"], True)
+        self.assertEqual(plugins["files"]["server"], self.endpoint)
+        code, explicit = self.invoke("status", "git")
+        self.assertEqual((code, explicit["state"]), (1, "failed"))
+        self.assertIn(str(receipt), str(explicit["error"]))
+        self.assertNotIn("plugins", explicit)
 
     def test_unknown_plugin_and_removed_commands_do_not_mutate(self) -> None:
         for command in (
@@ -696,6 +728,38 @@ class CliTests(unittest.TestCase):
         os.mkfifo(self.settings)
         self.assertEqual(self.invoke("status")[0], 1)
         self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_git_only_commands_ignore_unused_redirected_files_deployment(self) -> None:
+        """Settings loading cannot let unused Files paths block healthy Git."""
+        self.configure()
+        outside = self.root / "unrelated-files-data"
+        outside.mkdir()
+        marker = outside / "keep"
+        marker.write_bytes(b"unrelated")
+        files = self.data_root / "plugins/files"
+        files.parent.mkdir(parents=True, exist_ok=True)
+        for kind in ("file", "symlink"):
+            with self.subTest(kind=kind):
+                if kind == "file":
+                    files.write_bytes(b"unrelated")
+                else:
+                    files.symlink_to(outside, target_is_directory=True)
+                self.assertEqual(self.invoke("enable", "git")[1]["state"], "ready")
+                code, result = self.invoke("status")
+                self.assertEqual(code, 1)
+                plugins = cast(dict[str, dict[str, object]], result["plugins"])
+                self.assertEqual(plugins["files"]["state"], "fault")
+                self.assertIn("files", str(plugins["files"]["error"]))
+                self.assertEqual(plugins["git"]["state"], "ready")
+                self.assertEqual(self.invoke("status", "git")[1]["state"], "ready")
+                self.assertEqual(self.invoke("disable", "git")[1]["state"], "disabled")
+                self.assertEqual(self.config.read_bytes(), self.original)
+                self.assertEqual(marker.read_bytes(), b"unrelated")
+                if kind == "file":
+                    self.assertEqual(files.read_bytes(), b"unrelated")
+                else:
+                    self.assertEqual(files.readlink(), outside)
+                files.unlink()
 
 
 if __name__ == "__main__":

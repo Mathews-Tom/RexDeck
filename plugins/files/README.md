@@ -94,7 +94,7 @@ rexdeck status
 
 This refresh sequence applies to the current schemas. For a pre-cutover installation, follow **Existing native Files setup** before replacing the old package.
 
-Re-enabling verifies recorded ownership before refreshing the packaged action, launcher, and interpreter paths. Before `uv tool uninstall rexdeck`, disable every enabled integration (`rexdeck disable files` and, when selected, `rexdeck disable git`). Uninstalling the Python tool alone does not remove Rex configuration.
+Re-enabling verifies recorded ownership before refreshing the packaged action, launcher, and interpreter paths. Before `uv tool uninstall rexdeck`, run `disable` for every applied integration (`rexdeck disable files` and, when selected, `rexdeck disable git`), including integrations reported as disabled after a failed enable. A disabled action can still have an applied loader and module. Uninstalling the Python tool alone does not remove Rex configuration.
 
 ## Development verification
 

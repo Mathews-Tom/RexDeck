@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -71,15 +72,27 @@ def git_directory(raw: str) -> str:
     if selected:
         raise ValueError("Ambiguous inherited Git override: " + ", ".join(selected))
     cwd = directory(raw)
+    search_path = os.pathsep.join(
+        entry
+        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
+        if Path(entry).is_absolute()
+    )
+    git = shutil.which("git", path=search_path) if search_path else None
+    if git is None:
+        raise ValueError(
+            "Required executable not found in absolute PATH directories: git"
+        )
     result = subprocess.run(
-        ["git", "rev-parse", "--is-inside-work-tree"],
+        [git, "rev-parse", "--is-inside-work-tree"],
         cwd=cwd,
         capture_output=True,
         text=True,
         timeout=10,
         check=False,
     )
-    if result.returncode or result.stdout.strip() != "true":
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or f"Git exited {result.returncode}")
+    if result.stdout.strip() != "true":
         raise ValueError("Invoking directory is not a non-bare Git worktree")
     return cwd
 
@@ -130,6 +143,7 @@ def run(
     *,
     plugin: str = "files",
 ) -> int:
+    """Launch the selected native tool at validated cwd, then restore origin focus."""
     title = "Git" if plugin == "git" else "Files"
     tool = "lazygit" if plugin == "git" else "Yazi"
     exit_code = 1
@@ -181,6 +195,7 @@ def run(
 
 
 def main() -> int:
+    """Dispatch standalone cwd validation and native pane launch commands."""
     args = sys.argv[1:]
     if len(args) == 2 and args[0] in ("cwd", "git-cwd"):
         try:

@@ -66,6 +66,7 @@ def _selected_status(setup: lifecycle.Setup) -> None:
 
 
 def _inspect(target: settings.SavedTarget) -> dict[str, object]:
+    """Inspect the saved target without imposing plugin-specific prerequisites."""
     setup = target.setup()
     _selected_status(setup)
     result = lifecycle.inspect_setup(setup)
@@ -75,6 +76,7 @@ def _inspect(target: settings.SavedTarget) -> dict[str, object]:
 
 
 def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
+    """Approve and persist one target without retargeting existing ownership."""
     old = settings.load(path)
     # Validate both XDG roots even when a saved workspace is reused.
     workspace_default = settings.default_workspace()
@@ -192,6 +194,7 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
 
 
 def main() -> int:
+    """Dispatch lifecycle commands and isolate faults in aggregate status rows."""
     parser = _Parser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
     configure = subcommands.add_parser("setup")
@@ -219,8 +222,8 @@ def main() -> int:
             target = settings.load(path)
             if target is None:
                 raise RuntimeError("No saved Rex target; run rexdeck setup first")
-            setup = target.setup(args.plugin or "files")
             if args.command == "enable":
+                setup = target.setup(args.plugin)
                 result = lifecycle.apply_setup(setup)
                 if result.get("state") == "applied":
                     result = lifecycle.start(setup)
@@ -229,15 +232,26 @@ def main() -> int:
                         f"{args.plugin} apply did not succeed; integration was not started"
                     )
             elif args.command == "disable":
-                result = lifecycle.disable(setup)
+                result = lifecycle.disable(target.setup(args.plugin))
             else:
                 if args.plugin:
-                    result = lifecycle.status(setup)
+                    result = lifecycle.status(target.setup(args.plugin))
                 else:
-                    plugins = {
-                        plugin: lifecycle.status(target.setup(plugin))
-                        for plugin in lifecycle.PLUGINS
-                    }
+                    plugins: dict[str, dict[str, object]] = {}
+                    for plugin in lifecycle.PLUGINS:
+                        try:
+                            plugins[plugin] = lifecycle.status(target.setup(plugin))
+                        except (
+                            OSError,
+                            ValueError,
+                            RuntimeError,
+                            subprocess.SubprocessError,
+                        ) as error:
+                            plugins[plugin] = {
+                                "state": "fault",
+                                "server": target.server,
+                                "error": f"Cannot inspect {plugin}: {error}",
+                            }
                     failed = any(
                         row.get("state") in _FAILURES for row in plugins.values()
                     )

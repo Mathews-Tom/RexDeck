@@ -774,6 +774,65 @@ action.run({session_id = "session", block_id = "origin"})
             self.assertEqual(list(outside.iterdir()), [])
             directory.unlink()
 
+    def test_unused_git_deployment_does_not_block_files_lifecycle(self) -> None:
+        """Files stays removable when an unused Git deployment is redirected."""
+        outside = self.root / "unrelated-git-data"
+        outside.mkdir()
+        marker = outside / "keep"
+        marker.write_bytes(b"unrelated")
+        git = self.setup.data_root / "plugins/git"
+        git.parent.mkdir(parents=True)
+        for kind in ("file", "symlink"):
+            with self.subTest(kind=kind):
+                self.target.write_bytes(self.original)
+                if kind == "file":
+                    git.write_bytes(b"unrelated")
+                else:
+                    git.symlink_to(outside, target_is_directory=True)
+                life.apply_setup(self.setup)
+                self.assertEqual(life.start(self.setup)["state"], "ready")
+                self.assertEqual(life.status(self.setup)["state"], "ready")
+                # A personal append is not a sibling loader or its dependency.
+                tail = b"-- personal append\n"
+                self.target.write_bytes(self.target.read_bytes() + tail)
+                self.assertEqual(life.disable(self.setup)["state"], "disabled")
+                self.assertEqual(self.target.read_bytes(), self.original + b"\n" + tail)
+                self.assertEqual(marker.read_bytes(), b"unrelated")
+                if kind == "file":
+                    self.assertEqual(git.read_bytes(), b"unrelated")
+                else:
+                    self.assertEqual(git.readlink(), outside)
+                git.unlink()
+
+    def test_loader_free_files_ignores_unused_git_receipt(self) -> None:
+        """A foreign Git receipt cannot block a loader-free Files installation."""
+        git_receipt = self.workspace / "git/setup.json"
+        git_receipt.parent.mkdir(parents=True)
+        git_receipt.write_bytes(b"not JSON")
+        self.assertEqual(life.inspect_setup(self.setup)["state"], "inspected")
+        life.apply_setup(self.setup)
+        self.assertEqual(life.start(self.setup)["state"], "ready")
+        self.assertEqual(life.disable(self.setup)["state"], "disabled")
+        self.assertEqual(self.target.read_bytes(), self.original)
+        self.assertEqual(git_receipt.read_bytes(), b"not JSON")
+
+    def test_loader_free_files_ignores_redirected_git_workspace(self) -> None:
+        """Unused sibling workspace redirection is neither read nor adopted."""
+        outside = self.root / "foreign-workspace"
+        outside.mkdir()
+        marker = outside / "setup.json"
+        marker.write_bytes(b"foreign receipt")
+        self.workspace.mkdir()
+        git_workspace = self.workspace / "git"
+        git_workspace.symlink_to(outside, target_is_directory=True)
+        self.assertEqual(life.inspect_setup(self.setup)["state"], "inspected")
+        life.apply_setup(self.setup)
+        self.assertEqual(life.start(self.setup)["state"], "ready")
+        self.assertEqual(life.disable(self.setup)["state"], "disabled")
+        self.assertEqual(self.target.read_bytes(), self.original)
+        self.assertEqual(git_workspace.readlink(), outside)
+        self.assertEqual(marker.read_bytes(), b"foreign receipt")
+
     def test_changed_data_root_is_not_receipt_ownership(self) -> None:
         life.apply_setup(self.setup)
         before = self.snapshot()
@@ -833,6 +892,7 @@ action.run({session_id = "session", block_id = "origin"})
         self.assertFalse(self.module.exists())
 
     def test_shared_data_root_serializes_different_workspaces(self) -> None:
+        """The common deployment-root lock rejects another workspace's mutation."""
         other_dir = self.root / "other-config"
         other_dir.mkdir()
         other_config = other_dir / "other.lua"
@@ -844,6 +904,7 @@ action.run({session_id = "session", block_id = "origin"})
         attempted = False
 
         def install_concurrently() -> dict[str, str]:
+            """Attempt a sibling mutation while the first workspace owns the lock."""
             nonlocal attempted
             if not attempted:
                 attempted = True

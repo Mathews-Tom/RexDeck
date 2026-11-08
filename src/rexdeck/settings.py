@@ -78,7 +78,8 @@ class SavedTarget:
     server: str
     real_server: bool
 
-    def setup(self, plugin: str = "files") -> lifecycle.Setup:
+    def _validate(self, plugin: str | None = None) -> None:
+        """Validate shared frozen identity and only an explicitly selected plugin."""
         if self.config.resolve(strict=True) != self.config_target:
             raise RuntimeError(
                 "Saved Rex config target changed; restore the selected symlink before "
@@ -86,9 +87,13 @@ class SavedTarget:
             )
         if self.workspace.resolve() != self.workspace:
             raise RuntimeError("Saved Files workspace target changed; restore its path")
-        lifecycle._validate_data_root(self.data_root)
+        lifecycle._validate_data_root(self.data_root, plugin)
         if lifecycle._canonical_server(self.server) != self.server:
             raise RuntimeError("Saved Rex socket target changed; restore its path")
+
+    def setup(self, plugin: str = "files") -> lifecycle.Setup:
+        """Validate frozen target paths and select one integration's ownership."""
+        self._validate(plugin)
         return lifecycle.Setup(
             project=Path(__file__).resolve().parent,
             workspace=self.workspace,
@@ -113,6 +118,7 @@ class SavedTarget:
 
 
 def load(path: Path) -> SavedTarget | None:
+    """Load bounded settings and validate shared identity before plugin selection."""
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
@@ -158,7 +164,7 @@ def load(path: Path) -> SavedTarget | None:
     )
     if target.config_target.resolve() != target.config_target:
         raise RuntimeError("Saved config_target must be a resolved absolute path")
-    target.setup()
+    target._validate()
     return target
 
 

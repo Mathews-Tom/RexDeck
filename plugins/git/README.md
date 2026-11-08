@@ -28,6 +28,8 @@ Use upstream lazygit controls to inspect diffs, stage, commit, and perform other
 
 Inherited repository/config-injection/discovery variables such as `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`, `GIT_CONFIG`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_KEY_*`, `GIT_CONFIG_VALUE_*`, `GIT_CEILING_DIRECTORIES`, and `GIT_DISCOVERY_ACROSS_FILESYSTEM` are rejected, including empty values. Resolve the ambiguous environment before launching; RexDeck does not unset it silently or change your configuration. Normal upstream settings homes and supported authentication stores remain unchanged.
 
+Git validation searches only absolute `PATH` directories and invokes the resolved executable explicitly; relative and empty entries cannot select a Git binary from the invoking repository. Git discovery failures retain upstream diagnostics, including ownership recovery guidance; RexDeck does not change `safe.directory`.
+
 ## Independent ownership, update, and removal
 
 `enable files` and `enable git` share one saved target but own separate actions, modules, loaders, and receipts. `status` reports both; `status files` and `status git` inspect one. Ready means owned configuration/action registration matches the current package, not that a tool process is running.
@@ -48,7 +50,7 @@ Only unchanged owned artifacts are refreshed. Disable is independent and preserv
 rexdeck disable git
 ```
 
-Disable **every** enabled integration before uninstalling RexDeck or deliberately replacing its saved target. Python package removal alone does not remove Rex loaders. Changed artifacts produce an ownership conflict for manual judgment; they are not silently deleted. Cancellation recovery has the same limits as Files: SIGKILL/power loss cannot run rollback.
+Run `disable` for **every applied** integration before uninstalling RexDeck or deliberately replacing its saved target, including integrations reported as disabled after a failed enable. A disabled action can still have an applied loader and module; Python package removal alone does not remove Rex loaders. Changed artifacts produce an ownership conflict for manual judgment; they are not silently deleted. Cancellation recovery has the same limits as Files: SIGKILL/power loss cannot run rollback.
 
 ## Verification
 
