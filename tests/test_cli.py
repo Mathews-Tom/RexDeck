@@ -656,6 +656,51 @@ class CliTests(unittest.TestCase):
         self.assertIn(str(receipt), str(explicit["error"]))
         self.assertNotIn("plugins", explicit)
 
+    def test_status_reports_selected_tool_removed_after_enable(self) -> None:
+        """A vanished upstream tool is a missing dependency, not a generic fault."""
+        self.configure()
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        self.assertEqual(self.invoke("enable", "git")[0], 0)
+        empty = self.root / "empty-bin"
+        empty.mkdir()
+        tools = lifecycle._tools
+
+        def without(missing: str) -> object:
+            def lookup(tool: str = "yazi") -> dict[str, str]:
+                # Real lookup on a PATH lacking the named executable.
+                for name in ("rex", tool):
+                    if name == missing:
+                        self.resolve_executable(name)
+                return tools(tool)
+
+            return lookup
+
+        with (
+            patch.dict(os.environ, {"PATH": str(empty)}),
+            patch.object(lifecycle, "_tools", side_effect=without("yazi")),
+        ):
+            code, explicit = self.invoke("status", "files")
+            self.assertEqual((code, explicit["state"]), (1, "missing-dependency"))
+            self.assertIs(explicit["enabled"], True)
+            self.assertIs(explicit["applied"], True)
+            self.assertEqual(explicit["layout"], {"placement": "right", "size": 50})
+            self.assertIn("yazi", str(explicit["error"]))
+            code, listing = self.invoke("plugins")
+        self.assertEqual((code, listing["state"]), (1, "fault"))
+        plugins = cast(dict[str, dict[str, object]], listing["plugins"])
+        self.assertEqual(plugins["files"]["state"], "missing-dependency")
+        self.assertEqual(plugins["git"]["state"], "ready")
+        self.assertEqual(plugins["markdown"]["state"], "disabled")
+        # Rex itself is a prerequisite of RexDeck, not of one integration.
+        with (
+            patch.dict(os.environ, {"PATH": str(empty)}),
+            patch.object(lifecycle, "_tools", side_effect=without("rex")),
+        ):
+            code, explicit = self.invoke("status", "files")
+        self.assertEqual((code, explicit["state"]), (1, "fault"))
+        self.assertIn("Rex", str(explicit["error"]))
+        self.assertEqual(self.invoke("status", "files")[1]["state"], "ready")
+
     def test_unknown_plugin_and_removed_commands_do_not_mutate(self) -> None:
         for command in (
             ("enable", "other"),

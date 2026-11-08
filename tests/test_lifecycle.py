@@ -447,6 +447,19 @@ action.run({session_id = "session", block_id = "origin"})
         self.actions = [{"name": "rexdeck_files", "kind": "lua"}]
         self.assertEqual(life.status(self.setup)["state"], "fault")
 
+    def test_missing_tool_does_not_mask_registration_fault(self) -> None:
+        life.apply_setup(self.setup)
+        life.start(self.setup)
+        missing = life.MissingDependency("Required executable not found: yazi")
+        with patch.object(life, "_tools", side_effect=missing):
+            row = life.status(self.setup)
+            self.assertEqual(row["state"], "missing-dependency")
+            self.assertEqual(row["layout"], {"placement": "right", "size": 50})
+            self.actions = []  # registration lost as well
+            row = life.status(self.setup)
+        self.assertEqual(row["state"], "fault")
+        self.assertIn("yazi", str(row["error"]))
+
     def test_status_does_not_write_or_reload(self) -> None:
         life.apply_setup(self.setup)
         before = self.snapshot()
