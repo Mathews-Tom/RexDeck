@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — prepared, unpublished
+
+- Add selected dependency onboarding: setup/status never install; enable reuses existing tools or offers default-No, argv-based installation of missing Yazi/lazygit through existing qualified Homebrew on macOS arm64. Manual/noninteractive routes explain installation and rerun. Revalidate tools and frozen target before registration; preserve siblings and do not silently upgrade or uninstall upstream packages.
+- Accept both upstream and Homebrew's multiline Yazi version reports. Ignore empty/relative executable-search paths during qualification and lifecycle binding. Restrict the source distribution to product source, tests, metadata, and public documentation; globally ignored local evidence is not packaged.
+- Prepare Python 3.12+ metadata, packaged MIT license and project URLs. Document macOS arm64/Rex API 10 baseline, upstream unbundled licenses, installed-package checks and private-versus-owner visual proof limits.
+- Retain exact CI-built 0.1.0 wheel/sdist for owner-reviewed release. Manual Trusted Publishing requires protected environment approval bound to exact commit, immutable artifact ID, file hashes and evidence; no push/PR/tag publication or release-time rebuild. Publication and public-index native-use proof remain gated, not claimed complete.
 
 - Add independently selectable local Git through unmodified lazygit, preserving the invoking repository/worktree and exact return origin. Reject inherited Git repository/discovery overrides rather than silently redirecting work. Reuse native hosting and lifecycle ownership for Files/Git; serialize shared configuration and data-root changes, preserve siblings/open panes, and restore exact config bytes in either disable order without changing existing settings or Files receipt schemas.
 - Resolve Git validation through absolute PATH directories and preserve discovery errors. Retain healthy integration status when a sibling receipt is invalid; validate only deployment/sibling artifacts needed by the selected operation. Clarify cleanup of applied-but-disabled integrations before package removal.
@@ -13,4 +18,4 @@
 - Remove Files' LazyRex hub/SDK dependency, renderer/navigation patches, Go runtime preparation, lock/build receipts, and obsolete browser/preview commands and tests. Yazi remains write-capable; the launch directory is not a root jail.
 - Return Yazi quit to the exact captured terminal through the explicit Rex endpoint, with visible launch/exit/focus errors and no replacement-pane adoption. Independent Yazi panes survive disable.
 - Preserve tracked native registration, source integrity, conservative conflicts, atomic rollback, config symlink/mode preservation, and cancellation diagnostics. Package location is update provenance rather than ownership identity, so re-enabling refreshes an unchanged owned integration after reinstall. Refuse legacy receipts; old LazyRex installations require explicit prior-code cleanup.
-- Make LazyRex optional for future integrations that actually need an existing capability; defer the broader collection. No PyPI release, automatic tool installation or live migration command, hooks, fonts, or autostart is included.
+- Make LazyRex optional for future integrations that actually need an existing capability; defer the broader collection. No hooks, fonts, autostart, automatic Rex/manager installation, or live migration command is included.

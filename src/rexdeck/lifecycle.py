@@ -166,8 +166,19 @@ def _env(setup: Setup) -> dict[str, str]:
 
 
 def _executable(name: str) -> str:
-    found = shutil.which(name)
+    search_path = os.pathsep.join(
+        entry
+        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
+        if Path(entry).is_absolute()
+    )
+    found = shutil.which(name, path=search_path) if search_path else None
     if found is None:
+        if name == "rex":
+            raise RuntimeError(
+                "Rex is an externally installed prerequisite and was not found on PATH; "
+                "install Rex using its supported distribution, make rex available on PATH, "
+                "start its server, then rerun rexdeck setup. RexDeck never installs Rex"
+            )
         raise RuntimeError(
             f"Required executable not found: {name}; install it before applying or starting"
         )
@@ -902,17 +913,18 @@ def _unowned(paths: _Paths, setup: Setup) -> None:
         raise RuntimeError("Unowned or old RexDeck loader; nothing changed")
 
 
-def inspect_setup(setup: Setup) -> dict[str, object]:
-    """Inspect ownership; enable refreshes package drift and status checks readiness."""
+def inspect_setup(setup: Setup, *, check_tools: bool = True) -> dict[str, object]:
+    """Inspect ownership, optionally including selected integration prerequisites."""
     paths = _paths(setup)
     receipt = _receipt(paths, setup)
     prerequisites: dict[str, object] = {}
     conflicts = cast(list[str], receipt["conflicts"]).copy() if receipt else []
-    try:
-        prerequisites.update(_selected_tools(setup))
-        _sources(paths)
-    except RuntimeError as exc:
-        prerequisites["error"] = str(exc)
+    if check_tools:
+        try:
+            prerequisites.update(_selected_tools(setup))
+            _sources(paths)
+        except RuntimeError as exc:
+            prerequisites["error"] = str(exc)
     try:
         _endpoint_policy(setup)
         if receipt is None:

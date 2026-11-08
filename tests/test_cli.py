@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from rexdeck import cli, lifecycle, settings
+from rexdeck import cli, dependencies, lifecycle, settings
 
 
 class _Terminal(io.StringIO):
@@ -68,6 +68,15 @@ class CliTests(unittest.TestCase):
             boundary = patch.object(lifecycle, name, replacement)
             boundary.start()
             self.addCleanup(boundary.stop)
+        for name, dependency_replacement in (
+            ("_resolve", lambda name: sys.executable),
+            ("_probe", lambda executable, name: dependencies._VERSIONS[name][-1]),
+        ):
+            dependency_boundary = patch.object(
+                dependencies, name, dependency_replacement
+            )
+            dependency_boundary.start()
+            self.addCleanup(dependency_boundary.stop)
 
     def transport(
         self, argv: list[str], env: dict[str, str], *, timeout: float = 8.0
@@ -760,6 +769,209 @@ class CliTests(unittest.TestCase):
                 else:
                     self.assertEqual(files.readlink(), outside)
                 files.unlink()
+
+    def test_setup_and_status_never_prepare_optional_dependencies(self) -> None:
+        with (
+            patch.object(
+                dependencies, "ensure", side_effect=AssertionError("must not install")
+            ),
+            patch.object(
+                lifecycle,
+                "_selected_tools",
+                side_effect=RuntimeError("optional tool is absent"),
+            ),
+        ):
+            self.configure()
+            self.assertEqual(self.invoke("setup")[1]["state"], "configured")
+            self.assertEqual(self.invoke("status")[1]["state"], "disabled")
+            self.assertEqual(self.invoke("status", "git")[1]["state"], "disabled")
+        self.assertEqual(self.config.read_bytes(), self.original)
+        self.assertFalse(self.workspace.exists())
+        self.assertFalse(self.data_root.exists())
+
+    def test_missing_selected_tool_decline_preserves_registered_sibling(self) -> None:
+        self.configure()
+        self.assertEqual(self.invoke("enable", "git")[1]["state"], "ready")
+        git_module = self.data_root / "plugins/git/rexdeck_git.lua"
+        git_receipt = self.workspace / "git/setup.json"
+        before = {
+            path: path.read_bytes()
+            for path in (self.config, self.settings, git_module, git_receipt)
+        }
+        with (
+            patch.object(
+                dependencies,
+                "_resolve",
+                side_effect=lambda name: None if name == "yazi" else sys.executable,
+            ),
+            patch.object(dependencies, "_manager", return_value=sys.executable),
+            patch.object(
+                dependencies, "_install", side_effect=AssertionError("not consented")
+            ),
+        ):
+            for terminal in (None, "", "\n", "no\n", "anything else\n"):
+                with self.subTest(terminal=terminal):
+                    code, result = self.invoke("enable", "files", terminal=terminal)
+                    self.assertEqual(code, 1)
+                    self.assertIn("brew install yazi", str(result["error"]))
+                    self.assertIn("rexdeck enable files", str(result["error"]))
+                    self.assertFalse((self.workspace / "setup.json").exists())
+                    for path, content in before.items():
+                        self.assertEqual(path.read_bytes(), content)
+                    self.assertEqual(self.invoke("status", "git")[1]["state"], "ready")
+        # A deliberate manual install and rerun use the same ordinary enable path.
+        self.assertEqual(self.invoke("enable", "files")[1]["state"], "ready")
+        self.assertEqual(self.invoke("disable", "files")[1]["state"], "disabled")
+        self.assertEqual(self.invoke("status", "git")[1]["state"], "ready")
+        self.assertTrue(Path(sys.executable).is_file())
+
+    def test_consented_dependency_rechecks_then_registers_without_download_lock(
+        self,
+    ) -> None:
+        self.configure()
+        installed = False
+        probes: list[str] = []
+
+        def resolve(name: str) -> str | None:
+            return None if name == "yazi" and not installed else sys.executable
+
+        def install(argv: list[str]) -> None:
+            nonlocal installed
+            self.assertEqual(argv, [sys.executable, "install", "yazi"])
+            self.assertEqual(self.config.read_bytes(), self.original)
+            self.assertFalse(self.workspace.exists())
+            self.assertFalse(self.module.exists())
+            installed = True
+
+        def probe(executable: str, name: str) -> str:
+            probes.append(name)
+            return dependencies._VERSIONS[name][-1]
+
+        with (
+            patch.object(dependencies, "_resolve", side_effect=resolve),
+            patch.object(dependencies, "_probe", side_effect=probe),
+            patch.object(dependencies, "_manager", return_value=sys.executable),
+            patch.object(dependencies, "_install", side_effect=install),
+        ):
+            code, result = self.invoke("enable", "files", terminal="yes\n")
+        self.assertEqual((code, result["state"]), (0, "ready"))
+        self.assertEqual(probes, ["yazi"])
+        receipt = json.loads((self.workspace / "setup.json").read_text())
+        self.assertIs(receipt["enabled"], True)
+        self.assertEqual(self.invoke("disable", "files")[1]["state"], "disabled")
+        self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_failed_or_unqualified_install_never_registers_selected_integration(
+        self,
+    ) -> None:
+        self.configure()
+        for failure in ("nonzero", "cancelled", "missing", "unqualified"):
+            with self.subTest(failure=failure):
+                installed = False
+
+                def resolve(name: str) -> str | None:
+                    return (
+                        None
+                        if name == "yazi" and (not installed or failure == "missing")
+                        else sys.executable
+                    )
+
+                def install(argv: list[str]) -> None:
+                    nonlocal installed
+                    if failure in {"nonzero", "cancelled"}:
+                        raise RuntimeError(f"Installer {failure}")
+                    installed = True
+
+                def probe(executable: str, name: str) -> str:
+                    if failure == "unqualified":
+                        raise RuntimeError("Unqualified yazi version 99.0.0")
+                    return dependencies._VERSIONS[name][-1]
+
+                with (
+                    patch.object(dependencies, "_resolve", side_effect=resolve),
+                    patch.object(dependencies, "_probe", side_effect=probe),
+                    patch.object(dependencies, "_manager", return_value=sys.executable),
+                    patch.object(dependencies, "_install", side_effect=install),
+                ):
+                    code, result = self.invoke("enable", "files", terminal="y\n")
+                self.assertEqual(code, 1)
+                self.assertIn("rexdeck enable files", str(result["error"]))
+                self.assertEqual(self.config.read_bytes(), self.original)
+                self.assertFalse(self.workspace.exists())
+                self.assertFalse(self.module.exists())
+
+    def test_dependency_download_rejects_changed_saved_target_before_registration(
+        self,
+    ) -> None:
+        self.configure()
+        before = self.settings.read_bytes()
+        installed = False
+
+        def resolve(name: str) -> str | None:
+            return None if name == "yazi" and not installed else sys.executable
+
+        def install(argv: list[str]) -> None:
+            nonlocal installed
+            value = self.document()
+            value["server"] = "unix:///tmp/rexdeck-replaced-target.sock"
+            self.settings.write_text(json.dumps(value))
+            installed = True
+
+        with (
+            patch.object(dependencies, "_resolve", side_effect=resolve),
+            patch.object(dependencies, "_manager", return_value=sys.executable),
+            patch.object(dependencies, "_install", side_effect=install),
+        ):
+            code, result = self.invoke("enable", "files", terminal="yes\n")
+        self.assertEqual(code, 1)
+        self.assertIn("target changed", str(result["error"]))
+        self.assertNotEqual(self.settings.read_bytes(), before)
+        self.assertEqual(self.config.read_bytes(), self.original)
+        self.assertFalse(self.workspace.exists())
+        self.assertFalse(self.module.exists())
+
+    def test_dependency_download_revalidates_config_and_server_before_registration(
+        self,
+    ) -> None:
+        self.configure()
+        backing = self.root / "backing.lua"
+        self.config.rename(backing)
+        self.config.symlink_to(backing)
+        # Save the same selected symlink and its real target before dependency work.
+        value = self.document()
+        value["config_target"] = str(backing)
+        self.settings.write_text(json.dumps(value))
+        for change in ("config", "server"):
+            with self.subTest(change=change):
+                installed = False
+                self.status_failure = False
+
+                def resolve(name: str) -> str | None:
+                    return None if name == "yazi" and not installed else sys.executable
+
+                def install(argv: list[str]) -> None:
+                    nonlocal installed
+                    if change == "config":
+                        other = self.root / "other.lua"
+                        other.write_bytes(b"-- unrelated target\n")
+                        self.config.unlink()
+                        self.config.symlink_to(other)
+                    else:
+                        self.status_failure = True
+                    installed = True
+
+                with (
+                    patch.object(dependencies, "_resolve", side_effect=resolve),
+                    patch.object(dependencies, "_manager", return_value=sys.executable),
+                    patch.object(dependencies, "_install", side_effect=install),
+                ):
+                    code, _ = self.invoke("enable", "files", terminal="yes\n")
+                self.assertEqual(code, 1)
+                self.assertEqual(backing.read_bytes(), self.original)
+                self.assertFalse(self.workspace.exists())
+                self.assertFalse(self.module.exists())
+                self.config.unlink()
+                self.config.symlink_to(backing)
 
 
 if __name__ == "__main__":

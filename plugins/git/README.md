@@ -6,11 +6,11 @@ Launch unmodified [lazygit](https://github.com/jesseduffield/lazygit) in a nativ
 
 ## Requirements and capabilities
 
-- macOS arm64, Rex CLI/server API revision 10, Python 3.12+, and `uv`.
-- `git` and `lazygit` on `PATH`. Private runtime qualification used Git 2.56.0 and lazygit 0.66.2; other versions/platforms are not qualified.
+- macOS arm64, existing Rex CLI/server (API revision 10 baseline, not an exact-version gate), Python 3.12+, and `uv`.
+- `git` and `lazygit` on `PATH`. Lazygit **0.66.2 and 0.66.3** are qualified versions; other installed versions require manual resolution, never implicit upgrade. Private runtime qualification used Git 2.56.0; other platforms are not qualified.
 - An invoking terminal that reports its current local directory to Rex. A normal repository subdirectory or linked worktree is supported; a bare repository, missing directory, or unavailable cwd is rejected.
 
-Lazygit is **write-capable**, runs as your OS account, and retains its normal keys, settings, editor, custom commands, authentication, and network operations. RexDeck neither sandboxes it nor makes it read-only. Upstream Git hooks and configured commands retain their effects. Enable does not fetch, stage, commit, push, log in, install tools, or change Git settings. The initial directory is not a filesystem jail.
+Lazygit is **write-capable**, runs as your OS account, and retains its normal keys, settings, editor, custom commands, authentication, and network operations. RexDeck neither sandboxes it nor makes it read-only. Upstream Git hooks and configured commands retain their effects. Enable does not fetch, stage, commit, push, log in, or change Git settings. The initial directory is not a filesystem jail.
 
 ## Enable and use
 
@@ -21,6 +21,10 @@ rexdeck setup
 rexdeck enable git
 rexdeck status git
 ```
+
+Setup/status never install packages. When lazygit is missing, `enable git` may offer `brew install lazygit` using existing qualified Homebrew **7.0.12** on macOS arm64 (`/opt/homebrew` or a validated existing prefix at most 13 bytes); it displays resolved argv/effects and requires interactive **default-No** consent. It installs no unrelated integration, never silently upgrades existing tools, and revalidates the exact qualified tool version plus frozen approved target before registration. Git itself must already be available; RexDeck does not bootstrap Git/Rex/managers. Missing/unsupported manager, decline, and noninteractive execution give manual guidance without registration.
+
+Manual route: use `brew install lazygit` with an existing supported Homebrew (or [upstream instructions](https://github.com/jesseduffield/lazygit#installation)), then rerun `rexdeck enable git`. Failure/cancellation retains visible diagnostics and no partial registration; package-manager changes may remain. Disable/uninstall never removes Git/lazygit or changes their configuration.
 
 From the intended repository terminal, choose **RexDeck Git** in Rex's native palette. The terminal split runs lazygit with structured argv and the validated invoking cwd. Git performs its normal repository discovery; RexDeck does not manufacture a `.git` directory or collapse linked worktrees to their common repository.
 
@@ -55,3 +59,5 @@ Run `disable` for **every applied** integration before uninstalling RexDeck or d
 ## Verification
 
 Run the root Ruff/format/strict-mypy/full-pytest chain and compile the shared packaged `src/rexdeck/plugins/files/main.lua` asset. Build/install the wheel outside the checkout and use a private native Rex endpoint with disposable repositories. Exercise actual diff/stage/commit, normal subdirectory and linked-worktree origins, independent quits after focus changes, closed-origin failure, missing tools, both sibling enable/disable orders, and open-pane survival. Native terminal captures prove the private TUI interaction; they do not claim owner-app palette/font/desktop visual approval.
+
+Lazygit is an unbundled [MIT-licensed upstream tool](https://github.com/jesseduffield/lazygit/blob/master/LICENSE). Rex is external and separately licensed. Publication is held until the root [release owner gate](../../README.md#release-preparation-and-owner-gate) is satisfied; source install remains supported while unpublished.

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Never
 
-from rexdeck import lifecycle, settings
+from rexdeck import dependencies, lifecycle, settings
 
 _FAILURES = {"conflict", "failed", "fault"}
 
@@ -69,10 +69,7 @@ def _inspect(target: settings.SavedTarget) -> dict[str, object]:
     """Inspect the saved target without imposing plugin-specific prerequisites."""
     setup = target.setup()
     _selected_status(setup)
-    result = lifecycle.inspect_setup(setup)
-    if result.get("state") in _FAILURES:
-        return result
-    return result
+    return lifecycle.inspect_setup(setup, check_tools=False)
 
 
 def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
@@ -193,6 +190,31 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
     return {"state": "configured", "settings": str(path), **candidate.document()}
 
 
+def _enable(path: Path, target: settings.SavedTarget, plugin: str) -> dict[str, object]:
+    """Resolve dependencies before entering the existing owned-mutation path."""
+    setup = target.setup(plugin)
+    _selected_status(setup)
+    dependencies.ensure(plugin)
+    # A download can take arbitrarily long. Never keep a config lock across it or
+    # use a changed settings file, redirected path, or dead server afterwards.
+    current = settings.load(path)
+    if current is None or current != target:
+        raise RuntimeError(
+            "Saved Rex target changed during dependency preparation; no integration "
+            f"was registered. Inspect {path}, then rerun rexdeck enable {plugin}"
+        )
+    setup = current.setup(plugin)
+    _selected_status(setup)
+    result = lifecycle.apply_setup(setup)
+    if result.get("state") == "applied":
+        return lifecycle.start(setup)
+    if result.get("state") not in _FAILURES:
+        raise RuntimeError(
+            f"{plugin} apply did not succeed; integration was not started"
+        )
+    return result
+
+
 def main() -> int:
     """Dispatch lifecycle commands and isolate faults in aggregate status rows."""
     parser = _Parser(description=__doc__)
@@ -223,14 +245,7 @@ def main() -> int:
             if target is None:
                 raise RuntimeError("No saved Rex target; run rexdeck setup first")
             if args.command == "enable":
-                setup = target.setup(args.plugin)
-                result = lifecycle.apply_setup(setup)
-                if result.get("state") == "applied":
-                    result = lifecycle.start(setup)
-                elif result.get("state") not in _FAILURES:
-                    raise RuntimeError(
-                        f"{args.plugin} apply did not succeed; integration was not started"
-                    )
+                result = _enable(path, target, args.plugin)
             elif args.command == "disable":
                 result = lifecycle.disable(target.setup(args.plugin))
             else:
