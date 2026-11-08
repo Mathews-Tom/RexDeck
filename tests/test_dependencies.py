@@ -78,6 +78,7 @@ class DependencyTests(unittest.TestCase):
             ("git", "lazygit", "commit=abc, version=0.66.2, os=darwin, arch=arm64"),
             ("git", "lazygit", "commit=abc, version=0.66.3, os=darwin, arch=arm64"),
             ("markdown", "markdown-reader", "markdown-reader 1.35.4"),
+            ("usage", "tokscale", "tokscale 4.21.0"),
         ):
             with self.subTest(plugin=plugin, output=output):
                 executable = self.tool(name, output)
@@ -103,6 +104,20 @@ class DependencyTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     dependencies.ensure("markdown")
                 self.assertEqual(executable.read_bytes(), before)
+                self.assertFalse(self.manager_marker.exists())
+
+    def test_tokscale_rejects_unqualified_versions(self) -> None:
+        for output in (
+            "tokscale 4.20.1",
+            "tokscale 4.21.1",
+            "tokscale 4.21.0-rc1",
+            "4.21.0",
+        ):
+            with self.subTest(output=output):
+                executable = self.tool("tokscale", output)
+                with self.assertRaises(RuntimeError):
+                    dependencies.ensure("usage")
+                executable.unlink()
                 self.assertFalse(self.manager_marker.exists())
 
     def test_missing_tools_never_read_consent_or_execute_available_managers(
