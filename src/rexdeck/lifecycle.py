@@ -215,6 +215,10 @@ def _env(setup: Setup) -> dict[str, str]:
     return result
 
 
+class MissingDependency(RuntimeError):
+    """A selected upstream executable is absent; only the owner can install it."""
+
+
 def _executable(name: str) -> str:
     """Resolve trusted absolute PATH entries and explain external prerequisites."""
     search_path = os.pathsep.join(
@@ -230,7 +234,7 @@ def _executable(name: str) -> str:
                 "install Rex using its supported distribution, make rex available on PATH, "
                 "start its server, then rerun rexdeck setup. RexDeck never installs Rex"
             )
-        raise RuntimeError(
+        raise MissingDependency(
             f"Required executable not found: {name}; install it before applying or starting"
         )
     return str(Path(found).absolute())
@@ -1222,6 +1226,13 @@ def status(setup: Setup) -> dict[str, object]:
         elif receipt is None:
             _unowned(paths, setup)
         _expect_action(setup, bool(receipt and receipt["enabled"]))
+    except MissingDependency as exc:
+        return {
+            "state": "missing-dependency",
+            "server": setup.server,
+            "enabled": bool(receipt and receipt["enabled"]),
+            "error": str(exc),
+        }
     except RuntimeError as exc:
         return {"state": "fault", "server": setup.server, "error": str(exc)}
     conflicts = receipt["conflicts"] if receipt else []

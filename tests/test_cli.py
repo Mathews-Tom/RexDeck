@@ -656,6 +656,36 @@ class CliTests(unittest.TestCase):
         self.assertIn(str(receipt), str(explicit["error"]))
         self.assertNotIn("plugins", explicit)
 
+    def test_status_reports_selected_tool_removed_after_enable(self) -> None:
+        """A vanished upstream tool is a missing dependency, not a generic fault."""
+        self.configure()
+        self.assertEqual(self.invoke("enable", "files")[0], 0)
+        self.assertEqual(self.invoke("enable", "git")[0], 0)
+        empty = self.root / "empty-bin"
+        empty.mkdir()
+        tools = lifecycle._tools
+
+        def without_yazi(tool: str = "yazi") -> dict[str, str]:
+            if tool == "yazi":
+                self.resolve_executable(tool)  # real lookup on a PATH without yazi
+            return tools(tool)
+
+        with (
+            patch.dict(os.environ, {"PATH": str(empty)}),
+            patch.object(lifecycle, "_tools", side_effect=without_yazi),
+        ):
+            code, explicit = self.invoke("status", "files")
+            self.assertEqual((code, explicit["state"]), (1, "missing-dependency"))
+            self.assertIs(explicit["enabled"], True)
+            self.assertIn("yazi", str(explicit["error"]))
+            code, listing = self.invoke("plugins")
+        self.assertEqual((code, listing["state"]), (1, "fault"))
+        plugins = cast(dict[str, dict[str, object]], listing["plugins"])
+        self.assertEqual(plugins["files"]["state"], "missing-dependency")
+        self.assertEqual(plugins["git"]["state"], "ready")
+        self.assertEqual(plugins["markdown"]["state"], "disabled")
+        self.assertEqual(self.invoke("status", "files")[1]["state"], "ready")
+
     def test_unknown_plugin_and_removed_commands_do_not_mutate(self) -> None:
         for command in (
             ("enable", "other"),

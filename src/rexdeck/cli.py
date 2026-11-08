@@ -12,7 +12,7 @@ from typing import Never
 
 from rexdeck import dependencies, integrations, lifecycle, settings
 
-_FAILURES = {"conflict", "failed", "fault"}
+_FAILURES = {"conflict", "failed", "fault", "missing-dependency"}
 
 
 class _Parser(argparse.ArgumentParser):
