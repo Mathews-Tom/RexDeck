@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Never
 
-from rexdeck import dependencies, integrations, lifecycle, settings
+from rexdeck import attention, dependencies, integrations, lifecycle, settings
 
 _FAILURES = {"conflict", "failed", "fault", "missing-dependency"}
 
@@ -278,6 +278,26 @@ def main() -> int:
     subcommands.add_parser(
         "plugins", help="List available plugins and their enabled/disabled state"
     )
+    native = subcommands.add_parser(
+        "attention",
+        help="Explicit native terminal status observations and exact navigation",
+    )
+    attention_commands = native.add_subparsers(dest="attention_command", required=True)
+    observe = attention_commands.add_parser("observe")
+    observe.add_argument("id", nargs="?", help="Refresh an exact retained observation")
+    observe.add_argument("--session")
+    observe.add_argument("--block")
+    observe.add_argument(
+        "--project", help="Explicit project label; never inferred identity"
+    )
+    retained = attention_commands.add_parser("list")
+    retained.add_argument("--project")
+    retained.add_argument("--session")
+    retained.add_argument("--block")
+    navigate = attention_commands.add_parser("jump")
+    navigate.add_argument(
+        "id", help="Exact retained observation ID from attention list"
+    )
     configure = subcommands.add_parser("setup")
     configure.add_argument("--config", type=Path)
     configure.add_argument("--server")
@@ -319,6 +339,30 @@ def main() -> int:
             target = settings.load(path)
             if target is None:
                 raise RuntimeError("No saved Rex target; run rexdeck setup first")
+            if args.command == "attention":
+                if args.attention_command == "observe":
+                    if args.id:
+                        if args.session is not None or args.block is not None:
+                            raise RuntimeError(
+                                "Use an observation ID or exact session/block, not both"
+                            )
+                        result = attention.refresh(target, args.id, args.project)
+                    else:
+                        if args.session is None or args.block is None:
+                            raise RuntimeError(
+                                "Observe requires an observation ID or --session and --block"
+                            )
+                        result = attention.observe(
+                            target, args.session, args.block, args.project
+                        )
+                elif args.attention_command == "list":
+                    result = attention.listing(
+                        target, args.project, args.session, args.block
+                    )
+                else:
+                    result = attention.jump(target, args.id)
+                print(json.dumps(result, ensure_ascii=True, indent=2))
+                return 1 if result.get("state") in _FAILURES else 0
             if args.command == "enable":
                 result = _enable(
                     path, target, args.plugin, placement=args.placement, size=args.size
