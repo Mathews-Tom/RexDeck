@@ -2,7 +2,7 @@
 
 A collection of independently selectable plugins and extensions that bring existing tools into your own Rex application.
 
-Files, local Git, Markdown and Usage bring unmodified Yazi, lazygit, markdown-reader and tokscale into native Rex terminals. GitHub workflows, PDF/image viewers, agent/subagent views, and task-provider integrations remain planned. Select the tools you need without installing an unrelated default suite.
+Files, local Git, Markdown, Usage and GitHub bring unmodified Yazi, lazygit, markdown-reader, tokscale and gh-dash into native Rex terminals. PDF/image viewers, agent/subagent views, and task-provider integrations remain planned. Select the tools you need without installing an unrelated default suite.
 
 ## Plugins and extensions
 
@@ -12,7 +12,7 @@ Files, local Git, Markdown and Usage bring unmodified Yazi, lazygit, markdown-re
 | [Git](plugins/git/README.md) | Inspect, stage, and commit in the invoking repository/worktree using unmodified lazygit | Available |
 | [Markdown](plugins/markdown/README.md) | Read a selected Markdown file or the invoking directory with in-pane Mermaid diagrams using unmodified markdown-reader | Unreleased (source checkout) |
 | [Usage](plugins/usage/README.md) | Watch machine-wide token usage, models, sessions and projects for omp with upstream online refresh using unmodified tokscale | Unreleased (source checkout) |
-| GitHub | Pull-request/issue workflows with explicit repository/host/account | Planned |
+| [GitHub](plugins/github/README.md) | Repository-scoped PRs/issues with explicit host/account using unmodified gh-dash | Unreleased (source checkout) |
 | Rich viewers | PDF and image viewing | Planned |
 | Agents and subagents | Attention, observed state, and navigation to agent work | Planned |
 | Tasks | Independently selectable Linear and ClickUp workflows | Planned |
@@ -47,7 +47,7 @@ rexdeck status
 
 The installed command works from any directory; the package includes the shared native action and Python launcher for every integration. No shell wrapper, `RD_*` variables, or developer checkout is needed at runtime. Ensure the tool executable directory reported by `uv` is on `PATH`.
 
-`setup` remembers the selected Rex configuration and running server without changing Rex configuration. Interactive setup asks for approval before saving a personal-server target. Use `enable <id>` independently for each integration (`files`, `git`, `markdown`, `usage`), `status [<id>]` to inspect ownership/registration, and `disable <id>` to remove only that integration. Unqualified `status` reports every integration, retaining healthy results alongside an integration-specific fault if a sibling cannot be inspected. See the plugin READMEs for prerequisites, capabilities, updates, and removal.
+`setup` remembers the selected Rex configuration and running server without changing Rex configuration. Interactive setup asks for approval before saving a personal-server target. Use `enable <id>` independently for each integration (`files`, `git`, `markdown`, `usage`, `github`), `status [<id>]` to inspect ownership/registration, and `disable <id>` to remove only that integration. Unqualified `status` reports every integration, retaining healthy results alongside an integration-specific fault if a sibling cannot be inspected. See the plugin READMEs for prerequisites, capabilities, updates, and removal.
 
 Each integration row's `state` is one of: `disabled` (not selected, or turned off), `ready` (its native action is registered in the running Rex; this says nothing about whether the upstream tool is currently open), `missing-dependency` (an applied integration's tool is not on the current `PATH`; `enabled` shows whether it is turned on. Make the tool available, reinstalling it yourself if it was removed, then rerun `status`, or `rexdeck enable <id>` if its path changed), `conflict`, or `fault` (ownership, refresh or registration problem, with an `error`). `plugins` additionally reports `not-configured` rows before setup. Command-level errors, including no saved target or an unknown/old receipt for `status <id>`, print `failed`. `missing-dependency`, `conflict`, `fault` and `failed` exit nonzero.
 
@@ -70,6 +70,8 @@ rexdeck status git                       # reports "layout": {"placement": "belo
 ### Selected dependencies
 
 `setup` and `status` never install packages. `enable files` validates preinstalled Yazi; `enable git` validates preinstalled Git/lazygit; `enable markdown` validates preinstalled markdown-reader; `enable usage` validates preinstalled tokscale. Qualified versions are **Yazi 26.9.1, lazygit 0.66.2 or 0.66.3, markdown-reader 1.35.4, tokscale 4.21.0**. Missing or unqualified selected tools produce actionable nonzero manual-install/version-check/rerun guidance without registration or installation prompts. RexDeck never installs, upgrades, downloads, cancels package transactions, or removes upstream tools, and never probes or executes Homebrew.
+
+`enable github` validates preinstalled Git, gh and **gh-dash 4.26.2** ([official release](https://github.com/dlvhdr/gh-dash/releases/tag/v4.26.2)). The GitHub action requires `account=LOGIN` matching existing gh authentication; choose `remote=NAME` when several github.com remotes exist; a host other than github.com always needs `repo=HOST/OWNER/REPO` typed explicitly. A repository-less terminal is refused. The launcher layers temporary repository-scoped PR/issue sections over normal upstream settings, preserving themes/keybindings/custom commands but replacing custom section lists and initial view. The UI remains write-capable; no credentials are copied and no global account is switched. See [GitHub](plugins/github/README.md).
 
 Executable discovery ignores empty and relative `PATH` entries. Absolute entries, including checkout directories and symlinks to them, remain eligible for version probes and lifecycle lookup. Put only trusted tools in absolute `PATH` directories. RexDeck captures followed-target device/inode/mode/size/nanosecond timestamps/owner before the version probe and rechecks that identity afterward and under its operation locks immediately before applying or enabling an integration. Replacement or modification requires rerunning enable. This is metadata-based detection, not pinned execution or protection against an executable changed after the final check.
 
@@ -110,6 +112,7 @@ Every integration shares one native host: [`src/rexdeck/host/main.lua`](src/rexd
 
 - **Identity/dependencies:** unique lowercase `id` and plain-word `title`, the executable name resolved from absolute `PATH` entries, qualified versions with the version-report pattern, release URL, upstream license and any extra preinstalled prerequisites with their install source.
 - **Context:** `directory` (the invoking terminal's validated cwd), `git-worktree` (that cwd plus Git's own discovery; inherited repository redirection is refused) or `document` (an explicitly selected `.md`/`.markdown` file from the action's `file` argument, otherwise the invoking directory; the validated target becomes the tool's final argument). A cwd never stands in for a selected file, account, or agent identity; those need their own explicit, validated context before an integration may claim them.
+  `github-worktree` reuses Git discovery and additionally freezes an explicit host/repository/account choice; ambiguous remotes require `remote` or fully qualified `repo`, and `account` must match supported existing gh authentication. It passes process-local GH_HOST/GH_REPO plus a temporary repository-section config overlay to gh-dash.
 - **Argv:** fixed arguments appended after the executable. The launch is shell-less; nothing is interpolated.
 - **Layout:** a default placement/size, overridable per integration with `enable --placement/--size`.
 - **Capabilities:** honest disclosure of writes, filesystem/transcript access, network, authentication and external process execution. Descriptive metadata is not a sandbox.

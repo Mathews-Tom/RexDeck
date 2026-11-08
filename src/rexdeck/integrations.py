@@ -18,7 +18,9 @@ from dataclasses import dataclass
 # Markdown file (the action's ``file`` argument, absolute or relative to the
 # invoking directory) and otherwise browses the invoking directory; the
 # validated target is passed to the tool as its final argument.
-CONTEXTS = ("directory", "git-worktree", "document")
+# "github-worktree" reuses Git discovery and captures an explicit repository/host
+# and account choice, verified against existing gh authentication before launch.
+CONTEXTS = ("directory", "git-worktree", "document", "github-worktree")
 PLACEMENTS = ("right", "left", "below", "above")
 MIN_SIZE = 20
 MAX_SIZE = 80
@@ -268,6 +270,36 @@ INTEGRATIONS: dict[str, Integration] = {
             ),
             default_layout=Layout("right", 50),
             args=("tui", "--client", "omp"),
+        ),
+        Integration(
+            id="github",
+            title="GitHub",
+            tool="gh-dash",
+            tool_label="gh-dash",
+            description="Open GitHub PRs and issues with explicit repository and account",
+            keywords="github gh dashboard pull requests issues",
+            context="github-worktree",
+            versions=("4.26.2",),
+            version_pattern=r"^module version: v(\d+\.\d+\.\d+), checksum:",
+            release="https://github.com/dlvhdr/gh-dash/releases/tag/v4.26.2",
+            license="MIT",
+            capabilities=(
+                "authenticated GitHub network reads and writes: comments, reviews, "
+                "merge, close, assignments and other upstream actions",
+                "requires account=LOGIN matching existing gh authentication; never "
+                "switches global accounts or copies credentials",
+                "launch-scoped repository sections replace custom sections; normal "
+                "global/repository theme, keybindings and custom commands are retained",
+                "runs gh, configured editors, pagers, browser and custom commands; "
+                "upstream may initialize its normal config/cache",
+                "initial repository scope is not a sandbox: upstream navigation "
+                "and editable filters may deliberately leave it",
+            ),
+            default_layout=Layout("right", 50),
+            prerequisites=(
+                ("git", "https://git-scm.com/downloads"),
+                ("gh", "https://cli.github.com/"),
+            ),
         ),
     )
 }

@@ -1,7 +1,8 @@
 -- Native Rex host for one RexDeck integration; embedded verbatim in its generated module.
 -- Every integration shares this action: frozen origin identity, validated context,
 -- shell-less argv, configured split layout and exact-origin return by the launcher.
-local contexts = {directory = true, ['git-worktree'] = true, document = true}
+local contexts = {directory = true, ['git-worktree'] = true, document = true,
+  ['github-worktree'] = true}
 local function nonempty(value)
   return type(value) == 'string' and value ~= '' and not value:find('%z')
 end
@@ -42,6 +43,7 @@ return function(opts)
   if not nonempty(opts.server) then error(title .. ' requires an explicit Rex server', 0) end
 
   local document = opts.context == 'document'
+  local github = opts.context == 'github-worktree'
 
   rex.action{
     name = 'rexdeck_' .. opts.plugin,
@@ -49,13 +51,27 @@ return function(opts)
     category = 'RexDeck',
     description = opts.description,
     keywords = opts.keywords,
-    -- Only a document integration takes an explicitly selected file path.
-    args = document and {file = 'string?'} or nil,
+    args = document and {file = 'string?'}
+      or (github and {repo = 'string?', remote = 'string?', account = 'string?'} or nil),
     run = function(ctx, action_args)
       local selected = nil
       if document and type(action_args) == 'table' then selected = action_args.file end
       if selected ~= nil and not nonempty(selected) then
         error(title .. ' requires a nonempty selected file path', 0)
+      end
+      if github then
+        local choice = {}
+        for _, key in ipairs({'repo', 'remote', 'account'}) do
+          local value = type(action_args) == 'table' and action_args[key] or nil
+          if value ~= nil then
+            if not nonempty(value) then error(title .. ' requires a nonempty ' .. key, 0) end
+            choice[key] = value
+          end
+        end
+        if not nonempty(choice.account) then
+          error(title .. ' requires account=LOGIN matching existing gh authentication', 0)
+        end
+        selected = rex.json.encode(choice)
       end
       -- Freeze identity before any call can change focus or mutate the context.
       local session = type(ctx) == 'table' and ctx.session_id
@@ -98,6 +114,12 @@ return function(opts)
         opts.tool_label, paths[opts.tool], paths.rex, opts.server, session, origin,
         decoded.target}
       for index = 1, #args do command[#command + 1] = args[index] end
+      if github then
+        if not nonempty(decoded.selection) then
+          error(title .. ' did not receive a validated repository/account selection', 0)
+        end
+        command[#command + 1] = decoded.selection
+      end
       local split, split_error = rex.session.new_split{
         session_id = session,
         anchor_id = origin,
