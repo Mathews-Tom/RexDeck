@@ -1,6 +1,6 @@
 # ClickUp
 
-Unreleased: install the source checkout until the next published release. Python 3.12+, Rex, httpx and PyYAML are required; the Python dependencies are installed with RexDeck. This integration owns its frontend and vendors the owner's MIT ClickUp engine. Other integrations still host unmodified upstream tools. It is **write-capable**, not a read-only wrapper or a sandbox.
+New in 0.2.0. Python 3.12+, Rex, httpx and PyYAML are required; the Python dependencies are installed with RexDeck. This integration owns its frontend and vendors the owner's MIT ClickUp engine. Other integrations still host unmodified upstream tools. It is **write-capable**, not a read-only wrapper or a sandbox.
 
 ## Select and enable
 

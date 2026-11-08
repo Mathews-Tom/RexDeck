@@ -76,7 +76,7 @@ Use Yazi's normal navigation, previews, opening, configuration, and file operati
 
 Quit Yazi with its normal `q` binding to return focus to the exact captured project terminal. Each deliberate launch has its own origin; no replacement-pane registry or process sweeper is involved. A missing origin, failed launch, nonzero Yazi exit, or focus failure stays visible for acknowledgement instead of silently selecting another pane. User-defined Yazi bindings retain their own behavior.
 
-The Yazi pane opens to the right of the invoking terminal using half its space by default. Choose another side or share with `rexdeck enable files --placement below --size 35` (unreleased; available from a source checkout until the next published version); see [pane placement and size](../../README.md#pane-placement-and-size). The choice is saved with Files' ownership record and does not affect Git or Yazi's own configuration.
+The Yazi pane opens to the right of the invoking terminal using half its space by default. Choose another side or share with `rexdeck enable files --placement below --size 35` (since 0.2.0); see [pane placement and size](../../README.md#pane-placement-and-size). The choice is saved with Files' ownership record and does not affect Git or Yazi's own configuration.
 
 Tools run as your OS account, not in a sandbox. Tool-native opening/previewing can invoke programs configured by the user. RexDeck supplies structured argv and cwd, not a shell-interpolated command.
 
