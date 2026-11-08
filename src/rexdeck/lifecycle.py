@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import FrameType
 from typing import NoReturn, cast
@@ -27,7 +27,7 @@ _BEGIN = b"-- BEGIN REXDECK (owned native Files loader)\n"
 _END = b"-- END REXDECK\n"
 _MAX_READ = 2 * 1024 * 1024
 _COMMAND_WAIT = 8.0
-_ACTION = "rexdeck_files"
+PLUGINS = ("files", "git")
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class Setup:
     data_root: Path
     server: str
     real_server: bool = False
+    plugin: str = "files"
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class _Paths:
     data_root: Path
     module: Path
     receipt: Path
+    plugin: str
 
 
 @dataclass(frozen=True)
@@ -90,7 +92,8 @@ def _canonical_server(endpoint: str) -> str:
     return "unix://" + quote(str(_socket_path(endpoint)), safe="/")
 
 
-def _validate_data_root(root: Path) -> None:
+def _validate_data_root(root: Path, plugin: str | None) -> None:
+    """Reject redirection of shared parents and any selected deployment directory."""
     try:
         if (
             not root.is_absolute()
@@ -99,7 +102,10 @@ def _validate_data_root(root: Path) -> None:
             or root.resolve() != root
         ):
             raise RuntimeError("Files data root must remain a resolved absolute path")
-        for path in (root, root / "plugins", root / "plugins/files"):
+        paths: tuple[Path, ...] = (root, root / "plugins")
+        if plugin is not None:
+            paths += (root / "plugins" / plugin,)
+        for path in paths:
             if path.is_symlink() or (path.exists() and not path.is_dir()):
                 raise RuntimeError(f"Files deployment directory is redirected: {path}")
     except OSError as exc:
@@ -107,6 +113,9 @@ def _validate_data_root(root: Path) -> None:
 
 
 def _paths(setup: Setup) -> _Paths:
+    """Resolve the selected target without consulting unused sibling deployments."""
+    if setup.plugin not in PLUGINS:
+        raise RuntimeError(f"Unknown integration: {setup.plugin}")
     if not setup.server.strip() or setup.server != setup.server.strip():
         raise RuntimeError("An explicit nonempty Rex server endpoint is required")
     socket = _socket_path(setup.server)
@@ -125,19 +134,24 @@ def _paths(setup: Setup) -> _Paths:
             raise RuntimeError(f"Selected Rex config is not a regular file: {config}")
         project = setup.project.resolve(strict=True)
         workspace = setup.workspace.resolve()
+        if setup.plugin != "files":
+            workspace = workspace / setup.plugin
+            if workspace.is_symlink():
+                raise RuntimeError(f"Integration workspace is redirected: {workspace}")
         if workspace.exists() and not workspace.is_dir():
             raise RuntimeError(f"Setup workspace must be a directory: {workspace}")
     except OSError as exc:
         raise RuntimeError(f"Cannot resolve the explicit setup paths: {exc}") from exc
-    _validate_data_root(setup.data_root)
+    _validate_data_root(setup.data_root, setup.plugin)
     return _Paths(
         project,
         workspace,
         selected,
         config,
         setup.data_root,
-        setup.data_root / "plugins/files/rexdeck_files.lua",
+        setup.data_root / f"plugins/{setup.plugin}/rexdeck_{setup.plugin}.lua",
         workspace / "setup.json",
+        setup.plugin,
     )
 
 
@@ -160,15 +174,21 @@ def _executable(name: str) -> str:
     return str(Path(found).absolute())
 
 
-def _tools() -> dict[str, str]:
+def _tools(tool: str = "yazi") -> dict[str, str]:
+    """Bind the current interpreter, Rex and selected upstream tool to paths."""
     python = Path(sys.executable).absolute()
     if not python.is_file() or not os.access(python, os.X_OK):
         raise RuntimeError(f"Current Python interpreter is not executable: {python}")
     return {
         "python": str(python),
         "rex": _executable("rex"),
-        "yazi": _executable("yazi"),
+        tool: _executable(tool),
     }
+
+
+def _selected_tools(setup: Setup) -> dict[str, str]:
+    """Resolve only the executables required by the selected integration."""
+    return _tools() if setup.plugin == "files" else _tools("lazygit")
 
 
 def _run(
@@ -420,6 +440,7 @@ def _lua(value: str) -> str:
 
 
 def _loader(paths: _Paths) -> bytes:
+    """Build the tracked loader while preserving native Files loader identity."""
     # Rex tracks required modules. Restore both its cache and the user's search path.
     if ";" in str(paths.module.parent) or "?" in str(paths.module.parent):
         raise RuntimeError(
@@ -427,44 +448,56 @@ def _loader(paths: _Paths) -> bytes:
         )
     search = _lua(str(paths.module.parent / "?.lua") + ";")
     module = _lua(paths.module.stem)
-    return (
+    begin = (
         _BEGIN
+        if paths.plugin == "files"
+        else b"-- BEGIN REXDECK (owned native Git loader)\n"
+    )
+    end = _END if paths.plugin == "files" else b"-- END REXDECK git\n"
+    return (
+        begin
         + (
             f"do local previous, cached = package.path, package.loaded[{module}]; "
             f"package.path = {search} .. previous; package.loaded[{module}] = nil; "
             f"local ok, err = pcall(require, {module}); "
             f"package.loaded[{module}] = cached; package.path = previous; "
-            "if not ok then error('RexDeck Files unavailable: ' .. tostring(err)) end end\n"
+            f"if not ok then error('RexDeck {'Files' if paths.plugin == 'files' else 'Git'} unavailable: ' .. tostring(err)) end end\n"
         ).encode()
-        + _END
+        + end
     )
 
 
 def _expect_action(setup: Setup, enabled: bool) -> None:
+    """Require exact owned action identity or verified absence after reload."""
+    title = "Files" if setup.plugin == "files" else "Git"
     listing = _rex(setup, "actions", "--json")
     actions = [
         _object(row, "Rex action")
         for row in _list(listing.get("actions"), "Rex actions")
     ]
-    matches = [row for row in actions if row.get("name") == _ACTION]
+    matches = [row for row in actions if row.get("name") == f"rexdeck_{setup.plugin}"]
     if not enabled:
         if matches:
-            raise RuntimeError("Native Files action remains registered or is foreign")
+            raise RuntimeError(
+                f"Native {title} action remains registered or is foreign"
+            )
         return
     if len(matches) != 1:
         raise RuntimeError(
-            "Native Files action is missing or ambiguous after config reload"
+            f"Native {title} action is missing or ambiguous after config reload"
         )
     action = matches[0]
     if (
         action.get("kind") != "lua"
-        or action.get("title") != "RexDeck Files"
+        or action.get("title") != f"RexDeck {title}"
         or action.get("category") != "RexDeck"
     ):
-        raise RuntimeError("Files action identity is not the owned native Lua action")
+        raise RuntimeError(
+            f"{title} action identity is not the owned native Lua action"
+        )
     source = action.get("source")
     if not isinstance(source, str):
-        raise RuntimeError("Files action has no native source identity")
+        raise RuntimeError(f"{title} action has no native source identity")
     filename, separator, line = source.rpartition(":")
     paths = _paths(setup)
     owned_sources = {str(paths.module)} | {
@@ -474,14 +507,20 @@ def _expect_action(setup: Setup, enabled: bool) -> None:
     }
     if not separator or not line.isdecimal() or filename not in owned_sources:
         raise RuntimeError(
-            "Files action is registered from an unexpected config source"
+            f"{title} action is registered from an unexpected config source"
         )
 
 
 def _without_loader(
     data: bytes, loader: bytes, *, remove_separator: bool = False
 ) -> bytes:
-    if data.count(_BEGIN) != 1 or data.count(_END) != 1 or data.count(loader) != 1:
+    """Remove one exact loader, preserving foreign content and separator ownership."""
+    lines = loader.splitlines(keepends=True)
+    if (
+        data.count(lines[0]) != 1
+        or data.count(lines[-1]) != 1
+        or data.count(loader) != 1
+    ):
         raise RuntimeError(
             "RexDeck loader changed or is ambiguous; preserve it for manual reconciliation"
         )
@@ -507,9 +546,11 @@ def _sources(paths: _Paths) -> tuple[bytes, bytes]:
 def _module(
     setup: Setup, source: bytes, launcher: bytes, tools: dict[str, str], enabled: bool
 ) -> bytes:
+    """Embed canonical action and launcher code for one selected integration."""
     opts = tools | {
         "server": setup.server,
         "launcher_code": launcher.decode("utf-8"),
+        "plugin": setup.plugin,
     }
     quoted = ", ".join(f"{key} = {_lua(value)}" for key, value in sorted(opts.items()))
     return (
@@ -522,13 +563,14 @@ def _module(
 
 
 def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
+    """Read a receipt only if its schema, target and ownership fields are valid."""
     snapshot = _file(paths.receipt)
     if snapshot.data is None:
         return None
     result = _decode(snapshot.data, str(paths.receipt))
     expected: dict[str, object] = {
         "version": 3,
-        "kind": "native-files",
+        "kind": f"native-{setup.plugin}",
         "workspace": str(paths.workspace),
         "data_root": str(paths.data_root),
         "config": str(paths.selected),
@@ -567,7 +609,8 @@ def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
     if result.get("loader_separator") not in ("", "\n"):
         raise RuntimeError("Setup receipt has malformed loader_separator")
     tools = _object(result.get("tools"), "receipt tools")
-    if set(tools) != {"python", "rex", "yazi"} or any(
+    tool = "yazi" if setup.plugin == "files" else "lazygit"
+    if set(tools) != {"python", "rex", tool} or any(
         not isinstance(value, str) or not Path(value).is_absolute() or "\x00" in value
         for value in tools.values()
     ):
@@ -592,9 +635,10 @@ def _owned_config(paths: _Paths, receipt: dict[str, object]) -> None:
 
 
 def _current_bundle(setup: Setup, paths: _Paths, receipt: dict[str, object]) -> None:
+    """Require owned artifacts to match the current package and executable paths."""
     _owned_config(paths, receipt)
     source, launcher = _sources(paths)
-    tools = _tools()
+    tools = _selected_tools(setup)
     if (
         _digest(source) != receipt["source_sha256"]
         or _digest(launcher) != receipt["launcher_sha256"]
@@ -603,8 +647,8 @@ def _current_bundle(setup: Setup, paths: _Paths, receipt: dict[str, object]) -> 
         != receipt["module_sha256"]
     ):
         raise RuntimeError(
-            "Canonical Files source, launcher or tool paths changed; "
-            "run rexdeck enable files to refresh the owned integration"
+            f"Canonical {setup.plugin} source, launcher or tool paths changed; "
+            f"run rexdeck enable {setup.plugin} to refresh the owned integration"
         )
 
 
@@ -638,12 +682,13 @@ def _defer_cancellation() -> Iterator[None]:
                 raise KeyboardInterrupt(f"Received signal {interrupted}")
 
 
-def _rollback(changes: list[_Change], data_root: Path) -> list[str]:
+def _rollback(changes: list[_Change], data_root: Path, plugin: str) -> list[str]:
+    """Restore owned preimages without overwriting concurrent edits."""
     conflicts: list[str] = []
     for change in reversed(changes):
         try:
             if change.path.is_relative_to(data_root):
-                _validate_data_root(data_root)
+                _validate_data_root(data_root, plugin)
             current = _file(change.path)
             if current == change.before:
                 continue
@@ -684,11 +729,12 @@ def _recover_changes(
     operation: str,
     cause: RuntimeError | OSError | KeyboardInterrupt,
 ) -> NoReturn:
+    """Recover owned preimages and surface failure or cancellation with conflicts."""
     conflicts: list[str] = []
     cancellation: KeyboardInterrupt | None = None
     try:
         with _defer_cancellation():
-            conflicts = _rollback(changes, setup.data_root)
+            conflicts = _rollback(changes, setup.data_root, setup.plugin)
             try:
                 _reload(setup)
             except RuntimeError as reload_error:
@@ -711,11 +757,22 @@ def _recover_changes(
 
 @contextmanager
 def _operation_lock(paths: _Paths) -> Iterator[None]:
+    """Serialize config, deployment-root and workspace mutations without waiting."""
+    config_descriptor: int | None = None
     deployment_descriptor: int | None = None
     try:
-        _validate_data_root(paths.data_root)
+        config_descriptor = os.open(
+            paths.config.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        try:
+            fcntl.flock(config_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(
+                "Another RexDeck lifecycle operation is using the shared config"
+            ) from exc
+        _validate_data_root(paths.data_root, paths.plugin)
         paths.data_root.mkdir(parents=True, exist_ok=True)
-        _validate_data_root(paths.data_root)
+        _validate_data_root(paths.data_root, paths.plugin)
         deployment_descriptor = os.open(
             paths.data_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         )
@@ -762,6 +819,8 @@ def _operation_lock(paths: _Paths) -> Iterator[None]:
     finally:
         if deployment_descriptor is not None:
             os.close(deployment_descriptor)
+        if config_descriptor is not None:
+            os.close(config_descriptor)
 
 
 def _transaction(
@@ -772,6 +831,7 @@ def _transaction(
     before: _File,
     operation: str,
 ) -> None:
+    """Publish owned changes and receipt only after native reload verification."""
     for change in changes:
         if change.after is not None and len(change.after) > _MAX_READ:
             raise RuntimeError(
@@ -780,24 +840,24 @@ def _transaction(
     applied: list[_Change] = []
     try:
         for change in changes:
-            _validate_data_root(paths.data_root)
+            _validate_data_root(paths.data_root, paths.plugin)
             if change.path == paths.module and change.after is not None:
                 paths.module.parent.mkdir(parents=True, exist_ok=True)
-                _validate_data_root(paths.data_root)
+                _validate_data_root(paths.data_root, paths.plugin)
             if paths.selected.resolve(strict=True) != paths.config:
                 raise RuntimeError(
                     "Selected Rex config symlink changed during operation"
                 )
             applied.append(change)
             _replace(change.path, change.before, change.after)
-        _validate_data_root(paths.data_root)
+        _validate_data_root(paths.data_root, paths.plugin)
         if paths.selected.resolve(strict=True) != paths.config:
             raise RuntimeError(
                 "Selected Rex config symlink changed before config validation"
             )
         _check(setup)
         _reload(setup)
-        _validate_data_root(paths.data_root)
+        _validate_data_root(paths.data_root, paths.plugin)
         if paths.selected.resolve(strict=True) != paths.config:
             raise RuntimeError("Selected Rex config symlink changed during reload")
         if receipt["applied"]:
@@ -810,8 +870,15 @@ def _transaction(
         _recover_changes(setup, applied, operation, exc)
 
 
-def _unowned(paths: _Paths) -> None:
-    # Old state is never adopted or cleaned here; the explicit legacy helper owns it.
+def _sibling(setup: Setup) -> tuple[_Paths, Setup]:
+    """Resolve the other integration only when its loader needs ownership checks."""
+    sibling = replace(setup, plugin="git" if setup.plugin == "files" else "files")
+    return _paths(sibling), sibling
+
+
+def _unowned(paths: _Paths, setup: Setup) -> None:
+    """Reject foreign selected artifacts and validate any existing sibling loader."""
+    # Only a validated sibling receipt can account for another loader.
     for path in (
         paths.module,
         paths.workspace / "hub.json",
@@ -824,7 +891,14 @@ def _unowned(paths: _Paths) -> None:
                 f"Unowned existing artifact: {path}; use a fresh native workspace"
             )
     data = _file(paths.config).data or b""
-    if b"-- BEGIN REXDECK" in data or _END in data:
+    if b"-- BEGIN REXDECK" not in data and b"-- END REXDECK" not in data:
+        return
+    sibling, sibling_setup = _sibling(setup)
+    receipt = _receipt(sibling, sibling_setup)
+    if receipt is not None and receipt["applied"]:
+        _owned_config(sibling, receipt)
+        data = _without_loader(data, _loader(sibling))
+    if b"-- BEGIN REXDECK" in data or b"-- END REXDECK" in data:
         raise RuntimeError("Unowned or old RexDeck loader; nothing changed")
 
 
@@ -835,14 +909,14 @@ def inspect_setup(setup: Setup) -> dict[str, object]:
     prerequisites: dict[str, object] = {}
     conflicts = cast(list[str], receipt["conflicts"]).copy() if receipt else []
     try:
-        prerequisites.update(_tools())
+        prerequisites.update(_selected_tools(setup))
         _sources(paths)
     except RuntimeError as exc:
         prerequisites["error"] = str(exc)
     try:
         _endpoint_policy(setup)
         if receipt is None:
-            _unowned(paths)
+            _unowned(paths, setup)
             _expect_action(setup, False)
         elif receipt["applied"]:
             _owned_config(paths, receipt)
@@ -865,11 +939,12 @@ def inspect_setup(setup: Setup) -> dict[str, object]:
 
 
 def apply_setup(setup: Setup) -> dict[str, object]:
+    """Install or refresh the selected owned integration without enabling it."""
     paths = _paths(setup)
     _receipt(paths, setup)  # Refuse unknown ownership before creating even a lock.
     _endpoint_policy(setup)
     if not paths.receipt.exists():
-        _unowned(paths)
+        _unowned(paths, setup)
         _expect_action(setup, False)
     try:
         paths.workspace.mkdir(parents=True, exist_ok=True)
@@ -882,15 +957,15 @@ def apply_setup(setup: Setup) -> dict[str, object]:
         assert config.data is not None
         previous_module = _file(paths.module)
         if receipt is None:
-            _unowned(paths)
+            _unowned(paths, setup)
             _expect_action(setup, False)
         elif receipt["applied"]:
             _owned_config(paths, receipt)
         else:
-            _unowned(paths)
+            _unowned(paths, setup)
             _expect_action(setup, False)
         source, launcher = _sources(paths)
-        tools = _tools()
+        tools = _selected_tools(setup)
         enabled = bool(receipt and receipt["applied"] and receipt["enabled"])
         module = _module(setup, source, launcher, tools, enabled)
         changes: list[_Change] = []
@@ -910,7 +985,7 @@ def apply_setup(setup: Setup) -> dict[str, object]:
             separator = cast(str, receipt["loader_separator"])
         receipt = {
             "version": 3,
-            "kind": "native-files",
+            "kind": f"native-{setup.plugin}",
             "project": str(paths.project),
             "workspace": str(paths.workspace),
             "data_root": str(paths.data_root),
@@ -938,10 +1013,13 @@ def apply_setup(setup: Setup) -> dict[str, object]:
 
 
 def start(setup: Setup) -> dict[str, object]:
+    """Enable a verified current bundle and confirm its exact native action."""
     paths = _paths(setup)
     receipt = _receipt(paths, setup)
     if receipt is None or not receipt["applied"]:
-        raise RuntimeError("Files is not installed; run rexdeck enable files")
+        raise RuntimeError(
+            f"{setup.plugin} is not installed; run rexdeck enable {setup.plugin}"
+        )
     _endpoint_policy(setup)
     with _operation_lock(paths):
         before = _file(paths.receipt)
@@ -967,6 +1045,7 @@ def start(setup: Setup) -> dict[str, object]:
 
 
 def status(setup: Setup) -> dict[str, object]:
+    """Report selected ownership and registration, not upstream process readiness."""
     paths = _paths(setup)
     receipt = _receipt(paths, setup)
     try:
@@ -974,7 +1053,7 @@ def status(setup: Setup) -> dict[str, object]:
         if receipt is not None and receipt["applied"]:
             _current_bundle(setup, paths, receipt)
         elif receipt is None:
-            _unowned(paths)
+            _unowned(paths, setup)
         _expect_action(setup, bool(receipt and receipt["enabled"]))
     except RuntimeError as exc:
         return {"state": "fault", "server": setup.server, "error": str(exc)}
@@ -993,11 +1072,12 @@ def status(setup: Setup) -> dict[str, object]:
 
 
 def disable(setup: Setup) -> dict[str, object]:
+    """Remove selected owned artifacts, preserving siblings and concurrent edits."""
     paths = _paths(setup)
     receipt = _receipt(paths, setup)
     _endpoint_policy(setup)
     if receipt is None:
-        _unowned(paths)
+        _unowned(paths, setup)
         _expect_action(setup, False)
         return {"state": "disabled", "server": setup.server, "conflicts": []}
     with _operation_lock(paths):
@@ -1020,6 +1100,26 @@ def disable(setup: Setup) -> dict[str, object]:
                     _loader(paths),
                     remove_separator=receipt["loader_separator"] == "\n",
                 )
+                # The first loader owns a separator needed by any following one.
+                # Transfer it before removing that loader, so either disable order
+                # restores a config that originally had no final newline.
+                tail = config.data.partition(_loader(paths))[2]
+                if receipt["loader_separator"] == "\n" and tail.startswith(
+                    b"-- BEGIN REXDECK"
+                ):
+                    sibling, sibling_setup = _sibling(setup)
+                    if tail.startswith(_loader(sibling)):
+                        sibling_before = _file(sibling.receipt)
+                        sibling_receipt = _receipt(sibling, sibling_setup)
+                        if sibling_receipt is None or not sibling_receipt["applied"]:
+                            raise RuntimeError("Following loader has no owned receipt")
+                        _owned_config(sibling, sibling_receipt)
+                        sibling_receipt["loader_separator"] = "\n"
+                        changes.append(
+                            _Change(
+                                sibling.receipt, sibling_before, _json(sibling_receipt)
+                            )
+                        )
             except RuntimeError as exc:
                 return {
                     "state": "conflict",
