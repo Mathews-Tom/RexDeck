@@ -35,7 +35,7 @@ Integrations merged after the latest release are available from an exact public 
 uv tool install "rexdeck @ git+https://github.com/Mathews-Tom/RexDeck@<full-commit-sha>"
 ```
 
-Installing or upgrading either way replaces only the RexDeck package. After an upgrade that changes the bundled host (for example from 0.1.0), `status` reports each previously enabled integration as a `fault` asking for a refresh; run `rexdeck enable <id>` for each one. Integrations you never enabled stay unselected, and no upstream tool is installed.
+Installing or upgrading either way replaces only the RexDeck package. After an upgrade that changes the bundled host (for example from 0.1.0), `status` reports each previously enabled integration as a `fault` asking for a refresh; run `rexdeck enable <id>` for each one. If an integration's tool is missing at that point, `status` reports `missing-dependency` instead; restore the tool first, then run `rexdeck enable <id>`. Integrations you never enabled stay unselected, and no upstream tool is installed.
 
 Then save your target and enable only the integrations you need:
 

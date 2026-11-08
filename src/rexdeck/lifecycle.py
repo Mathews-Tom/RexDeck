@@ -1226,12 +1226,25 @@ def status(setup: Setup) -> dict[str, object]:
         elif receipt is None:
             _unowned(paths, setup)
         _expect_action(setup, bool(receipt and receipt["enabled"]))
-    except MissingDependency as exc:
+    except MissingDependency as missing:
+        enabled = bool(receipt and receipt["enabled"])
+        try:
+            # A missing tool must not hide a registration fault behind it.
+            _expect_action(setup, enabled)
+        except RuntimeError as exc:
+            return {
+                "state": "fault",
+                "server": setup.server,
+                "error": f"{exc}; also {missing}",
+            }
         return {
             "state": "missing-dependency",
             "server": setup.server,
-            "enabled": bool(receipt and receipt["enabled"]),
-            "error": str(exc),
+            "applied": bool(receipt and receipt["applied"]),
+            "enabled": enabled,
+            "layout": _layout(setup, receipt).document(),
+            "conflicts": receipt["conflicts"] if receipt else [],
+            "error": str(missing),
         }
     except RuntimeError as exc:
         return {"state": "fault", "server": setup.server, "error": str(exc)}
