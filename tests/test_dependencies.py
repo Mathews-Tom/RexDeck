@@ -14,9 +14,20 @@ import time
 import unittest
 from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import TypedDict
 from unittest.mock import patch
 
 from rexdeck import dependencies, lifecycle
+
+
+class _BrewOptions(TypedDict, total=False):
+    version: str
+    prefix: str
+    cellar: str
+    outcome: str
+    yazi_version: str
+    inventory_output: str
+    inventory_code: int
 
 
 class _Terminal(io.StringIO):
@@ -70,6 +81,11 @@ class DependencyTests(unittest.TestCase):
         cellar: str | None = None,
         outcome: str = "success",
         yazi_version: str = "26.9.1",
+        installed: tuple[str, ...] = (),
+        install_dependencies: tuple[str, ...] = (),
+        inventory_output: str | None = None,
+        inventory_code: int = 0,
+        inventory_warning: bool = False,
     ) -> Path:
         prefix = str(self.prefix) if prefix is None else prefix
         cellar = str(Path(prefix) / "Cellar") if cellar is None else cellar
@@ -80,6 +96,17 @@ class DependencyTests(unittest.TestCase):
                 "commit=abc, build source=test, version=0.66.3, os=darwin, arch=arm64",
             ),
         }
+        inventory = json.dumps(
+            {
+                "formulae": [
+                    {"name": name.rsplit("/", 1)[-1], "full_name": name}
+                    for name in installed
+                ],
+                "casks": [],
+            }
+        )
+        if inventory_output is not None:
+            inventory = inventory_output
         return self.script(
             "brew",
             "import json, os, pathlib, sys\n"
@@ -87,11 +114,22 @@ class DependencyTests(unittest.TestCase):
             f"if args == ['--version']: print('Homebrew {version}')\n"
             f"elif args == ['--prefix']: print({prefix!r})\n"
             f"elif args == ['--cellar']: print({cellar!r})\n"
+            "elif args == ['info', '--json=v2', '--installed', '--formula']:\n"
+            f"    if {inventory_warning!r}: print('Warning: owned fixture diagnostic', file=sys.stderr, flush=True)\n"
+            f"    if {outcome!r} == 'oversized-inventory': print(' ' * {lifecycle._MAX_READ + 1}); sys.exit(0)\n"
+            f"    print({inventory!r})\n"
+            f"    sys.exit({inventory_code})\n"
             "elif len(args) == 2 and args[0] == 'install' and args[1] in ('yazi', 'lazygit'):\n"
             f"    record = pathlib.Path({str(self.record)!r})\n"
-            "    keys = ['HOMEBREW_NO_AUTO_UPDATE', 'HOMEBREW_NO_INSTALL_UPGRADE', "
-            "'HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK', 'HOMEBREW_NO_INSTALL_CLEANUP']\n"
-            "    record.write_text(json.dumps({'argv': args, 'env': {key: os.environ.get(key) for key in keys}}))\n"
+            "    record.write_text('install attempted')\n"
+            # Model the source-backed forbidden-formula boundary, not Homebrew itself:
+            # computed dependencies needing installation are checked before mutation.
+            f"    dependencies = {install_dependencies!r}\n"
+            "    forbidden = set(os.environ.get('HOMEBREW_FORBIDDEN_FORMULAE', '').split())\n"
+            "    if any(dep in forbidden or dep.rsplit('/', 1)[-1] in forbidden for dep in dependencies):\n"
+            "        print('dependency installation forbidden', flush=True); sys.exit(43)\n"
+            "    for dep in dependencies:\n"
+            f"        (pathlib.Path({str(self.prefix)!r}) / ('dependency-' + dep.replace('/', '_'))).write_text('new dependency')\n"
             "    print('download progress', flush=True)\n"
             "    print('installer diagnostic', file=sys.stderr, flush=True)\n"
             f"    if {outcome!r} == 'nonzero': sys.exit(42)\n"
@@ -235,12 +273,13 @@ class DependencyTests(unittest.TestCase):
     def test_unqualified_manager_layout_version_and_relocation_never_install(
         self,
     ) -> None:
-        for options in (
+        cases: tuple[_BrewOptions, ...] = (
             {"version": "7.0.13"},
             {"prefix": "relative"},
             {"prefix": str(self.prefix / "missing")},
             {"cellar": str(self.prefix / "not-standard")},
-        ):
+        )
+        for options in cases:
             with self.subTest(options=options):
                 self.brew(**options)
                 with (
@@ -281,37 +320,110 @@ class DependencyTests(unittest.TestCase):
                 self.assertEqual(
                     (self.prefix / (name + ".probes")).read_text(), "version\n"
                 )
-                record = json.loads(self.record.read_text())
-                self.assertEqual(record["argv"], ["install", name])
-                self.assertEqual(
-                    record["env"],
-                    {
-                        "HOMEBREW_NO_AUTO_UPDATE": "1",
-                        "HOMEBREW_NO_INSTALL_UPGRADE": "1",
-                        "HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK": "1",
-                        "HOMEBREW_NO_INSTALL_CLEANUP": "1",
-                    },
-                )
                 self.assertEqual(stdout.getvalue(), "")
                 self.assertIn("download progress", stderr.getvalue())
                 self.assertIn("installer diagnostic", stderr.getvalue())
-                for key in (
-                    "HOMEBREW_NO_AUTO_UPDATE",
-                    "HOMEBREW_NO_INSTALL_UPGRADE",
-                    "HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK",
-                    "HOMEBREW_NO_INSTALL_CLEANUP",
-                ):
-                    self.assertNotIn(key, os.environ)
                 Path(executable).unlink()
+
+    def test_installed_dependency_upgrade_is_forbidden_before_any_dependency_install(
+        self,
+    ) -> None:
+        original = self.prefix / "dependency-go"
+        original.write_text("existing incompatible Go")
+        self.brew(installed=("go",), install_dependencies=("missing-runtime", "go"))
+        stderr = io.StringIO()
+        with (
+            patch.object(sys, "stdin", _Terminal("yes\n")),
+            redirect_stderr(stderr),
+            self.assertRaisesRegex(RuntimeError, "status 43.*rexdeck enable git"),
+        ):
+            dependencies.ensure("git")
+        self.assertEqual(original.read_text(), "existing incompatible Go")
+        self.assertFalse((self.prefix / "dependency-missing-runtime").exists())
+        self.assertFalse((self.bin / "lazygit").exists())
+
+    def test_missing_dependencies_remain_eligible_without_mutating_owner_restrictions(
+        self,
+    ) -> None:
+        original = self.prefix / "dependency-go"
+        original.write_text("existing satisfied Go")
+        self.brew(
+            installed=("go", "owner/tap/existing"),
+            install_dependencies=("missing-runtime",),
+        )
+        with (
+            patch.dict(os.environ, {"HOMEBREW_FORBIDDEN_FORMULAE": "owner-ban"}),
+            patch.object(sys, "stdin", _Terminal("yes\n")),
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(dependencies.ensure("git"), str(self.bin / "lazygit"))
+            self.assertEqual(os.environ["HOMEBREW_FORBIDDEN_FORMULAE"], "owner-ban")
+        self.assertEqual(original.read_text(), "existing satisfied Go")
+        self.assertEqual(
+            (self.prefix / "dependency-missing-runtime").read_text(), "new dependency"
+        )
+
+    def test_owner_forbidden_missing_dependency_still_cannot_be_installed(self) -> None:
+        self.brew(installed=("go",), install_dependencies=("owner-ban",))
+        with (
+            patch.dict(os.environ, {"HOMEBREW_FORBIDDEN_FORMULAE": "owner-ban"}),
+            patch.object(sys, "stdin", _Terminal("yes\n")),
+            redirect_stderr(io.StringIO()),
+            self.assertRaisesRegex(RuntimeError, "status 43"),
+        ):
+            dependencies.ensure("files")
+        self.assertFalse((self.prefix / "dependency-owner-ban").exists())
+        self.assertFalse((self.bin / "yazi").exists())
+
+    def test_valid_inventory_with_stderr_warning_still_installs_missing_tool(
+        self,
+    ) -> None:
+        self.brew(inventory_warning=True)
+        with (
+            patch.object(sys, "stdin", _Terminal("yes\n")),
+            redirect_stderr(io.StringIO()),
+        ):
+            executable = dependencies.ensure("files")
+        self.assertEqual(executable, str(self.bin / "yazi"))
+        self.assertEqual((self.prefix / "yazi.probes").read_text(), "version\n")
+
+    def test_invalid_failed_and_oversized_inventory_never_start_installer(self) -> None:
+        cases: tuple[_BrewOptions, ...] = (
+            {"inventory_output": "not JSON"},
+            {"inventory_output": "[]"},
+            {"inventory_output": "{}"},
+            {"inventory_output": '{"formulae": null}'},
+            {"inventory_output": '{"formulae": [null]}'},
+            {"inventory_output": '{"formulae": [{"name": "go"}]}'},
+            {
+                "inventory_output": (
+                    '{"formulae": [{"name": "go other", "full_name": "go"}]}'
+                )
+            },
+            {"inventory_code": 42},
+            {"outcome": "oversized-inventory"},
+        )
+        for options in cases:
+            with self.subTest(options=options):
+                self.brew(**options)
+                with (
+                    patch.object(sys, "stdin", _Terminal("yes\n")),
+                    redirect_stderr(io.StringIO()),
+                    self.assertRaisesRegex(RuntimeError, "rexdeck enable files"),
+                ):
+                    dependencies.ensure("files")
+                self.assertFalse(self.record.exists())
+                self.assertFalse((self.bin / "yazi").exists())
 
     def test_installer_nonzero_missing_and_bad_postinstall_versions_are_failures(
         self,
     ) -> None:
-        for options, error in (
+        cases: tuple[tuple[_BrewOptions, str], ...] = (
             ({"outcome": "nonzero"}, "status 42"),
             ({"outcome": "missing"}, "still missing"),
             ({"yazi_version": "99.0.0"}, "Unqualified yazi"),
-        ):
+        )
+        for options, error in cases:
             with self.subTest(options=options):
                 self.brew(**options)
                 with (
@@ -371,6 +483,8 @@ class DependencyTests(unittest.TestCase):
         installer = self.script(
             "long-installer",
             "import json, os, pathlib, subprocess, sys, time\n"
+            "if sys.argv[1:] == ['info', '--json=v2', '--installed', '--formula']:\n"
+            "    print(json.dumps({'formulae': [], 'casks': []})); sys.exit(0)\n"
             "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(300)'])\n"
             f"pathlib.Path({str(ready)!r}).write_text(json.dumps([os.getpid(), child.pid]))\n"
             "print('installer active', flush=True)\n"

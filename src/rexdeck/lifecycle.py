@@ -202,10 +202,26 @@ def _selected_tools(setup: Setup) -> dict[str, str]:
     return _tools() if setup.plugin == "files" else _tools("lazygit")
 
 
+def _require_qualified_tool(
+    setup: Setup, tools: dict[str, str], expected_tool: str | None
+) -> None:
+    """Check the exact binding being persisted, without resolving PATH again."""
+    tool = "yazi" if setup.plugin == "files" else "lazygit"
+    if expected_tool is not None and tools[tool] != expected_tool:
+        raise RuntimeError(
+            f"{tool} executable changed after qualification "
+            f"({expected_tool} -> {tools[tool]}); rerun rexdeck enable {setup.plugin}"
+        )
+
+
 def _run(
-    argv: list[str], env: dict[str, str], *, timeout: float = _COMMAND_WAIT
+    argv: list[str],
+    env: dict[str, str],
+    *,
+    timeout: float = _COMMAND_WAIT,
+    inherit_stderr: bool = False,
 ) -> _Result:
-    """Bound helper output/lifetime and hand off cancellation to exact-child cleanup."""
+    """Bound captured output/lifetime; optionally leave diagnostics on the terminal."""
     child: subprocess.Popen[bytes] | None = None
     try:
         with _defer_cancellation():
@@ -214,7 +230,7 @@ def _run(
                 env=env,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=None if inherit_stderr else subprocess.STDOUT,
             )
         assert child.stdout is not None
         output = bytearray()
@@ -950,8 +966,8 @@ def inspect_setup(setup: Setup, *, check_tools: bool = True) -> dict[str, object
     }
 
 
-def apply_setup(setup: Setup) -> dict[str, object]:
-    """Install or refresh the selected owned integration without enabling it."""
+def apply_setup(setup: Setup, *, expected_tool: str | None = None) -> dict[str, object]:
+    """Apply the current binding, optionally requiring a previously qualified path."""
     paths = _paths(setup)
     _receipt(paths, setup)  # Refuse unknown ownership before creating even a lock.
     _endpoint_policy(setup)
@@ -978,6 +994,7 @@ def apply_setup(setup: Setup) -> dict[str, object]:
             _expect_action(setup, False)
         source, launcher = _sources(paths)
         tools = _selected_tools(setup)
+        _require_qualified_tool(setup, tools, expected_tool)
         enabled = bool(receipt and receipt["applied"] and receipt["enabled"])
         module = _module(setup, source, launcher, tools, enabled)
         changes: list[_Change] = []
@@ -1024,8 +1041,8 @@ def apply_setup(setup: Setup) -> dict[str, object]:
         }
 
 
-def start(setup: Setup) -> dict[str, object]:
-    """Enable a verified current bundle and confirm its exact native action."""
+def start(setup: Setup, *, expected_tool: str | None = None) -> dict[str, object]:
+    """Enable a current bundle, optionally requiring its previously qualified path."""
     paths = _paths(setup)
     receipt = _receipt(paths, setup)
     if receipt is None or not receipt["applied"]:
@@ -1044,6 +1061,7 @@ def start(setup: Setup) -> dict[str, object]:
             _expect_action(setup, False)
         source, launcher = _sources(paths)
         tools = cast(dict[str, str], receipt["tools"])
+        _require_qualified_tool(setup, tools, expected_tool)
         module = _module(setup, source, launcher, tools, True)
         receipt["enabled"] = True
         receipt["module_sha256"] = _digest(module)

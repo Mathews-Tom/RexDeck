@@ -53,6 +53,7 @@ class CliTests(unittest.TestCase):
         patcher = patch.dict(os.environ, environment, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.resolve_executable = lifecycle._executable
         for name, replacement in (
             ("_run", self.transport),
             ("_executable", lambda name: sys.executable),
@@ -860,6 +861,188 @@ class CliTests(unittest.TestCase):
         self.assertIs(receipt["enabled"], True)
         self.assertEqual(self.invoke("disable", "files")[1]["state"], "disabled")
         self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_path_shadow_at_apply_cannot_replace_qualified_selected_tool(self) -> None:
+        """Reject a new PATH winner at the actual binding, preserving both owners."""
+        self.configure()
+        for plugin, sibling, tool in (
+            ("files", "git", "yazi"),
+            ("git", "files", "lazygit"),
+        ):
+            with self.subTest(plugin=plugin):
+                self.assertEqual(self.invoke("enable", sibling)[1]["state"], "ready")
+                selected_module = (
+                    self.data_root / f"plugins/{plugin}/rexdeck_{plugin}.lua"
+                )
+                selected_receipt = self.workspace / (
+                    "setup.json" if plugin == "files" else "git/setup.json"
+                )
+                watched = (
+                    self.config,
+                    self.settings,
+                    self.module,
+                    self.workspace / "setup.json",
+                    self.data_root / "plugins/git/rexdeck_git.lua",
+                    self.workspace / "git/setup.json",
+                )
+                before = {
+                    path: path.read_bytes() if path.exists() else None
+                    for path in watched
+                }
+                qualified = self.root / f"{plugin}-qualified" / tool
+                shadow = self.root / f"{plugin}-earlier" / tool
+                qualified.parent.mkdir()
+                shadow.parent.mkdir()
+                qualified.write_text("#!/bin/sh\nexit 0\n")
+                qualified.chmod(0o755)
+                tools = lifecycle._tools
+                bind = lifecycle._selected_tools
+                appeared = False
+                probes: list[str] = []
+
+                def tool_paths(name: str = "yazi") -> dict[str, str]:
+                    result = tools(name)
+                    if name == tool:
+                        result[name] = self.resolve_executable(name)
+                    return result
+
+                def appear_at_binding(setup: lifecycle.Setup) -> dict[str, str]:
+                    nonlocal appeared
+                    if setup.plugin == plugin and not appeared:
+                        shadow.write_text("#!/bin/sh\nexit 99\n")
+                        shadow.chmod(0o755)
+                        appeared = True
+                    return bind(setup)
+
+                def probe(executable: str, name: str) -> str:
+                    probes.append(executable)
+                    return dependencies._VERSIONS[name][-1]
+
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "PATH": os.pathsep.join(
+                                map(str, (shadow.parent, qualified.parent))
+                            )
+                        },
+                    ),
+                    patch.object(lifecycle, "_tools", side_effect=tool_paths),
+                    patch.object(
+                        lifecycle, "_selected_tools", side_effect=appear_at_binding
+                    ),
+                    patch.object(
+                        dependencies,
+                        "_resolve",
+                        side_effect=lambda name: (
+                            self.resolve_executable(name)
+                            if name == tool
+                            else sys.executable
+                        ),
+                    ),
+                    patch.object(dependencies, "_probe", side_effect=probe),
+                ):
+                    code, result = self.invoke("enable", plugin)
+                    self.assertEqual(code, 1)
+                    self.assertIn("changed after qualification", str(result["error"]))
+                    self.assertEqual(probes, [str(qualified)])
+                    for path, content in before.items():
+                        self.assertEqual(
+                            path.read_bytes() if path.exists() else None, content
+                        )
+                    self.assertEqual(
+                        self.invoke("status", sibling)[1]["state"], "ready"
+                    )
+                    shadow.unlink()
+                    self.assertEqual(self.invoke("enable", plugin)[1]["state"], "ready")
+                    receipt = json.loads(selected_receipt.read_text())
+                    self.assertEqual(receipt["tools"][tool], str(qualified))
+                    self.assertIn(
+                        f'{tool} = "{qualified}"'.encode(), selected_module.read_bytes()
+                    )
+                    self.assertEqual(probes, [str(qualified), str(qualified)])
+                    self.assertEqual(
+                        self.invoke("disable", plugin)[1]["state"], "disabled"
+                    )
+                self.assertEqual(self.invoke("status", sibling)[1]["state"], "ready")
+                self.assertEqual(
+                    self.invoke("disable", sibling)[1]["state"], "disabled"
+                )
+                self.assertEqual(self.config.read_bytes(), self.original)
+
+    def test_replaced_bundle_between_apply_and_start_cannot_lose_qualification(
+        self,
+    ) -> None:
+        """A separately refreshed receipt cannot authorize this enable's start."""
+        self.configure()
+        self.assertEqual(self.invoke("enable", "git")[1]["state"], "ready")
+        qualified = self.root / "qualified/yazi"
+        shadow = self.root / "earlier/yazi"
+        qualified.parent.mkdir()
+        shadow.parent.mkdir()
+        qualified.write_text("#!/bin/sh\nexit 0\n")
+        qualified.chmod(0o755)
+        tools = lifecycle._tools
+        apply = lifecycle.apply_setup
+        replaced: dict[Path, bytes] = {}
+
+        def tool_paths(name: str = "yazi") -> dict[str, str]:
+            result = tools(name)
+            if name == "yazi":
+                result[name] = self.resolve_executable(name)
+            return result
+
+        def replace_after_apply(
+            setup: lifecycle.Setup, *, expected_tool: str | None = None
+        ) -> dict[str, object]:
+            """Model another deliberate lower-level apply between CLI transactions."""
+            result = (
+                apply(setup)
+                if expected_tool is None
+                else apply(setup, expected_tool=expected_tool)
+            )
+            shadow.write_text("#!/bin/sh\nexit 99\n")
+            shadow.chmod(0o755)
+            apply(setup)
+            replaced.update(
+                (path, path.read_bytes())
+                for path in (
+                    self.settings,
+                    self.config,
+                    self.module,
+                    self.workspace / "setup.json",
+                    self.data_root / "plugins/git/rexdeck_git.lua",
+                    self.workspace / "git/setup.json",
+                )
+            )
+            return result
+
+        with (
+            patch.dict(
+                os.environ,
+                {"PATH": os.pathsep.join(map(str, (shadow.parent, qualified.parent)))},
+            ),
+            patch.object(lifecycle, "_tools", side_effect=tool_paths),
+            patch.object(
+                dependencies,
+                "_resolve",
+                side_effect=lambda name: (
+                    self.resolve_executable(name) if name == "yazi" else sys.executable
+                ),
+            ),
+            patch.object(lifecycle, "apply_setup", side_effect=replace_after_apply),
+        ):
+            code, result = self.invoke("enable", "files")
+            self.assertEqual(code, 1)
+            self.assertIn("changed after qualification", str(result["error"]))
+            self.assertTrue(replaced)
+            for path, content in replaced.items():
+                self.assertEqual(path.read_bytes(), content)
+            receipt = json.loads((self.workspace / "setup.json").read_text())
+            self.assertEqual(receipt["tools"]["yazi"], str(shadow))
+            self.assertIs(receipt["enabled"], False)
+            self.assertEqual(self.invoke("status", "files")[1]["state"], "disabled")
+            self.assertEqual(self.invoke("status", "git")[1]["state"], "ready")
 
     def test_failed_or_unqualified_install_never_registers_selected_integration(
         self,

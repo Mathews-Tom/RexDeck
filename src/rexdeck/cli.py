@@ -194,7 +194,7 @@ def _enable(path: Path, target: settings.SavedTarget, plugin: str) -> dict[str, 
     """Resolve dependencies before entering the existing owned-mutation path."""
     setup = target.setup(plugin)
     _selected_status(setup)
-    dependencies.ensure(plugin)
+    qualified_tool = dependencies.ensure(plugin)
     # A download can take arbitrarily long. Never keep a config lock across it or
     # use a changed settings file, redirected path, or dead server afterwards.
     current = settings.load(path)
@@ -205,9 +205,9 @@ def _enable(path: Path, target: settings.SavedTarget, plugin: str) -> dict[str, 
         )
     setup = current.setup(plugin)
     _selected_status(setup)
-    result = lifecycle.apply_setup(setup)
+    result = lifecycle.apply_setup(setup, expected_tool=qualified_tool)
     if result.get("state") == "applied":
-        return lifecycle.start(setup)
+        return lifecycle.start(setup, expected_tool=qualified_tool)
     if result.get("state") not in _FAILURES:
         raise RuntimeError(
             f"{plugin} apply did not succeed; integration was not started"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import json
 import os
 import platform
 import re
@@ -46,6 +47,7 @@ _INSTALL_ENV = {
 
 
 def _resolve(name: str) -> str | None:
+    """Search absolute PATH entries while preserving lexical executable identity."""
     search_path = os.pathsep.join(
         entry
         for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
@@ -56,6 +58,7 @@ def _resolve(name: str) -> str | None:
 
 
 def _probe(executable: str, name: str) -> str:
+    """Require an explicitly qualified upstream version before registration."""
     result = lifecycle._run([executable, "--version"], dict(os.environ))
     text = result.output.decode(errors="replace").strip()
     version = re.search(_PATTERNS[name], text, re.MULTILINE)
@@ -71,6 +74,7 @@ def _probe(executable: str, name: str) -> str:
 
 
 def _manual(plugin: str) -> str:
+    """Give version-qualified manual steps without authorizing installation."""
     tool = _TOOLS[plugin]
     return (
         f"Manually install {tool} {' or '.join(_VERSIONS[tool])} from {_RELEASES[tool]}. "
@@ -82,6 +86,7 @@ def _manual(plugin: str) -> str:
 
 
 def _manager() -> str:
+    """Qualify an existing manager's platform, version, layout, and redirects."""
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         raise RuntimeError("Automatic installation supports macOS arm64 only")
     brew = _resolve("brew")
@@ -150,6 +155,50 @@ def _manager() -> str:
     return brew
 
 
+def _install_environment(brew: str) -> dict[str, str]:
+    """Forbid replacing installed formulae, without excluding missing dependencies."""
+    environment = {**os.environ, **_INSTALL_ENV}
+    result = lifecycle._run(
+        [brew, "info", "--json=v2", "--installed", "--formula"],
+        environment,
+        inherit_stderr=True,
+    )
+    try:
+        inventory = json.loads(result.output)
+        if result.code != 0 or not isinstance(inventory, dict):
+            raise ValueError
+        formulae = inventory["formulae"]
+        if not isinstance(formulae, list):
+            raise ValueError
+        forbidden = set(environment.get("HOMEBREW_FORBIDDEN_FORMULAE", "").split())
+        for formula in formulae:
+            if not isinstance(formula, dict):
+                raise ValueError
+            for key in ("name", "full_name"):
+                name = formula[key]
+                if (
+                    not isinstance(name, str)
+                    or re.fullmatch(
+                        r"[A-Za-z0-9_+@.-]+(?:/[A-Za-z0-9_+@.-]+){0,2}", name
+                    )
+                    is None
+                ):
+                    raise ValueError
+                forbidden.add(name)
+    except (KeyError, ValueError, TypeError) as exc:
+        raise RuntimeError(
+            "Cannot inventory installed Homebrew formulae safely; no installer was "
+            "started. Inspect brew info --json=v2 --installed --formula, or install "
+            "the selected tool manually without replacing existing dependencies"
+        ) from exc
+    # Homebrew 7.0.12 checks this supported control against its computed install
+    # dependencies in FormulaInstaller#prelude, before installing any dependency.
+    # Satisfied dependencies are skipped; an installed but incompatible one is
+    # forbidden rather than upgraded, while missing dependencies remain eligible.
+    environment["HOMEBREW_FORBIDDEN_FORMULAE"] = " ".join(sorted(forbidden))
+    return environment
+
+
 @contextmanager
 def _installer_signals() -> Iterator[None]:
     """Turn termination into an exception only while owning an installer session."""
@@ -160,6 +209,7 @@ def _installer_signals() -> Iterator[None]:
     previous = {signum: signal.getsignal(signum) for signum in signals}
 
     def interrupt(signum: int, _frame: FrameType | None) -> None:
+        """Unwind through exact-owned installer cancellation."""
         raise KeyboardInterrupt(f"Received signal {signum}")
 
     try:
@@ -173,15 +223,16 @@ def _installer_signals() -> Iterator[None]:
 
 
 def _install(argv: list[str]) -> None:
-    """Stream installer output to stderr and reap only its new process group."""
+    """Protect installed formulae, stream progress, and reap only our installer group."""
     child: subprocess.Popen[bytes] | None = None
     try:
         with _installer_signals():
+            environment = _install_environment(argv[0])
             try:
                 with lifecycle._defer_cancellation():
                     child = subprocess.Popen(
                         argv,
-                        env={**os.environ, **_INSTALL_ENV},
+                        env=environment,
                         stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
@@ -249,8 +300,10 @@ def ensure(plugin: str) -> str:
         f"Missing {tool}. Run {shlex.join(argv)}?\n"
         "This uses the existing Homebrew prefix, contacts package registries, downloads "
         "and runs upstream package installation code, and may install transitive "
-        "dependencies. Homebrew auto-update, install-upgrade, dependent checks and "
-        "automatic cleanup are disabled for this command. "
+        "dependencies. Installed formulae are protected from replacement; an "
+        "incompatible existing dependency makes installation fail instead of upgrading "
+        "it. Homebrew auto-update, install-upgrade, dependent checks and automatic "
+        "cleanup are disabled for this command. "
         "It does not install Rex or Homebrew.\n"
         "Install this dependency? [y/N]: ",
         end="",

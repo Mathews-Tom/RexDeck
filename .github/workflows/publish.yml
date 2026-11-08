@@ -60,8 +60,11 @@ jobs:
                 run.path !== '.github/workflows/checks.yml')
               throw new Error('Artifact must come from successful main push checks');
             const env = (await github.rest.repos.getEnvironment({...repo, environment_name: 'pypi'})).data;
-            if (!env.protection_rules.some(r => r.type === 'required_reviewers' && r.reviewers.some(v => v.type === 'User' && v.reviewer.login === 'Mathews-Tom')))
-              throw new Error('pypi environment requires the repository owner as a reviewer');
+            const approvals = env.protection_rules.filter(r => r.type === 'required_reviewers');
+            if (approvals.length !== 1 || approvals[0].reviewers.length !== 1 ||
+                approvals[0].reviewers[0].type !== 'User' ||
+                approvals[0].reviewers[0].reviewer.login !== 'Mathews-Tom')
+              throw new Error('pypi environment requires the repository owner as its sole reviewer');
             let ref = (await github.rest.git.getRef({...repo, ref: 'tags/v0.1.0'})).data.object;
             if (ref.type !== 'tag') throw new Error('v0.1.0 must be annotated');
             ref = (await github.rest.git.getTag({...repo, tag_sha: ref.sha})).data.object;
