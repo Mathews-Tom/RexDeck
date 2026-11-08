@@ -41,6 +41,8 @@ Write receipts contain canonical `target`, `field_digest` and field-level `diff`
 - `touch ID --status NAME`: set native status.
 - `touch ID --assignee ID/USERNAME/me`: replace the assignee set; displaced members are explicitly removed.
 - `touch ID --due YYYY-MM-DD`: set due date.
+- `touch ID --description MARKDOWN`: replace the description through `markdown_content`; the staged and digested value is the current `markdown_description`, falling back to plain `description` when ClickUp returns no Markdown form.
+- `touch ID --points NUMBER`: set native Sprint Points; negative, non-numeric and non-finite values are refused before any request.
 - `touch ID --field NAME=VALUE`: repeatable custom-field sets. Supported types are checkbox, currency, date, drop_down, email, number, phone, short_text, text and url. Unsupported types, ambiguous names and unknown dropdown options are refused.
 - `comment ID --text TEXT`: append one comment with `notify_all=false`. The digest covers the complete top-level conversation membership, not only its first page.
 

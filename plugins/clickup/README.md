@@ -37,6 +37,8 @@ Select a fresh task and run `sync` first. The following commands **propose**, bu
 - `status EXACT-NATIVE-STATUS`: use an exact status from the task's home list, not an invented workflow category.
 - `assignee ID/USERNAME/me`: replace the task's assignee set with the resolved member, as the engine's touch contract specifies.
 - `due YYYY-MM-DD`: set the due date.
+- `description MARKDOWN`: replace the whole task description with one line of Markdown. The proposal shows the current Markdown it replaces.
+- `points NUMBER`: set native Sprint Points (a finite number ≥ 0). Requires the workspace's Sprint Points ClickApp, and ClickUp only accepts values on the workspace's configured point scale: a value outside it is refused (`REJECTED`, HTTP 400 `ITEM_223`) and nothing is applied. The task detail shows `points=` after refresh.
 - `field NAME=VALUE`: set a supported list-specific custom field. Type/option validation comes from the engine; unsupported field types are refused.
 - `comment TEXT`: append one plain-text comment; `notify_all` is false.
 
@@ -48,7 +50,7 @@ After a write, the list, task and complete comments are refreshed. There are no 
 
 The [local registry](references/registry-format.md) contains hierarchy/member/custom-field metadata, not task content or credentials. The frontend scopes it by account, workspace and selected list under `$XDG_CONFIG_HOME/rexdeck/clickup/`; the rebuildable SQLite metadata cache is separately scoped under `$XDG_CACHE_HOME/rexdeck/clickup/`. Neither belongs in source control. Sync is explicit; an unsynced or digest-mismatched registry is refused.
 
-States distinguish loading/writing/ready/empty/stale, missing credentials, authentication, permission, not-found, rate-limited, network, malformed responses, account mismatch and registry/write diagnostics. Refresh failures retain data only as stale; identity/auth/access failures clear it. HTTP 429 exposes a numeric `Retry-After` hint when supplied. Requests use a fixed HTTPS API-v2 origin, reject arbitrary origins/path traversal/redirects and are paced across workers. No response/error body or credential is logged; credential echoes are redacted and remote terminal controls stripped.
+States distinguish loading/writing/ready/empty/stale, missing credentials, authentication, permission, not-found, rate-limited, network, malformed responses, refused requests (HTTP 400, shown as `REJECTED` with only ClickUp's short `ECODE`), account mismatch and registry/write diagnostics. Refresh failures retain data only as stale; identity/auth/access failures clear it. HTTP 429 exposes a numeric `Retry-After` hint when supplied. Requests use a fixed HTTPS API-v2 origin, reject arbitrary origins/path traversal/redirects and are paced across workers. No response/error body or credential is logged; credential echoes are redacted and remote terminal controls stripped.
 
 Proposal/engine-read errors preserve a fresh list as ready/empty; failed list refreshes remain stale. Empty/relative XDG cache roots are refused; cache directories are 0700 and files 0600. Labels/IDs are single-line; pane and engine CLI text remove terminal commands, bidi overrides and zero-width formatting.
 

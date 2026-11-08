@@ -357,6 +357,69 @@ def test_a_malformed_due_date_names_the_flag_that_carried_it(
     assert diagnostics[0]["supported_fixes"] == ["--due YYYY-MM-DD"]
 
 
+@pytest.mark.parametrize("given", ["-1", "three", "nan", "inf", ""])
+def test_invalid_sprint_points_are_refused_before_any_call(
+    route: dict[str, Any], synced: Path, capsys: pytest.CaptureFixture[str], given: str
+) -> None:
+    del synced
+    sent: list[httpx.Request] = []
+    route[TASK] = _recording(sent, {})
+
+    assert main(["touch", "synaa0001", "--points", given, "--dry-run", "--json"]) == 2
+
+    assert sent == []
+    diagnostics = _receipt(capsys)["diagnostics"]
+    assert isinstance(diagnostics, list)
+    assert diagnostics[0]["code"] == "usage/bad-points"
+
+
+def test_fractional_sprint_points_stay_fractional_and_stage_the_held_value(
+    route: dict[str, Any], synced: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    del synced
+    sent: list[httpx.Request] = []
+    route[TASK] = _task_routes(sent, overrides={"points": 2})
+    argv = ["touch", "synaa0001", "--points", "0.5"]
+    assert main([*argv, "--dry-run", "--json"]) == 0
+    diff = _mutation(capsys)["diff"]["points"]
+    assert (diff["from"], diff["to"]) == ("2", "0.5")
+
+    assert main([*argv, "--quiet"], pin_write=True) == 0
+
+    assert json.loads(sent[0].content) == {"points": 0.5}
+
+
+def test_a_description_edit_stages_the_markdown_form_it_replaces(
+    route: dict[str, Any], synced: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Staging the plain text would hide formatting the replacement discards.
+
+    Like ClickUp, the route returns the Markdown form only when asked for it.
+    """
+    del synced
+    payload = {
+        **fixture("task"),
+        "description": "Old plain",
+        "markdown_description": "Old **bold**",
+    }
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        if request.url.params.get("include_markdown_description") == "true":
+            return httpx.Response(200, json=payload)
+        return httpx.Response(
+            200, json={k: v for k, v in payload.items() if k != "markdown_description"}
+        )
+
+    route[TASK] = answer
+
+    assert (
+        main(["touch", "synaa0001", "--description", "New", "--dry-run", "--json"]) == 0
+    )
+
+    assert _mutation(capsys)["diff"]["description"]["from"] == "Old **bold**"
+
+
 # ----------------------------------------------------------------------- custom fields
 
 

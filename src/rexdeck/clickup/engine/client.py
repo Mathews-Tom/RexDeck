@@ -196,7 +196,40 @@ def _failed(method: str, path: str, response: httpx.Response) -> EngineError:
                 supported_fixes=(EXPORT_LINE,),
             )
         )
+    if response.status_code == 400:
+        return _rejected(method, path, response)
     return _bad_response(method, path, response.status_code, "the request failed")
+
+
+def _rejected(method: str, path: str, response: httpx.Response) -> EngineError:
+    """A 400 is ClickUp refusing the request as invalid, not an unusable response.
+
+    Only the short `ECODE` identifier is kept; the human `err` text and the rest
+    of the body stay unread, like every other failing body.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    raw = payload.get("ECODE") if isinstance(payload, dict) else None
+    ecode = (
+        raw
+        if isinstance(raw, str)
+        and 0 < len(raw) <= 40
+        and all(c.isascii() and (c.isupper() or c.isdigit() or c == "_") for c in raw)
+        else None
+    )
+    detail = f"HTTP 400, {ecode}" if ecode else "HTTP 400"
+    return EngineError(
+        Diagnostic(
+            code="request/rejected",
+            severity=SEVERITY_ERROR,
+            message=f"ClickUp refused the request as invalid ({detail})",
+            subject=path,
+            evidence={"method": method, "path": path, "status": 400, "ecode": ecode},
+            supported_fixes=("--dry-run",),
+        )
+    )
 
 
 def _bad_response(method: str, path: str, status: int, reason: str) -> EngineError:

@@ -35,6 +35,9 @@ from rexdeck.clickup.engine import (
 from rexdeck.clickup.text import clean, single_line
 
 _ID = re.compile(r"[A-Za-z0-9_-]+\Z")
+WRITE_ACTIONS = frozenset(
+    {"status", "assignee", "due", "description", "points", "field", "comment"}
+)
 
 
 class ClickUpError(RuntimeError):
@@ -59,6 +62,16 @@ def text(value: object, *, multiline: bool = False) -> str:
     if isinstance(value, (str, int)) and not isinstance(value, bool):
         return clean(str(value)) if multiline else single_line(str(value))
     raise ClickUpError("malformed", "Required text or identifier is absent")
+
+
+def sprint_points(value: object) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else str(value)
+    raise ClickUpError("malformed", "Sprint Points is not a number")
 
 
 @dataclass(frozen=True)
@@ -131,6 +144,7 @@ def engine_error(error: diagnostics.EngineError) -> ClickUpError:
             "auth/missing-credential": "missing-credential",
             "transport/unreachable": "network",
             "transport/bad-response": "malformed",
+            "request/rejected": "rejected",
         }.get(finding.code, finding.code)
     retry = finding.evidence.get("retry_after")
     suffix = f"; Retry-After: {retry}" if isinstance(retry, int) else ""
@@ -203,6 +217,7 @@ class Task:
     url: str
     status_type: str = ""
     status_color: str = ""
+    points: str = "-"
 
     @classmethod
     def parse(cls, data: Mapping[str, object]) -> Task:
@@ -227,6 +242,7 @@ class Task:
             text(data.get("url")),
             status.kind,
             status.color,
+            sprint_points(data.get("points")),
         )
 
 
@@ -445,6 +461,8 @@ class Service:
             "query": "",
             "type": None,
             "due": None,
+            "description": None,
+            "points": None,
             "field": None,
             "expect_digest": None,
             "dry_run": True,
@@ -767,7 +785,7 @@ class Controller:
         self, action: str, value: str
     ) -> concurrent.futures.Future[runtime.Outcome]:
         with self.lock:
-            if action not in {"status", "assignee", "due", "field", "comment"}:
+            if action not in WRITE_ACTIONS:
                 raise ValueError("Unsupported task change")
             value = clean(value)
             if not value.strip():
@@ -927,8 +945,18 @@ class Controller:
                         OSError,
                     ) as error:
                         self._error(error)
+                        # Only the write itself refusing proves nothing applied;
+                        # a 400 on the refresh reads after it proves nothing.
+                        refused = (
+                            isinstance(error, diagnostics.EngineError)
+                            and error.diagnostic.code == "request/rejected"
+                            and error.diagnostic.evidence.get("method")
+                            in {"PUT", "POST"}
+                        )
                         self._set(
-                            output="Write may have succeeded; it was NOT retried. Refresh before any new proposal."
+                            output="ClickUp refused this write; it was not applied and was NOT retried. Refresh before any new proposal."
+                            if refused
+                            else "Write may have succeeded; it was NOT retried. Refresh before any new proposal."
                         )
                     except Exception as error:  # noqa: BLE001 - outcome is uncertain
                         # Any other failure after dispatch must still end `writing`.
@@ -1010,7 +1038,7 @@ def render(view: View, query: str, page: int) -> None:
     if detail:
         task = detail.task
         print(
-            f"\nTASK {task.id} custom={task.custom_id or '-'} native status={task.status} (type={task.status_type or 'unavailable'}, color={task.status_color or 'unavailable'}) home-list={task.list_id} updated={task.updated}"
+            f"\nTASK {task.id} custom={task.custom_id or '-'} native status={task.status} (type={task.status_type or 'unavailable'}, color={task.status_color or 'unavailable'}) points={task.points} home-list={task.list_id} updated={task.updated}"
         )
         print(task.name + "\n" + task.description)
         print(
@@ -1034,7 +1062,8 @@ def render(view: View, query: str, page: int) -> None:
     print(
         "Commands: next | prev | filter TEXT | select INTERNAL/CUSTOM-ID | open | refresh | "
         "sync | tasks | task | sprint | search TEXT | status NATIVE-STATUS | assignee ID/NAME | "
-        "due YYYY-MM-DD | field NAME=VALUE | comment TEXT | confirm TASK-ID PROPOSAL-CODE | cancel | "
+        "due YYYY-MM-DD | description MARKDOWN | points NUMBER | field NAME=VALUE | comment TEXT | "
+        "confirm TASK-ID PROPOSAL-CODE | cancel | "
         "switch ACCOUNT TEAM LIST [ENV-NAME] | quit",
         flush=True,
     )
@@ -1089,7 +1118,7 @@ def main() -> int:
                         controller.select(argument)
                     elif command in {"sync", "tasks", "task", "sprint", "search"}:
                         controller.inspect(command, argument)
-                    elif command in {"status", "assignee", "due", "field", "comment"}:
+                    elif command in WRITE_ACTIONS:
                         controller.stage(command, argument)
                     elif command == "confirm":
                         parts = argument.split()

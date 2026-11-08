@@ -137,6 +137,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     touch.add_argument("--due", help="set the due date, ISO-8601 YYYY-MM-DD")
     touch.add_argument(
+        "--description", help="replace the task description with this Markdown"
+    )
+    touch.add_argument(
+        "--points", help="set the task's native Sprint Points, a number >= 0"
+    )
+    touch.add_argument(
         "--field",
         action="append",
         metavar="NAME=VALUE",

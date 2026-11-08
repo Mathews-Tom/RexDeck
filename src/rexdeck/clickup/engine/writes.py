@@ -13,6 +13,7 @@ that mattered.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -66,6 +67,8 @@ def verb_touch(session: Session) -> Outcome:
         session.args.status,
         session.args.assignee,
         session.args.due,
+        session.args.description,
+        session.args.points,
         session.args.field,
     )
     if not any(one is not None for one in wanted):
@@ -78,8 +81,13 @@ def verb_touch(session: Session) -> Outcome:
         if session.args.due is None
         else runtime.epoch_ms(session.args.due, fix="--due YYYY-MM-DD")
     )
+    points = None if session.args.points is None else _points(session.args.points)
     loaded = runtime.prepare(session)
-    payload = session.http().get(f"/task/{target}")
+    # The Markdown form is what a description write replaces, so it is also the
+    # form staged and digested; the plain `description` drops its formatting.
+    payload = session.http().get(
+        f"/task/{target}", {"include_markdown_description": "true"}
+    )
 
     staged: list[Staged] = []
     body: dict[str, object] = {}
@@ -107,6 +115,31 @@ def verb_touch(session: Session) -> Outcome:
     if due is not None:
         staged.append(_staged_due(payload, session.args.due))
         body["due_date"] = due
+    if session.args.description is not None:
+        held = payload.get("markdown_description") or payload.get("description")
+        current_description = held if isinstance(held, str) and held else None
+        staged.append(
+            Staged(
+                name="description",
+                current=current_description,
+                current_text=current_description or projections.ABSENT,
+                proposed_text=session.args.description,
+            )
+        )
+        body["markdown_content"] = session.args.description
+    if points is not None:
+        held_points = payload.get("points")
+        staged.append(
+            Staged(
+                name="points",
+                current=held_points,
+                current_text=projections.ABSENT
+                if held_points is None
+                else str(held_points),
+                proposed_text=str(points),
+            )
+        )
+        body["points"] = points
 
     custom = _staged_custom(session, payload, session.args.field or [])
     staged.extend(item for item, _, _ in custom)
@@ -518,6 +551,27 @@ def _member_number(member_id: str) -> int:
     return int(member_id)
 
 
+def _points(raw: str) -> int | float:
+    """Return Sprint Points as the JSON number ClickUp stores; whole stays whole."""
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        value = math.nan
+    if not math.isfinite(value) or value < 0:
+        raise EngineError(
+            Diagnostic(
+                code="usage/bad-points",
+                severity=SEVERITY_ERROR,
+                message="sprint points must be a finite number of zero or more",
+                subject="--points",
+                evidence={"given": raw},
+                supported_fixes=("--points 3", "--points 0.5"),
+            ),
+            exit_code=2,
+        )
+    return int(value) if value.is_integer() else value
+
+
 def _nothing_to_write(target: str) -> EngineError:
     return EngineError(
         Diagnostic(
@@ -526,7 +580,14 @@ def _nothing_to_write(target: str) -> EngineError:
             message="touch was given no field to set",
             subject=target,
             evidence={"target": target},
-            supported_fixes=("--status", "--assignee", "--due", "--field"),
+            supported_fixes=(
+                "--status",
+                "--assignee",
+                "--due",
+                "--description",
+                "--points",
+                "--field",
+            ),
         ),
         exit_code=2,
     )

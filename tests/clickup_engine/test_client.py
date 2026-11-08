@@ -56,6 +56,35 @@ def test_invalid_response_payload_is_a_coded_finding_without_body_contents(
 
 
 @pytest.mark.parametrize(
+    ("body", "ecode"),
+    (
+        ({"err": f"echo {TOKEN}", "ECODE": "ITEM_223"}, "ITEM_223"),
+        ({"err": "x", "ECODE": f"BAD {TOKEN}"}, None),
+        ({"err": "x"}, None),
+        ([], None),
+    ),
+)
+def test_http_400_is_a_refused_request_keeping_only_a_well_formed_ecode(
+    body: object, ecode: str | None
+) -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(400, json=body)
+
+    connection = client.Client(TOKEN, transport=httpx.MockTransport(handle))
+    try:
+        with pytest.raises(EngineError) as caught:
+            connection.put("/task/synaa0001", {"points": 2.5})
+        finding = caught.value.diagnostic
+        assert finding.code == "request/rejected"
+        assert finding.evidence["ecode"] == ecode
+        assert TOKEN not in str(finding) and "echo" not in str(finding)
+        assert connection.calls == 1
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
     "path",
     (
         "https://example.invalid/task/synaa0001",
