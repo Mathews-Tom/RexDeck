@@ -6,10 +6,15 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from types import FrameType
 from urllib.parse import unquote, urlsplit
 
 
@@ -102,16 +107,7 @@ def git_directory(raw: str) -> str:
     if selected:
         raise ValueError("Ambiguous inherited Git override: " + ", ".join(selected))
     cwd = directory(raw)
-    search_path = os.pathsep.join(
-        entry
-        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
-        if Path(entry).is_absolute()
-    )
-    git = shutil.which("git", path=search_path) if search_path else None
-    if git is None:
-        raise ValueError(
-            "Required executable not found in absolute PATH directories: git"
-        )
+    git = executable("git")
     result = subprocess.run(
         [git, "rev-parse", "--is-inside-work-tree"],
         cwd=cwd,
@@ -127,11 +123,230 @@ def git_directory(raw: str) -> str:
     return cwd
 
 
+def executable(name: str) -> str:
+    """Resolve helper programs only from the same trusted absolute PATH entries."""
+    search = os.pathsep.join(
+        entry
+        for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
+        if Path(entry).is_absolute()
+    )
+    found = shutil.which(name, path=search) if search else None
+    if found is None:
+        raise ValueError(
+            f"Required executable not found in absolute PATH directories: {name}"
+        )
+    return found
+
+
+def git_output(cwd: str, *args: str) -> str:
+    result = subprocess.run(
+        [executable("git"), *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or f"Git exited {result.returncode}")
+    return result.stdout.strip()
+
+
+def github_repo(value: str) -> str:
+    """Require an explicit DNS host and unambiguous owner/repository path."""
+    parts = value.split("/")
+    if len(parts) != 3:
+        raise ValueError(
+            "Use repo=HOST/OWNER/REPO (including the explicit GitHub host)"
+        )
+    host, owner, repo = parts
+    repo = repo.removesuffix(".git")
+    if (
+        len(host) > 253
+        or not all(
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?", label)
+            for label in host.split(".")
+        )
+        or "." not in host
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", owner)
+        or not re.fullmatch(r"[A-Za-z0-9_.-]+", repo)
+        or repo in (".", "..")
+    ):
+        raise ValueError(
+            "Invalid GitHub host/owner/repository; use repo=HOST/OWNER/REPO"
+        )
+    return f"{host.lower()}/{owner}/{repo}"
+
+
+def github_remote(value: str) -> str:
+    """Accept literal HTTPS/SSH GitHub remotes, not SSH aliases or URL rewriting."""
+    match = re.fullmatch(r"git@([^/:]+):([^/]+/[^/]+)", value)
+    if match:
+        return github_repo(f"{match[1]}/{match[2]}")
+    uri = urlsplit(value)
+    if (
+        uri.scheme not in ("https", "ssh")
+        or not uri.hostname
+        or uri.port is not None
+        or uri.password is not None
+        or (
+            uri.username is not None
+            and not (uri.scheme == "ssh" and uri.username == "git")
+        )
+        or uri.query
+        or uri.fragment
+    ):
+        raise ValueError(
+            "Unsupported or ambiguous GitHub remote; use repo=HOST/OWNER/REPO"
+        )
+    return github_repo(uri.hostname + "/" + uri.path.removeprefix("/"))
+
+
+def github_selection(cwd: str, raw: str | None) -> dict[str, str]:
+    """Freeze a deliberate remote/repo and account without asking Git to guess."""
+    value = json.loads(raw or "{}")
+    if not isinstance(value, dict) or set(value) - {"repo", "remote", "account"}:
+        raise ValueError("GitHub selection accepts only repo, remote and account")
+    if any(
+        not isinstance(item, str) or not item or "\x00" in item
+        for item in value.values()
+    ):
+        raise ValueError("GitHub selection values must be nonempty strings")
+    account = value.get("account", "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", account):
+        raise ValueError(
+            "Explicit account=LOGIN is required; existing gh auth must match"
+        )
+    if "repo" in value and "remote" in value:
+        raise ValueError("Choose repo=HOST/OWNER/REPO or remote=NAME, not both")
+    if "repo" in value:
+        repo = github_repo(value["repo"])
+    else:
+        remotes = git_output(cwd, "remote").splitlines()
+        remote = value.get("remote")
+        if remote is None:
+            if len(remotes) != 1:
+                raise ValueError(
+                    "Repository remotes are missing or ambiguous; choose remote=NAME "
+                    "or repo=HOST/OWNER/REPO. Remotes: " + ", ".join(remotes)
+                )
+            remote = remotes[0]
+        if remote not in remotes:
+            raise ValueError(f"Unknown repository remote {remote!r}")
+        urls = git_output(cwd, "remote", "get-url", "--all", remote).splitlines()
+        if len(urls) != 1:
+            raise ValueError("Remote has multiple fetch URLs; use repo=HOST/OWNER/REPO")
+        repo = github_remote(urls[0])
+        if not repo.startswith("github.com/"):
+            # A remote URL is repository-controlled; never send credentials to a host
+            # the operator did not type themselves.
+            raise ValueError(
+                "Remote points to a non-github.com host; choose repo=HOST/OWNER/REPO"
+            )
+    return {"repo": repo, "account": account}
+
+
+def github_environment(selection: dict[str, str], cwd: str) -> dict[str, str]:
+    """Verify supported existing authentication; never read or persist a token."""
+    if "FF_MOCK_DATA" in os.environ:
+        raise ValueError(
+            "Remove gh-dash FF_MOCK_DATA before launching real GitHub workflows"
+        )
+    host, owner, repo = selection["repo"].split("/")
+    environment = dict(os.environ)
+    gh = executable("gh")
+    environment.update(
+        GH_HOST=host, GH_REPO=selection["repo"], GH_PATH=gh, GH_PROMPT_DISABLED="1"
+    )
+
+    def api(endpoint: str, query: str) -> str:
+        result = subprocess.run(
+            [gh, "api", "--hostname", host, endpoint, "--jq", query],
+            cwd=cwd,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if result.returncode:
+            raise ValueError(
+                f"GitHub authentication/API failed for {host} as "
+                f"{selection['account']}: {result.stderr.strip() or result.stdout.strip()}"
+            )
+        return result.stdout.strip()
+
+    actual = api("user", ".login")
+    if actual.casefold() != selection["account"].casefold():
+        raise ValueError(
+            f"GitHub account mismatch: requested {selection['account']}, authenticated "
+            f"as {actual}. Use an already configured matching gh authentication "
+            "environment; RexDeck never switches global accounts."
+        )
+    actual_repo = api(f"repos/{owner}/{repo}", ".full_name")
+    if actual_repo.casefold() != f"{owner}/{repo}".casefold():
+        raise ValueError(
+            f"GitHub repository redirected to {host}/{actual_repo}; select it explicitly"
+        )
+    return environment
+
+
+def github_config(cwd: str, selection: dict[str, str]) -> dict[str, object]:
+    """Layer only repository sections over upstream global and selected settings."""
+    invoking = Path(cwd)
+    provided = os.environ.get("GH_DASH_CONFIG")
+    includes = []
+    if provided:
+        includes.append(str((Path(cwd) / provided).resolve()))
+    else:
+        for name in (".gh-dash.yml", ".gh-dash.yaml"):
+            candidate = invoking / name
+            if candidate.exists():
+                includes.append(str(candidate))
+                break
+    host, owner, repo = selection["repo"].split("/")
+    title = f"{host}/{owner}/{repo} as {selection['account']}"
+    return {
+        "include": includes,
+        "prSections": [{"title": title, "filters": f"repo:{owner}/{repo}"}],
+        "issuesSections": [{"title": title, "filters": f"repo:{owner}/{repo}"}],
+        "notificationsSections": [],
+        "smartFilteringAtLaunch": False,
+        "defaults": {"view": "prs"},
+    }
+
+
+class LaunchInterrupted(Exception):
+    """Unwind the tool and temporary overlay on a terminating pane signal."""
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(f"signal {signum}")
+
+
+@contextmanager
+def cleanup_signals() -> Iterator[None]:
+    """Restore prior handlers after signal-driven stack unwinding cleans up."""
+
+    def interrupt(signum: int, _frame: FrameType | None) -> None:
+        raise LaunchInterrupted(signum)
+
+    previous = {}
+    try:
+        for signum in (signal.SIGHUP, signal.SIGTERM):
+            previous[signum] = signal.signal(signum, interrupt)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
 # Mirrors rexdeck.integrations.CONTEXTS; this file runs standalone under ``python -I``.
 CONTEXTS = {
     "directory": directory,
     "git-worktree": git_directory,
     "document": document,
+    "github-worktree": git_directory,
 }
 
 
@@ -212,17 +427,45 @@ def run(
         # A document target was validated as an explicit absolute selection or the
         # invoking directory; re-check it in that same form at launch time.
         checked = resolve(context, cwd, cwd if context == "document" else None)
-        # A document integration receives its validated target as the last argument.
-        target = (checked,) if context == "document" else ()
-        # Inherit the actual pane TTY and the tool's normal configuration.
-        exit_code = subprocess.run(
-            [tool, *args, *target], cwd=workdir(checked), check=False
-        ).returncode
+        if context == "github-worktree":
+            if len(args) != 1:
+                raise ValueError(
+                    "GitHub requires its captured repository/account selection"
+                )
+            selection = github_selection(checked, args[0])
+            environment = github_environment(selection, checked)
+            with (
+                cleanup_signals(),
+                tempfile.TemporaryDirectory(prefix="rexdeck-github-") as temporary,
+            ):
+                config = Path(temporary) / "config.yml"
+                config.write_text(
+                    json.dumps(github_config(checked, selection)), encoding="utf-8"
+                )
+                exit_code = subprocess.run(
+                    [tool, "--config", str(config)],
+                    cwd=checked,
+                    env=environment,
+                    check=False,
+                ).returncode
+        else:
+            # A document integration receives its validated target as the last argument.
+            target = (checked,) if context == "document" else ()
+            # Inherit the actual pane TTY and the tool's normal configuration.
+            exit_code = subprocess.run(
+                [tool, *args, *target], cwd=workdir(checked), check=False
+            ).returncode
         if exit_code < 0:
             exit_code = 128 - exit_code
         if exit_code:
             print(f"RexDeck {title}: {label} exited {exit_code}", file=sys.stderr)
             acknowledge()
+    except LaunchInterrupted as error:
+        exit_code = 128 + error.signum
+        print(
+            f"RexDeck {title}: {label} interrupted by signal {error.signum}",
+            file=sys.stderr,
+        )
     except KeyboardInterrupt:
         exit_code = 130
         print(f"RexDeck {title}: {label} interrupted", file=sys.stderr)
@@ -260,8 +503,23 @@ def main() -> int:
     args = sys.argv[1:]
     if len(args) in (3, 4) and args[0] == "context":
         try:
-            target = resolve(args[1], args[2], args[3] if len(args) == 4 else None)
-            print(json.dumps({"cwd": workdir(target), "target": target}))
+            if args[1] == "github-worktree":
+                target = git_directory(args[2])
+                selection = github_selection(
+                    target, args[3] if len(args) == 4 else None
+                )
+                print(
+                    json.dumps(
+                        {
+                            "cwd": target,
+                            "target": target,
+                            "selection": json.dumps(selection),
+                        }
+                    )
+                )
+            else:
+                target = resolve(args[1], args[2], args[3] if len(args) == 4 else None)
+                print(json.dumps({"cwd": workdir(target), "target": target}))
             return 0
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             print(f"RexDeck: invalid invoking context: {error}", file=sys.stderr)

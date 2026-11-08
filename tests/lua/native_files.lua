@@ -151,3 +151,44 @@ for _, invalid in ipairs({'', false, 1, {}}) do
   assert(not pcall(action.run, context, {file = invalid}))
   assert(effects == 0 and opened == 0, 'invalid selection caused effects')
 end
+
+-- GitHub must preserve the captured repository/account choice across validation.
+options.plugin, options.title, options.context = 'github', 'GitHub', 'github-worktree'
+options.tool, options.tool_label, options['gh-dash'] = 'gh-dash', 'gh-dash', '/gh-dash'
+options.args = {}
+install(options)
+assert(action.args.repo == 'string?' and action.args.remote == 'string?'
+  and action.args.account == 'string?', 'GitHub action lacks explicit identity arguments')
+local captured = 'captured identity'
+rex.json.encode = function(value)
+  assert(value.repo == 'github.com/owner/project' and value.account == 'reader')
+  assert(value.remote == nil)
+  return captured
+end
+rex.exec = function(argv)
+  assert(argv[6] == 'github-worktree' and argv[8] == captured,
+    'GitHub identity lost before context validation')
+  return {ok = true, stdout = 'validated'}
+end
+rex.json.decode = function()
+  return {cwd = '/exact origin', target = '/exact origin', selection = captured}
+end
+rex.session.new_split = function(request)
+  opened = opened + 1
+  assert(request.anchor_id == 'origin-a', 'GitHub lost captured origin')
+  local command = request.layout.block.options.command
+  assert(command[14] == '/exact origin' and command[15] == captured,
+    'GitHub selection lost between preflight and launch')
+  return {block_ids = {'github-1'}}
+end
+reset()
+action.run(context, {repo = 'github.com/owner/project', account = 'reader'})
+assert(opened == 1)
+reset()
+local ok, err = pcall(action.run, context, {})
+assert(not ok and tostring(err):find('account=LOGIN', 1, true))
+assert(opened == 0 and effects == 0, 'missing account caused effects')
+reset()
+rex.json.decode = function() return {cwd = '/exact origin', target = '/exact origin'} end
+assert(not pcall(action.run, context, {repo = 'github.com/owner/project', account = 'reader'}))
+assert(opened == 0, 'missing validated identity opened a pane')

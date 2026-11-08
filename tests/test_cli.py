@@ -121,6 +121,7 @@ class CliTests(unittest.TestCase):
                 ("git", "Git"),
                 ("markdown", "Markdown"),
                 ("usage", "Usage"),
+                ("github", "GitHub"),
             ):
                 module = self.data_root / f"plugins/{plugin}/rexdeck_{plugin}.lua"
                 if (
@@ -620,7 +621,7 @@ class CliTests(unittest.TestCase):
         code, result = self.invoke("plugins")
         self.assertEqual((code, result["state"]), (0, "ready"))
         plugins = cast(dict[str, dict[str, object]], result["plugins"])
-        self.assertEqual(set(plugins), {"files", "git", "markdown", "usage"})
+        self.assertEqual(set(plugins), set(integrations.PLUGINS))
         self.assertEqual(plugins["files"]["state"], "ready")
         self.assertIs(plugins["files"]["enabled"], True)
         self.assertEqual(plugins["git"]["state"], "disabled")
