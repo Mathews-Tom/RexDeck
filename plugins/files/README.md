@@ -90,13 +90,15 @@ Disable removes only unchanged owned loader/module state and reloads the selecte
 
 Ctrl-C, SIGTERM, and SIGHUP during a lifecycle mutation run the same rollback path; further cancellation is deferred until recovery finishes. SIGKILL, power loss, and OS crashes cannot run Python recovery, and there is no durable crash-recovery journal. Retain ownership records and inspect artifacts before manual recovery after an uncatchable interruption.
 
-After upgrading RexDeck, refresh the integration before launching Files again:
+After upgrading RexDeck, refresh the integration before launching Files again. A PyPI installation upgrades in place:
 
 ```sh
 uv tool upgrade rexdeck
 rexdeck enable files
 rexdeck status
 ```
+
+`uv tool upgrade` keeps an installation's original source, so an installation made from a checkout keeps using that checkout. Update the checkout and run `uv tool install --reinstall .` there instead, or switch to the published release with `uv tool install --reinstall --default-index https://pypi.org/simple rexdeck`. Then run `rexdeck enable files` (and `rexdeck enable git` when selected) to refresh.
 
 This refresh sequence applies to the current schemas. For a pre-cutover installation, follow **Existing native Files setup** before replacing the old package.
 
