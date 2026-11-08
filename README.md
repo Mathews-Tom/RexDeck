@@ -2,7 +2,7 @@
 
 A collection of independently selectable plugins and extensions that bring existing tools into your own Rex application.
 
-Files, local Git and Markdown bring unmodified Yazi, lazygit and markdown-reader into native Rex terminals. GitHub workflows, PDF/image viewers, agent/subagent views, and task-provider integrations remain planned. Select the tools you need without installing an unrelated default suite.
+Files, local Git, Markdown and Usage bring unmodified Yazi, lazygit, markdown-reader and tokscale into native Rex terminals. GitHub workflows, PDF/image viewers, agent/subagent views, and task-provider integrations remain planned. Select the tools you need without installing an unrelated default suite.
 
 ## Plugins and extensions
 
@@ -11,6 +11,7 @@ Files, local Git and Markdown bring unmodified Yazi, lazygit and markdown-reader
 | [Files](plugins/files/README.md) | Browse, preview, and manage files using unmodified Yazi in a native Rex terminal | Available |
 | [Git](plugins/git/README.md) | Inspect, stage, and commit in the invoking repository/worktree using unmodified lazygit | Available |
 | [Markdown](plugins/markdown/README.md) | Read a selected Markdown file or the invoking directory with in-pane Mermaid diagrams using unmodified markdown-reader | Unreleased (source checkout) |
+| [Usage](plugins/usage/README.md) | Watch machine-wide token usage, models, sessions and projects for omp with upstream online refresh using unmodified tokscale | Unreleased (source checkout) |
 | GitHub | Pull-request/issue workflows with explicit repository/host/account | Planned |
 | Rich viewers | PDF and image viewing | Planned |
 | Agents and subagents | Attention, observed state, and navigation to agent work | Planned |
@@ -38,7 +39,7 @@ rexdeck status
 
 The installed command works from any directory; the package includes the shared native action and Python launcher for every integration. No shell wrapper, `RD_*` variables, or developer checkout is needed at runtime. Ensure the tool executable directory reported by `uv` is on `PATH`.
 
-`setup` remembers the selected Rex configuration and running server without changing Rex configuration. Interactive setup asks for approval before saving a personal-server target. Use `enable <id>` independently for each integration (`files`, `git`, `markdown`), `status [<id>]` to inspect ownership/registration, and `disable <id>` to remove only that integration. Unqualified `status` reports every integration, retaining healthy results alongside an integration-specific fault if a sibling cannot be inspected. See the plugin READMEs for prerequisites, capabilities, updates, and removal.
+`setup` remembers the selected Rex configuration and running server without changing Rex configuration. Interactive setup asks for approval before saving a personal-server target. Use `enable <id>` independently for each integration (`files`, `git`, `markdown`, `usage`), `status [<id>]` to inspect ownership/registration, and `disable <id>` to remove only that integration. Unqualified `status` reports every integration, retaining healthy results alongside an integration-specific fault if a sibling cannot be inspected. See the plugin READMEs for prerequisites, capabilities, updates, and removal.
 
 Run `rexdeck plugins` to list every available plugin shipped with this installation and its current state as JSON. Configured rows include `enabled: true` or `enabled: false`; before setup, rows report `not-configured` rather than guessing that a target is disabled. Unreleased (source checkout until the next published version; 0.1.1 omits them): configured rows also report the saved pane `layout`, and every row's `integration` field discloses the hosted tool, qualified versions, upstream license, launch context, write/network/process capabilities and default layout. Plugin inspection faults remain visible alongside healthy sibling rows and return a nonzero exit status. Listing never enables integrations or installs dependencies. Planned integrations are not included.
 
@@ -58,7 +59,7 @@ rexdeck status git                       # reports "layout": {"placement": "belo
 
 ### Selected dependencies
 
-`setup` and `status` never install packages. `enable files` validates preinstalled Yazi; `enable git` validates preinstalled Git/lazygit; `enable markdown` validates preinstalled markdown-reader. Qualified versions are **Yazi 26.9.1, lazygit 0.66.2 or 0.66.3, markdown-reader 1.35.4**. Missing or unqualified selected tools produce actionable nonzero manual-install/version-check/rerun guidance without registration or installation prompts. RexDeck never installs, upgrades, downloads, cancels package transactions, or removes upstream tools, and never probes or executes Homebrew.
+`setup` and `status` never install packages. `enable files` validates preinstalled Yazi; `enable git` validates preinstalled Git/lazygit; `enable markdown` validates preinstalled markdown-reader; `enable usage` validates preinstalled tokscale. Qualified versions are **Yazi 26.9.1, lazygit 0.66.2 or 0.66.3, markdown-reader 1.35.4, tokscale 4.21.0**. Missing or unqualified selected tools produce actionable nonzero manual-install/version-check/rerun guidance without registration or installation prompts. RexDeck never installs, upgrades, downloads, cancels package transactions, or removes upstream tools, and never probes or executes Homebrew.
 
 Executable discovery ignores empty and relative `PATH` entries. Absolute entries, including checkout directories and symlinks to them, remain eligible for version probes and lifecycle lookup. Put only trusted tools in absolute `PATH` directories. RexDeck captures followed-target device/inode/mode/size/nanosecond timestamps/owner before the version probe and rechecks that identity afterward and under its operation locks immediately before applying or enabling an integration. Replacement or modification requires rerunning enable. This is metadata-based detection, not pinned execution or protection against an executable changed after the final check.
 
