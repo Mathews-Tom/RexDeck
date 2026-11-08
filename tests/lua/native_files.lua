@@ -30,7 +30,8 @@ rex = {
     if mode == 'no-pwd' then return {} end
     return {pwd = 'file:///exact%20origin'}
   end,
-  exec = function()
+  exec = function(argv)
+    assert(argv[5] == 'context' and argv[6] == 'directory')
     effects = effects + 1
     if mode == 'exec-error' then return nil, 'python unavailable' end
     if mode == 'refused-cwd' then return {ok = false, stderr = 'remote cwd refused'} end
@@ -45,6 +46,8 @@ rex = {
   end},
   session = {new_split = function(request)
     effects = effects + 1
+    assert(request.direction == 'vertical' and request.side == 'after' and request.ratio == 0.7,
+      'split ignored configured layout')
     local source = panes[request.anchor_id]
     if mode == 'split-error' then return nil, 'split denied' end
     if not source or source.session ~= request.session_id then return nil, 'invalid source' end
@@ -56,7 +59,17 @@ rex = {
     return {block_ids = {id}}
   end},
 }
-install{python = '/python', rex = '/rex', yazi = '/yazi', server = 'unix:///private.sock', launcher_code = 'pass'}
+local options = {python = '/python', rex = '/rex', yazi = '/yazi',
+  server = 'unix:///private.sock', launcher_code = 'pass', plugin = 'files',
+  title = 'Files', tool = 'yazi', tool_label = 'Yazi', description = 'Files',
+  keywords = 'files', context = 'directory', args = {},
+  layout = {direction = 'vertical', side = 'after', ratio = 0.7}}
+for _, ratio in ipairs({'0.7', 0 / 0, 0.1, 0.9}) do
+  options.layout.ratio = ratio
+  assert(not pcall(install, options), 'invalid layout ratio accepted: ' .. tostring(ratio))
+end
+options.layout.ratio = 0.7
+install(options)
 assert(action.name == 'rexdeck_files' and type(action.run) == 'function')
 
 for _, invalid in ipairs({{}, {session_id = 'session-a'}, {block_id = 'origin-a'},

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from rexdeck.plugins.files import launch
+from rexdeck.host import launch
 
 LAUNCHER = Path(launch.__file__)
 
@@ -32,7 +32,7 @@ def test_cwd_decodes_local_spaces_unicode_and_literal_uri_characters(
         elif representation == "hostname":
             value = value.replace("file://", f"file://{socket.gethostname()}", 1)
     result = subprocess.run(
-        [sys.executable, str(LAUNCHER), "cwd", value],
+        [sys.executable, str(LAUNCHER), "context", "directory", value],
         capture_output=True,
         text=True,
         check=False,
@@ -96,7 +96,7 @@ def test_file_uri_accepts_local_fqdn_without_accepting_remote_or_credentials(
 )
 def test_cwd_refuses_untrusted_or_ambiguous_input(value: str) -> None:
     result = subprocess.run(
-        [sys.executable, str(LAUNCHER), "cwd", value],
+        [sys.executable, str(LAUNCHER), "context", "directory", value],
         capture_output=True,
         text=True,
         check=False,
@@ -119,7 +119,7 @@ def test_cwd_reports_real_symlink_loop_without_traceback(tmp_path: Path) -> None
     loop = tmp_path / "loop"
     loop.symlink_to(loop.name)
     result = subprocess.run(
-        [sys.executable, str(LAUNCHER), "cwd", str(loop)],
+        [sys.executable, str(LAUNCHER), "context", "directory", str(loop)],
         capture_output=True,
         text=True,
         check=False,
@@ -184,6 +184,7 @@ def tools(tmp_path: Path) -> tuple[Path, Path, Path]:
         f"path = Path({str(state)!r})\n"
         "state = json.loads(path.read_text())\n"
         "state['tty'] = [os.isatty(fd) for fd in (0, 1, 2)]\n"
+        "state['argv'] = sys.argv[1:]\n"
         "state['cwd'] = os.getcwd()\n"
         "state['config'] = os.environ.get('YAZI_CONFIG_HOME')\n"
         "state['focused'] = 'origin-b'\n"
@@ -205,7 +206,10 @@ def tools(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 
 def start(
-    tools: tuple[Path, Path, Path], cwd: Path, origin: str = "origin-a"
+    tools: tuple[Path, Path, Path],
+    cwd: Path,
+    origin: str = "origin-a",
+    args: tuple[str, ...] = (),
 ) -> tuple[subprocess.Popen[bytes], int]:
     yazi, rex, _ = tools
     master, slave = pty.openpty()
@@ -222,12 +226,16 @@ def start(
                 sys.executable,
                 str(LAUNCHER),
                 "run",
+                "directory",
+                "Files",
+                "Yazi",
                 str(yazi),
                 str(rex),
                 "unix:///private server.sock",
                 "session-exact",
                 origin,
                 str(cwd),
+                *args,
             ],
             stdin=slave,
             stdout=slave,
@@ -284,6 +292,25 @@ def test_real_launcher_inherits_tty_and_config_then_restores_frozen_origin(
         assert state["cwd"] == str(cwd.resolve())
         assert state["config"] == str(cwd / "user config")
         assert state["focused"] == origin
+    finally:
+        cleanup(child, master)
+
+
+def test_descriptor_args_follow_fixed_fields_verbatim_without_a_shell(
+    tmp_path: Path, tools: tuple[Path, Path, Path]
+) -> None:
+    """Integration argv reaches the tool after the nine launch fields, unexpanded."""
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    args = ("--client", "omp", "two words", "$(touch pwned)", "-")
+    child, master = start(tools, cwd, args=args)
+    try:
+        output = terminal_output(master)
+        assert child.wait(timeout=5) == 0, output
+        state = json.loads(tools[2].read_text())
+        assert state["argv"] == list(args)
+        assert state["focused"] == "origin-a"
+        assert not (cwd / "pwned").exists()
     finally:
         cleanup(child, master)
 
@@ -398,9 +425,11 @@ def test_python312_symlink_loop_reaches_existing_error_boundary(
     acknowledgements: list[bool] = []
     monkeypatch.setattr(Path, "resolve", resolve)
     monkeypatch.setattr(launch, "acknowledge", lambda: acknowledgements.append(True))
-    args = [str(LAUNCHER), command]
+    args = [str(LAUNCHER), "run" if command == "run" else "context", "directory"]
     if command == "run":
         args += [
+            "Files",
+            "Yazi",
             str(tools[0]),
             str(tools[1]),
             "unix:///private server.sock",

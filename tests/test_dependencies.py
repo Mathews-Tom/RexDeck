@@ -11,7 +11,7 @@ from contextlib import chdir
 from pathlib import Path
 from unittest.mock import patch
 
-from rexdeck import dependencies, lifecycle
+from rexdeck import dependencies, integrations, lifecycle
 
 
 class _UnusedInput:
@@ -101,7 +101,7 @@ class DependencyTests(unittest.TestCase):
                     ):
                         dependencies.ensure(plugin)
                     message = str(failure.exception)
-                    self.assertIn(dependencies._RELEASES[tool], message)
+                    self.assertIn(integrations.get(plugin).release, message)
                     self.assertIn(f"{tool} --version", message)
                     self.assertIn(f"rexdeck enable {plugin}", message)
                     self.assertFalse(self.manager_marker.exists())

@@ -19,8 +19,8 @@ jobs:
       - run: uv run mypy --strict
       - run: brew install luajit
       - run: uv run pytest
-      - name: Shared Files and Git Lua syntax
-        run: luajit -b src/rexdeck/plugins/files/main.lua "$RUNNER_TEMP/rexdeck-shared.out"
+      - name: Shared native host Lua syntax
+        run: luajit -b src/rexdeck/host/main.lua "$RUNNER_TEMP/rexdeck-shared.out"
       - name: Build installable release artifacts
         run: |
           uv build --no-sources --out-dir "$RUNNER_TEMP/rexdeck-dist"
@@ -31,9 +31,9 @@ jobs:
         run: |
           "$RUNNER_TEMP/rexdeck-wheel/bin/rexdeck" --help
           "$RUNNER_TEMP/rexdeck-wheel/bin/rexdeck" plugins
-          "$RUNNER_TEMP/rexdeck-wheel/bin/python" -m rexdeck.plugins.files.launch cwd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/rexdeck-wheel/bin/python" -m rexdeck.host.launch context directory "$RUNNER_TEMP"
           git init "$RUNNER_TEMP/rexdeck-installed-repo"
-          "$RUNNER_TEMP/rexdeck-wheel/bin/python" -m rexdeck.plugins.files.launch git-cwd "$RUNNER_TEMP/rexdeck-installed-repo"
+          "$RUNNER_TEMP/rexdeck-wheel/bin/python" -m rexdeck.host.launch context git-worktree "$RUNNER_TEMP/rexdeck-installed-repo"
           "$RUNNER_TEMP/rexdeck-wheel/bin/python" - <<'PY'
           import os
           import subprocess
@@ -45,9 +45,9 @@ jobs:
           assert package.version == "0.1.1"
           assert package.metadata["License-Expression"] == "MIT"
           assert any(str(path).endswith("/licenses/LICENSE") for path in package.files)
-          assert files("rexdeck").joinpath("plugins/files/launch.py").is_file()
-          source = files("rexdeck").joinpath("plugins/files/main.lua")
-          output = Path(os.environ["RUNNER_TEMP"]) / "rexdeck-installed-files.out"
+          assert files("rexdeck").joinpath("host/launch.py").is_file()
+          source = files("rexdeck").joinpath("host/main.lua")
+          output = Path(os.environ["RUNNER_TEMP"]) / "rexdeck-installed-host.out"
           subprocess.run(["luajit", "-b", str(source), str(output)], check=True)
           PY
       - name: Retain exact candidate artifacts

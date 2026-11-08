@@ -20,7 +20,7 @@ Install the published package from PyPI (or `uv tool install .` from a source ch
 uv tool install --default-index https://pypi.org/simple rexdeck
 ```
 
-Ensure the tool executable directory reported by `uv` is on `PATH`. The installed package includes the Files action and launcher; subsequent commands work from any directory and do not require the checkout.
+Ensure the tool executable directory reported by `uv` is on `PATH`. The installed package includes the shared native host action and launcher; subsequent commands work from any directory and do not require a checkout.
 
 With your Rex application already running:
 
@@ -76,6 +76,8 @@ Use Yazi's normal navigation, previews, opening, configuration, and file operati
 
 Quit Yazi with its normal `q` binding to return focus to the exact captured project terminal. Each deliberate launch has its own origin; no replacement-pane registry or process sweeper is involved. A missing origin, failed launch, nonzero Yazi exit, or focus failure stays visible for acknowledgement instead of silently selecting another pane. User-defined Yazi bindings retain their own behavior.
 
+The Yazi pane opens to the right of the invoking terminal using half its space by default. Choose another side or share with `rexdeck enable files --placement below --size 35` (unreleased; available from a source checkout until the next published version); see [pane placement and size](../../README.md#pane-placement-and-size). The choice is saved with Files' ownership record and does not affect Git or Yazi's own configuration.
+
 Tools run as your OS account, not in a sandbox. Tool-native opening/previewing can invoke programs configured by the user. RexDeck supplies structured argv and cwd, not a shell-interpolated command.
 
 ## Disable and update
@@ -105,7 +107,7 @@ Re-enabling verifies recorded ownership before refreshing the packaged action, l
 Run the shared checks from the [root README](../../README.md#development), plus this plugin's Lua syntax screen:
 
 ```sh
-luajit -b src/rexdeck/plugins/files/main.lua /tmp/rexdeck-files-syntax.out
+luajit -b src/rexdeck/host/main.lua /tmp/rexdeck-host-syntax.out
 ```
 
 Lua compilation is not runtime proof. Build and install the wheel outside the checkout, then exercise setup/enable/status, native action/Yazi navigation and quit focus, reinstall/refresh, and disable on a private Rex server. Owner-app palette, glyphs, and visual behavior require owner-led checking rather than a CLI-only GUI claim.
