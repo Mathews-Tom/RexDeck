@@ -195,8 +195,8 @@ def _enable(path: Path, target: settings.SavedTarget, plugin: str) -> dict[str, 
     setup = target.setup(plugin)
     _selected_status(setup)
     qualified_tool: lifecycle.QualifiedTool = dependencies.ensure(plugin)
-    # A download can take arbitrarily long. Never keep a config lock across it or
-    # use a changed settings file, redirected path, or dead server afterwards.
+    # Version probes run outside config locks; revalidate the saved target and
+    # running server before publishing an integration.
     current = settings.load(path)
     if current is None or current != target:
         raise RuntimeError(

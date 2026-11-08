@@ -17,10 +17,10 @@ from rexdeck import cli, dependencies, lifecycle, settings
 
 
 class _Terminal(io.StringIO):
-    """Provide explicit interactive consent without changing production TTY checks."""
+    """Provide interactive approval for saving a personal Rex target."""
 
     def isatty(self) -> bool:
-        """Keep scripted consent eligible for the interactive-only install prompt."""
+        """Keep target approval interactive without using a real terminal."""
         return True
 
 
@@ -794,8 +794,8 @@ class CliTests(unittest.TestCase):
         self.assertFalse(self.workspace.exists())
         self.assertFalse(self.data_root.exists())
 
-    def test_missing_selected_tool_decline_preserves_registered_sibling(self) -> None:
-        """Declining every unsupported consent form leaves a registered sibling intact."""
+    def test_missing_tool_preserves_sibling_until_owner_installs_it(self) -> None:
+        """Missing-tool guidance never registers actions, even with affirmative input."""
         self.configure()
         self.assertEqual(self.invoke("enable", "git")[1]["state"], "ready")
         git_module = self.data_root / "plugins/git/rexdeck_git.lua"
@@ -810,12 +810,8 @@ class CliTests(unittest.TestCase):
                 "_resolve",
                 side_effect=lambda name: None if name == "yazi" else sys.executable,
             ),
-            patch.object(dependencies, "_manager", return_value=sys.executable),
-            patch.object(
-                dependencies, "_install", side_effect=AssertionError("not consented")
-            ),
         ):
-            for terminal in (None, "", "\n", "no\n", "anything else\n"):
+            for terminal in (None, "yes\n"):
                 with self.subTest(terminal=terminal):
                     code, result = self.invoke("enable", "files", terminal=terminal)
                     self.assertEqual(code, 1)
@@ -829,46 +825,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.invoke("enable", "files")[1]["state"], "ready")
         self.assertEqual(self.invoke("disable", "files")[1]["state"], "disabled")
         self.assertEqual(self.invoke("status", "git")[1]["state"], "ready")
-        self.assertTrue(Path(sys.executable).is_file())
-
-    def test_consented_dependency_rechecks_then_registers_without_download_lock(
-        self,
-    ) -> None:
-        """Consent prepares dependencies before locks, then registers the qualified tool."""
-        self.configure()
-        installed = False
-        probes: list[str] = []
-
-        def resolve(name: str) -> str | None:
-            """Expose the selected tool only after the simulated installation."""
-            return None if name == "yazi" and not installed else sys.executable
-
-        def install(argv: list[str]) -> None:
-            """Keep all integration state untouched throughout dependency installation."""
-            nonlocal installed
-            self.assertEqual(self.config.read_bytes(), self.original)
-            self.assertFalse(self.workspace.exists())
-            self.assertFalse(self.module.exists())
-            installed = True
-
-        def probe(executable: str, name: str) -> str:
-            """Record qualification of the newly available selected tool."""
-            probes.append(name)
-            return dependencies._VERSIONS[name][-1]
-
-        with (
-            patch.object(dependencies, "_resolve", side_effect=resolve),
-            patch.object(dependencies, "_probe", side_effect=probe),
-            patch.object(dependencies, "_manager", return_value=sys.executable),
-            patch.object(dependencies, "_install", side_effect=install),
-        ):
-            code, result = self.invoke("enable", "files", terminal="yes\n")
-        self.assertEqual((code, result["state"]), (0, "ready"))
-        self.assertEqual(probes, ["yazi"])
-        receipt = json.loads((self.workspace / "setup.json").read_text())
-        self.assertIs(receipt["enabled"], True)
-        self.assertEqual(self.invoke("disable", "files")[1]["state"], "disabled")
-        self.assertEqual(self.config.read_bytes(), self.original)
 
     def _reject_changed_tool_identity(self, boundary: str) -> None:
         """Exercise both owners with target changes at a locked mutation boundary."""
@@ -1195,75 +1151,37 @@ class CliTests(unittest.TestCase):
             self.assertEqual(self.invoke("status", "files")[1]["state"], "disabled")
             self.assertEqual(self.invoke("status", "git")[1]["state"], "ready")
 
-    def test_failed_or_unqualified_install_never_registers_selected_integration(
-        self,
-    ) -> None:
-        """Installer failure, cancellation and failed qualification cannot register Files."""
+    def test_unqualified_preinstalled_tool_never_registers(self) -> None:
+        """An unsupported owner-installed tool is refused without upstream mutation."""
         self.configure()
-        for failure in ("nonzero", "cancelled", "missing", "unqualified"):
-            with self.subTest(failure=failure):
-                installed = False
-
-                def resolve(name: str) -> str | None:
-                    """Model tools missing before or after installation."""
-                    return (
-                        None
-                        if name == "yazi" and (not installed or failure == "missing")
-                        else sys.executable
-                    )
-
-                def install(argv: list[str]) -> None:
-                    """Fail before registration or make only the executable available."""
-                    nonlocal installed
-                    if failure in {"nonzero", "cancelled"}:
-                        raise RuntimeError(f"Installer {failure}")
-                    installed = True
-
-                def probe(executable: str, name: str) -> str:
-                    """Reject unsupported versions before ownership writes."""
-                    if failure == "unqualified":
-                        raise RuntimeError("Unqualified yazi version 99.0.0")
-                    return dependencies._VERSIONS[name][-1]
-
-                with (
-                    patch.object(dependencies, "_resolve", side_effect=resolve),
-                    patch.object(dependencies, "_probe", side_effect=probe),
-                    patch.object(dependencies, "_manager", return_value=sys.executable),
-                    patch.object(dependencies, "_install", side_effect=install),
+        for plugin, tool in (("files", "yazi"), ("git", "lazygit")):
+            with self.subTest(plugin=plugin):
+                with patch.object(
+                    dependencies,
+                    "_probe",
+                    side_effect=RuntimeError(f"Unqualified {tool} version 99.0.0"),
                 ):
-                    code, result = self.invoke("enable", "files", terminal="y\n")
+                    code, result = self.invoke("enable", plugin)
                 self.assertEqual(code, 1)
-                self.assertIn("rexdeck enable files", str(result["error"]))
+                self.assertIn(f"rexdeck enable {plugin}", str(result["error"]))
                 self.assertEqual(self.config.read_bytes(), self.original)
                 self.assertFalse(self.workspace.exists())
                 self.assertFalse(self.module.exists())
 
-    def test_dependency_download_rejects_changed_saved_target_before_registration(
-        self,
-    ) -> None:
-        """Changed saved settings remain user-owned and abort stale-target registration."""
+    def test_tool_qualification_rejects_changed_saved_target(self) -> None:
+        """An independent settings edit aborts stale-target registration."""
         self.configure()
         before = self.settings.read_bytes()
-        installed = False
 
-        def resolve(name: str) -> str | None:
-            """Make the tool available only after the settings-changing install."""
-            return None if name == "yazi" and not installed else sys.executable
-
-        def install(argv: list[str]) -> None:
-            """Model an independent saved-target edit while dependency work is running."""
-            nonlocal installed
+        def probe(_executable: str, name: str) -> str:
+            """Model another operation changing the target during a version probe."""
             value = self.document()
             value["server"] = "unix:///tmp/rexdeck-replaced-target.sock"
             self.settings.write_text(json.dumps(value))
-            installed = True
+            return dependencies._VERSIONS[name][-1]
 
-        with (
-            patch.object(dependencies, "_resolve", side_effect=resolve),
-            patch.object(dependencies, "_manager", return_value=sys.executable),
-            patch.object(dependencies, "_install", side_effect=install),
-        ):
-            code, result = self.invoke("enable", "files", terminal="yes\n")
+        with patch.object(dependencies, "_probe", side_effect=probe):
+            code, result = self.invoke("enable", "files")
         self.assertEqual(code, 1)
         self.assertIn("target changed", str(result["error"]))
         self.assertNotEqual(self.settings.read_bytes(), before)
@@ -1271,10 +1189,8 @@ class CliTests(unittest.TestCase):
         self.assertFalse(self.workspace.exists())
         self.assertFalse(self.module.exists())
 
-    def test_dependency_download_revalidates_config_and_server_before_registration(
-        self,
-    ) -> None:
-        """Long dependency preparation cannot bypass config-target or server rechecks."""
+    def test_tool_qualification_revalidates_config_and_server(self) -> None:
+        """A version probe cannot bypass frozen-target and live-server checks."""
         self.configure()
         backing = self.root / "backing.lua"
         self.config.rename(backing)
@@ -1285,16 +1201,10 @@ class CliTests(unittest.TestCase):
         self.settings.write_text(json.dumps(value))
         for change in ("config", "server"):
             with self.subTest(change=change):
-                installed = False
                 self.status_failure = False
 
-                def resolve(name: str) -> str | None:
-                    """Keep the selected dependency absent until preparation finishes."""
-                    return None if name == "yazi" and not installed else sys.executable
-
-                def install(argv: list[str]) -> None:
-                    """Redirect the config or stop the server before enable revalidation."""
-                    nonlocal installed
+                def probe(_executable: str, name: str) -> str:
+                    """Redirect config or stop the server during executable validation."""
                     if change == "config":
                         other = self.root / "other.lua"
                         other.write_bytes(b"-- unrelated target\n")
@@ -1302,14 +1212,10 @@ class CliTests(unittest.TestCase):
                         self.config.symlink_to(other)
                     else:
                         self.status_failure = True
-                    installed = True
+                    return dependencies._VERSIONS[name][-1]
 
-                with (
-                    patch.object(dependencies, "_resolve", side_effect=resolve),
-                    patch.object(dependencies, "_manager", return_value=sys.executable),
-                    patch.object(dependencies, "_install", side_effect=install),
-                ):
-                    code, _ = self.invoke("enable", "files", terminal="yes\n")
+                with patch.object(dependencies, "_probe", side_effect=probe):
+                    code, _ = self.invoke("enable", "files")
                 self.assertEqual(code, 1)
                 self.assertEqual(backing.read_bytes(), self.original)
                 self.assertFalse(self.workspace.exists())
