@@ -41,6 +41,7 @@ _MAX_HOOK_BYTES = 2 * 1024 * 1024
 _HOOK_SECONDS = 1.0
 _HOOK_SAVE_MARGIN = 0.05
 _BINDING_SECONDS = 0.35
+_PROVIDER_READ_LOCK_SECONDS = 0.1
 _BINDING_REASONS = {
     "verified",
     "missing-identifiers",
@@ -60,6 +61,18 @@ class _BindingDeadline(RuntimeError):
     """Bound receipt-time lookup without spending the receiver's storage budget."""
 
 
+class _ProviderRows(dict[str, dict[str, object]]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sequence = 0
+
+
+def _receipt_number(value: object) -> int:
+    if type(value) is not int or value < 0:
+        raise RuntimeError("Invalid provider receipt sequence")
+    return value
+
+
 @contextmanager
 def _binding_budget() -> Iterator[None]:
     previous = signal.getsignal(signal.SIGALRM)
@@ -67,6 +80,14 @@ def _binding_budget() -> Iterator[None]:
     started = time.monotonic()
 
     def expired(signum: int, frame: object) -> None:
+        # The binding alarm is one-shot. Rearm the overall alarm before raising
+        # so lifecycle._run's subprocess cleanup cannot spend another two seconds.
+        if remaining:
+            left = remaining - (time.monotonic() - started)
+            if left <= 0:
+                raise _HookDeadline("Provider hook deadline")
+            signal.signal(signal.SIGALRM, previous)
+            signal.setitimer(signal.ITIMER_REAL, left, interval)
         raise _BindingDeadline("Provider binding deadline")
 
     signal.signal(signal.SIGALRM, expired)
@@ -111,6 +132,7 @@ def _validate_provider(row: dict[str, object]) -> None:
     _hook_text(row.get("agent_type"), empty=True)
     _hook_text(row.get("cwd"), 4096)
     _text(row.get("endpoint"))
+    _receipt_number(row.get("receipt_order", 0))
     for field in (
         "last_message_present",
         "transcript_present",
@@ -172,6 +194,8 @@ def _store(
     max_bytes = _MAX_PROVIDER_BYTES if provider_store else _MAX_BYTES
     max_rows = _MAX_PROVIDER_ROWS if provider_store else _MAX_ROWS
     size_label = "256 KiB (providers)" if provider_store else "2 MiB"
+    if provider_store and lock_timeout is None:
+        lock_timeout = _PROVIDER_READ_LOCK_SECONDS
     if path.parent.resolve() != path.parent:
         raise RuntimeError("Attention storage directory must not be a symlink")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,7 +220,7 @@ def _store(
                     if time.monotonic() >= deadline:
                         raise RuntimeError("Attention lock timed out") from None
                     time.sleep(0.005)
-        rows: dict[str, dict[str, object]] = {}
+        rows: dict[str, dict[str, object]] = _ProviderRows() if provider_store else {}
         descriptor: int | None
         try:
             descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -223,12 +247,22 @@ def _store(
                 raise RuntimeError("Unsupported attention storage version")
             if provider_store and document.get("kind") != "provider-subagents":
                 raise RuntimeError("Invalid provider attention storage kind")
+            if provider_store:
+                cast(_ProviderRows, rows).sequence = _receipt_number(
+                    document.get("receipt_sequence", 0)
+                )
             for key, value in _object(document.get("rows")).items():
                 row = _object(value)
                 if provider_store:
+                    _text(key)
                     if row.get("row_type") != "provider":
                         raise RuntimeError("Invalid provider attention row type")
                     _validate_provider(row)
+                    if (
+                        _receipt_number(row.get("receipt_order", 0))
+                        > cast(_ProviderRows, rows).sequence
+                    ):
+                        raise RuntimeError("Provider receipt exceeds store sequence")
                 else:
                     for field in ("endpoint", "instance_id", "session_id", "block_id"):
                         _text(row.get(field))
@@ -308,6 +342,7 @@ def _save(
     document: dict[str, object] = {"version": 1, "rows": rows}
     if provider_store:
         document["kind"] = "provider-subagents"
+        document["receipt_sequence"] = cast(_ProviderRows, rows).sequence
     data = json.dumps(document, ensure_ascii=True, allow_nan=False).encode()
     max_bytes = _MAX_PROVIDER_BYTES if provider_store else _MAX_BYTES
     max_rows = _MAX_PROVIDER_ROWS if provider_store else _MAX_ROWS
@@ -585,6 +620,22 @@ def jump(target: settings.SavedTarget, identity: str) -> dict[str, object]:
     return {"state": "focused", "session_id": session, "block_id": block}
 
 
+def _hook_lock_budget() -> float:
+    remaining, _ = signal.getitimer(signal.ITIMER_REAL)
+    return max(0.0, (remaining or _HOOK_SECONDS) - _HOOK_SAVE_MARGIN)
+
+
+def _reserve_receipt(target: settings.SavedTarget, identity: str) -> int | None:
+    """Persist an ordering token before lookup, independent of wall-clock changes."""
+    with _store(target, provider_store=True, lock_timeout=_hook_lock_budget()) as rows:
+        if identity not in rows and len(rows) >= _MAX_PROVIDER_ROWS:
+            return None
+        provider_rows = cast(_ProviderRows, rows)
+        provider_rows.sequence += 1
+        _save(target, rows, provider_store=True)
+        return provider_rows.sequence
+
+
 def _receive_hook(target: settings.SavedTarget, provider: str, payload: object) -> None:
     """Accept only documented metadata; neither content nor transcript paths escape."""
     if provider not in PROVIDERS:
@@ -625,11 +676,21 @@ def _receive_hook(target: settings.SavedTarget, provider: str, payload: object) 
     ):
         if variable in os.environ:
             row[field] = _hook_text(os.environ[variable], 4096, empty=True)
+    identity = (
+        "hook:"
+        + hashlib.sha256(json.dumps([provider, parent, agent]).encode()).hexdigest()
+    )
+    sequence = _reserve_receipt(target, identity)
+    if sequence is None:
+        return
+    row["receipt_order"] = sequence
     server, session, block = row["rex_server"], row["session_id"], row["block_id"]
     endpoint_matches = server is None
     if isinstance(server, str):
         try:
             endpoint_matches = lifecycle._canonical_server(server) == target.server
+        except _HookDeadline:
+            raise
         except (OSError, RuntimeError, ValueError):
             endpoint_matches = False
     if not endpoint_matches:
@@ -657,23 +718,28 @@ def _receive_hook(target: settings.SavedTarget, provider: str, payload: object) 
                         binding_reason="verified",
                     )
         except _BindingDeadline:
-            row["binding_reason"] = "verification-timeout"
+            row.update(
+                binding="unbound",
+                binding_reason="verification-timeout",
+                instance_id=None,
+                host_id=None,
+            )
         except _HookDeadline:
             raise
         except (OSError, RuntimeError):
-            row["binding_reason"] = "verification-failed"
-    identity = (
-        "hook:"
-        + hashlib.sha256(json.dumps([provider, parent, agent]).encode()).hexdigest()
-    )
-    remaining, _ = signal.getitimer(signal.ITIMER_REAL)
-    lock_budget = max(0.0, (remaining or _HOOK_SECONDS) - _HOOK_SAVE_MARGIN)
-    with _store(target, provider_store=True, lock_timeout=lock_budget) as rows:
+            row.update(
+                binding="unbound",
+                binding_reason="verification-failed",
+                instance_id=None,
+                host_id=None,
+            )
+    with _store(target, provider_store=True, lock_timeout=_hook_lock_budget()) as rows:
         if identity not in rows and len(rows) >= _MAX_PROVIDER_ROWS:
             return
         previous = rows.get(identity)
-        if previous is not None and _timestamp(previous["observed_at"]) > _timestamp(
-            row["observed_at"]
+        if (
+            previous is not None
+            and _receipt_number(previous.get("receipt_order", 0)) > sequence
         ):
             return
         rows[identity] = row
@@ -681,34 +747,39 @@ def _receive_hook(target: settings.SavedTarget, provider: str, payload: object) 
 
 
 def hook(provider: str) -> int:
-    """Silent fail-open hook boundary, including stdin, lock and local Rex deadlines."""
-    previous = signal.getsignal(signal.SIGALRM)
-    previous_timer = signal.getitimer(signal.ITIMER_REAL)
-
-    def expired(signum: int, frame: object) -> None:
-        raise _HookDeadline("Provider hook deadline")
-
+    """Silent fail-open boundary, including deadline restoration and cleanup."""
     try:
-        signal.signal(signal.SIGALRM, expired)
-        signal.setitimer(signal.ITIMER_REAL, _HOOK_SECONDS)
-        if provider not in PROVIDERS:
-            return 0
-        raw = sys.stdin.buffer.read(_MAX_HOOK_BYTES + 1)
-        if len(raw) > _MAX_HOOK_BYTES:
-            while sys.stdin.buffer.read(64 * 1024):
-                pass
-            return 0
-        payload: object = json.loads(raw)
-        target = settings.load(settings.settings_path())
-        if target is not None:
-            _receive_hook(target, provider, payload)
+        previous = signal.getsignal(signal.SIGALRM)
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+
+        def expired(signum: int, frame: object) -> None:
+            raise _HookDeadline("Provider hook deadline")
+
+        try:
+            signal.signal(signal.SIGALRM, expired)
+            signal.setitimer(signal.ITIMER_REAL, _HOOK_SECONDS)
+            if provider not in PROVIDERS:
+                return 0
+            raw = sys.stdin.buffer.read(_MAX_HOOK_BYTES + 1)
+            if len(raw) > _MAX_HOOK_BYTES:
+                while sys.stdin.buffer.read(64 * 1024):
+                    pass
+                return 0
+            payload: object = json.loads(raw)
+            target = settings.load(settings.settings_path())
+            if target is not None:
+                _receive_hook(target, provider, payload)
+        finally:
+            # Keep restoration inside the outer fail-open handler: a pending
+            # deadline delivered at this boundary must not escape the hook.
+            try:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+            finally:
+                signal.signal(signal.SIGALRM, previous)
+                signal.setitimer(signal.ITIMER_REAL, *previous_timer)
     except (Exception, KeyboardInterrupt):
         # Provider control semantics must never be affected by telemetry failure.
         pass
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
-        signal.setitimer(signal.ITIMER_REAL, *previous_timer)
     return 0
 
 

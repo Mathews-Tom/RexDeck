@@ -6,10 +6,13 @@ import fcntl
 import io
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
@@ -856,20 +859,32 @@ def test_hook_invalid_fields_and_retention_limits_cannot_poison_native_evidence(
     assert capsys.readouterr() == ("", "")
 
 
-def test_older_provider_receipt_cannot_overwrite_newer_snapshot(
+def test_delayed_lookup_cannot_overwrite_newer_receipt_after_clock_rollback(
     native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, target = native
     hook_environment(monkeypatch, target)
-    invoke_hook(monkeypatch, json.dumps(hook_payload("SubagentStop")).encode())
-    with attention._store(target, provider_store=True) as retained:
-        for row in retained.values():
-            row["observed_at"] = time.time() + 10
-        attention._save(target, retained, provider_store=True)
-    before = attention._path(target, provider_store=True).read_bytes()
-    invoke_hook(monkeypatch, json.dumps(hook_payload()).encode())
-    assert attention._path(target, provider_store=True).read_bytes() == before
-    assert rows(target)[0]["state"] == "stopped"
+    original_block = attention._block
+    after_newer: list[bytes] = []
+    monkeypatch.setattr(time, "time", lambda: 100.0)
+
+    def interleave(
+        setup: lifecycle.Setup, session: str, block: str
+    ) -> dict[str, object] | None:
+        found = original_block(setup, session, block)
+        with monkeypatch.context() as newer:
+            newer.setattr(time, "time", lambda: 90.0)
+            newer.setenv("REX_SERVER", "unix:///other.sock")
+            attention._receive_hook(target, "claude-code", hook_payload("SubagentStop"))
+        after_newer.append(attention._path(target, provider_store=True).read_bytes())
+        return found
+
+    monkeypatch.setattr(attention, "_block", interleave)
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    assert attention._path(target, provider_store=True).read_bytes() == after_newer[0]
+    row = rows(target)[0]
+    assert row["state"] == "stopped" and row["observed_at"] == 90.0
+    assert row["receipt_order"] == 2
 
 
 def test_full_provider_quota_never_consumes_native_capacity(
@@ -1053,7 +1068,10 @@ def test_provider_store_rejects_redirected_files_without_blocking_native_observe
     assert cleared["provider_error"] and "removed" not in cleared
 
 
-@pytest.mark.parametrize("fault", ["malformed-json", "invalid-kind", "bad-row", "size"])
+@pytest.mark.parametrize(
+    "fault",
+    ["malformed-json", "invalid-kind", "bad-row", "empty-key", "nul-key", "size"],
+)
 def test_provider_store_faults_preserve_native_cli_output_and_allow_explicit_recovery(
     native: tuple[Native, settings.SavedTarget],
     monkeypatch: pytest.MonkeyPatch,
@@ -1072,6 +1090,12 @@ def test_provider_store_faults_preserve_native_cli_output_and_allow_explicit_rec
     elif fault == "bad-row":
         document = json.loads(path.read_text())
         next(iter(document["rows"].values()))["binding_reason"] = []
+        path.write_text(json.dumps(document))
+    elif fault in ("empty-key", "nul-key"):
+        document = json.loads(path.read_text())
+        key, row = next(iter(document["rows"].items()))
+        del document["rows"][key]
+        document["rows"]["" if fault == "empty-key" else "bad\x00key"] = row
         path.write_text(json.dumps(document))
     else:
         path.write_bytes(b"x" * (attention._MAX_PROVIDER_BYTES + 1))
@@ -1126,3 +1150,163 @@ def test_provider_jump_releases_store_lock_before_all_native_ipc(
     attention.jump(target, identity)
     assert checked == ["status", "rex", "rex", "rex"]
     assert backend.focused == [{"block_id": "block:one"}]
+
+
+def test_stuck_provider_writer_returns_native_rows_with_bounded_fault(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    attention.observe(target, "session:one", "block:one")
+    attention._receive_hook(target, "codex", hook_payload())
+    lock_path = attention._path(target, provider_store=True).with_suffix(".lock")
+    monkeypatch.setattr(attention, "_PROVIDER_READ_LOCK_SECONDS", 0.02)
+    with lock_path.open("r+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        listing = attention.listing(target)
+        assert time.monotonic() - started < 0.3
+        assert listing["provider_state"] == "fault"
+        assert "timed out" in str(listing["provider_error"])
+        assert len(cast(list[object], listing["rows"])) == 1
+    assert attention.listing(target)["provider_state"] == "ready"
+
+
+def test_hook_deadline_during_endpoint_validation_is_not_swallowed(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    budgets: list[float] = []
+    original_budget = attention._hook_lock_budget
+
+    def budget() -> float:
+        result = original_budget()
+        budgets.append(result)
+        return result
+
+    def expired(server: str) -> str:
+        raise attention._HookDeadline("Endpoint deadline")
+
+    monkeypatch.setattr(attention, "_hook_lock_budget", budget)
+    monkeypatch.setattr(lifecycle, "_canonical_server", expired)
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    assert len(budgets) == 1  # Reservation only; no post-expiry lookup/store wait.
+    assert not rows(target, provider="claude-code")
+    assert signal.getitimer(signal.ITIMER_REAL)[0] == 0
+    assert capsys.readouterr() == ("", "")
+
+
+def test_binding_timeout_after_capture_clears_focusable_fields(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend, target = native
+    hook_environment(monkeypatch, target)
+
+    @contextmanager
+    def expire_after_capture() -> Iterator[None]:
+        yield
+        raise attention._BindingDeadline("Expired after row capture")
+
+    monkeypatch.setattr(attention, "_binding_budget", expire_after_capture)
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    row = rows(target)[0]
+    assert (
+        row["binding"] == "unbound" and row["binding_reason"] == "verification-timeout"
+    )
+    assert row["instance_id"] is None and row["host_id"] is None
+    with pytest.raises(RuntimeError, match="unbound"):
+        attention.jump(target, str(row["id"]))
+    assert not backend.focused
+
+
+def test_overall_hook_deadline_interrupts_native_subprocess_cleanup(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target)
+    read_fd, write_fd = os.pipe()
+
+    class SlowCleanup:
+        def __init__(self) -> None:
+            self.stdout = os.fdopen(read_fd, "rb")
+            self.killed = False
+
+        def poll(self) -> int | None:
+            return None
+
+        def kill(self) -> None:
+            self.killed = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            time.sleep(2)
+            return 0
+
+    child = SlowCleanup()
+
+    def popen(*args: object, **kwargs: object) -> SlowCleanup:
+        return child
+
+    def blocked(setup: lifecycle.Setup) -> str:
+        lifecycle._run(["fake-native"], {})
+        raise AssertionError("Native cleanup exceeded the receiver deadline")
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(attention, "_status", blocked)
+    monkeypatch.setattr(attention, "_HOOK_SECONDS", 0.18)
+    monkeypatch.setattr(attention, "_BINDING_SECONDS", 0.03)
+    try:
+        started = time.monotonic()
+        assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+        assert time.monotonic() - started < 0.8
+        assert child.killed
+    finally:
+        child.stdout.close()
+        os.close(write_fd)
+    assert capsys.readouterr() == ("", "")
+
+
+def test_hook_deadline_in_cleanup_is_silent_and_cannot_escape(
+    native: tuple[Native, settings.SavedTarget],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    original = signal.setitimer
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    injected: list[bool] = []
+
+    def alarm(which: int, seconds: float, interval: float = 0) -> tuple[float, float]:
+        result = original(which, seconds, interval)
+        if seconds == 0 and not injected:
+            injected.append(True)
+            raise attention._HookDeadline("Pending deadline during cleanup")
+        return result
+
+    monkeypatch.setattr(signal, "setitimer", alarm)
+    assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
+    assert injected and signal.getsignal(signal.SIGALRM) == previous_handler
+    assert signal.getitimer(signal.ITIMER_REAL)[0] == 0
+    assert capsys.readouterr() == ("", "")
+
+
+def test_newer_receipt_wins_when_wall_clock_moves_backwards(
+    native: tuple[Native, settings.SavedTarget], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, target = native
+    hook_environment(monkeypatch, target, bound=False)
+    monkeypatch.setattr(time, "time", lambda: 100.0)
+    invoke_hook(monkeypatch, json.dumps(hook_payload()).encode())
+    monkeypatch.setattr(time, "time", lambda: 90.0)
+    invoke_hook(monkeypatch, json.dumps(hook_payload("SubagentStop")).encode())
+    row = rows(target)[0]
+    assert row["state"] == "stopped" and row["observed_at"] == 90.0
+    assert row["receipt_order"] == 2
+    attention.clear_provider(target, "claude-code")
+    invoke_hook(monkeypatch, json.dumps(hook_payload()).encode())
+    assert rows(target)[0]["receipt_order"] == 3
