@@ -277,9 +277,17 @@ def main() -> int:
     if sys.argv[1:3] == ["attention", "hook"]:
         return attention.hook(sys.argv[3] if len(sys.argv) == 4 else "")
     parser = _Parser(description=__doc__)
+    if len(sys.argv) > 1 and sys.argv[1] == "clickup":
+        # Imported lazily: hook invocations must not pay for (or fail on) ClickUp deps.
+        from rexdeck.clickup import frontend as clickup
+
+        return clickup.configure(sys.argv[2:])
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser(
         "plugins", help="List available plugins and their enabled/disabled state"
+    )
+    subcommands.add_parser(
+        "clickup", help="Explicit account/workspace/list selection (select or status)"
     )
     native = subcommands.add_parser(
         "attention",

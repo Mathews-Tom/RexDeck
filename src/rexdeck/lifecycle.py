@@ -240,21 +240,24 @@ def _executable(name: str) -> str:
     return str(Path(found).absolute())
 
 
-def _tools(tool: str = "yazi") -> dict[str, str]:
-    """Bind the current interpreter, Rex and selected upstream tool to paths."""
+def _tools(tool: str = "yazi", *, owned: bool = False) -> dict[str, str]:
+    """Bind the interpreter, Rex and the selected upstream or owned frontend."""
     python = Path(sys.executable).absolute()
     if not python.is_file() or not os.access(python, os.X_OK):
         raise RuntimeError(f"Current Python interpreter is not executable: {python}")
     return {
         "python": str(python),
         "rex": _executable("rex"),
-        tool: _executable(tool),
+        tool: str(python) if owned else _executable(tool),
     }
 
 
 def _selected_tools(setup: Setup) -> dict[str, str]:
     """Resolve only the executables required by the selected integration."""
-    return _tools(integrations.get(setup.plugin).tool)
+    integration = integrations.get(setup.plugin)
+    if integration.owned_module is not None:
+        return _tools(integration.tool, owned=True)
+    return _tools(integration.tool)
 
 
 def _require_qualified_tool(

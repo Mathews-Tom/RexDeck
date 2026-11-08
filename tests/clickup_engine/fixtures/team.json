@@ -1,0 +1,1 @@
+{"teams": [{"id": "7000000001", "name": "Sample Workspace", "members": [{"user": {"id": 710000001, "username": "user_one", "email": "user_one@example.com", "color": "#000000"}}, {"user": {"id": 710000002, "username": "user_two", "email": "user_two@example.com", "color": "#111111"}}]}, {"id": "7000000002", "name": "Other Sample Workspace", "members": []}]}

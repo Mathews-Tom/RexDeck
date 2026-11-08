@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from rexdeck import integrations, lifecycle
@@ -57,6 +58,8 @@ def _manual(integration: integrations.Integration) -> str:
 def ensure(plugin: str) -> lifecycle.QualifiedTool:
     """Validate only the selected preinstalled tool; never prompt or run an installer."""
     integration = integrations.get(plugin)
+    if integration.owned_module is not None:
+        return lifecycle.QualifiedTool.capture(str(Path(sys.executable).absolute()))
     for prerequisite, source in integration.prerequisites:
         name = prerequisite.capitalize()
         if _resolve(prerequisite) is None:
