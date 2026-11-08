@@ -192,3 +192,22 @@ reset()
 rex.json.decode = function() return {cwd = '/exact origin', target = '/exact origin'} end
 assert(not pcall(action.run, context, {repo = 'github.com/owner/project', account = 'reader'}))
 assert(opened == 0, 'missing validated identity opened a pane')
+
+options.plugin, options.title, options.context = 'viewer', 'Viewer', 'media'
+options.tool, options.tool_label = 'yazi', 'Yazi'
+options.args = {}
+install(options)
+for _, absent in ipairs({{}, {file = false}, {file = ''}}) do
+  reset()
+  local accepted, error = pcall(action.run, context, absent)
+  assert(not accepted and tostring(error):find('RexDeck Viewer', 1, true))
+  assert(effects == 0 and opened == 0, 'missing rich-file selection changed focus or panes')
+end
+reset()
+rex.exec = function(argv)
+  assert(argv[6] == 'media' and argv[8] == '/selected/image.png')
+  return {ok = false, stderr = 'Invalid .png file signature'}
+end
+local accepted, error = pcall(action.run, context, {file = '/selected/image.png'})
+assert(not accepted and tostring(error):find('Invalid .png file signature', 1, true))
+assert(opened == 0 and focused == 'origin-b', 'corrupt rich file opened a pane')

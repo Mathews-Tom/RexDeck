@@ -626,6 +626,8 @@ class CliTests(unittest.TestCase):
         self.assertIs(plugins["files"]["enabled"], True)
         self.assertEqual(plugins["git"]["state"], "disabled")
         self.assertIs(plugins["git"]["enabled"], False)
+        self.assertEqual(plugins["viewer"]["state"], "disabled")
+        self.assertIs(plugins["viewer"]["enabled"], False)
         self.assertEqual({path: path.read_bytes() for path in before}, before)
         self.assertFalse((self.workspace / "git/setup.json").exists())
         self.assertFalse((self.data_root / "plugins/git").exists())

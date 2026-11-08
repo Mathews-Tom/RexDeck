@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -83,6 +84,42 @@ def document(raw: str, selected: str | None = None) -> str:
     )
 
 
+MEDIA_SUFFIXES = (".pdf", ".jpg", ".jpeg", ".png", ".svg")
+
+
+def media(raw: str, selected: str | None = None) -> str:
+    """Require a selected local rich-format file; never silently browse a cwd."""
+    if selected is None or not selected or "\x00" in selected:
+        raise ValueError("Select a local PDF, JPG, PNG or SVG with the file argument")
+    if not selected.startswith("/") and not selected.lower().startswith("file:"):
+        selected = str(Path(directory(raw)) / selected)
+    path = _local(selected)
+    if not path.is_file() or path.suffix.lower() not in MEDIA_SUFFIXES:
+        raise ValueError("Select a local file ending in " + ", ".join(MEDIA_SUFFIXES))
+    # Detect obvious mislabeled files before a preview pane opens. Full decoding
+    # remains the upstream previewer's job, not a RexDeck rendering pipeline.
+    suffix = path.suffix.lower()
+    with path.open("rb") as stream:
+        if suffix == ".svg":
+            try:
+                _, root = next(ET.iterparse(stream, events=("start",)))
+                valid = root.tag in ("svg", "{http://www.w3.org/2000/svg}svg")
+            except (ET.ParseError, StopIteration):
+                valid = False
+        else:
+            header = stream.read(1024)
+            valid = (
+                b"%PDF-" in header
+                if suffix == ".pdf"
+                else header.startswith(b"\xff\xd8\xff")
+                if suffix in (".jpg", ".jpeg")
+                else header.startswith(b"\x89PNG\r\n\x1a\n")
+            )
+    if not valid:
+        raise ValueError(f"Invalid {suffix} file signature: {path}")
+    return str(path)
+
+
 def git_directory(raw: str) -> str:
     """Keep cwd-based Git discovery; reject inherited repository redirection."""
     overrides = {
@@ -136,6 +173,20 @@ def executable(name: str) -> str:
             f"Required executable not found in absolute PATH directories: {name}"
         )
     return found
+
+
+def execution_environment() -> dict[str, str]:
+    """Preserve configuration/auth while excluding cwd-relative helper lookup."""
+    environment = dict(os.environ)
+    environment["PATH"] = (
+        os.pathsep.join(
+            entry
+            for entry in os.environ.get("PATH", os.defpath).split(os.pathsep)
+            if Path(entry).is_absolute()
+        )
+        or os.defpath
+    )
+    return environment
 
 
 def git_output(cwd: str, *args: str) -> str:
@@ -253,7 +304,7 @@ def github_environment(selection: dict[str, str], cwd: str) -> dict[str, str]:
             "Remove gh-dash FF_MOCK_DATA before launching real GitHub workflows"
         )
     host, owner, repo = selection["repo"].split("/")
-    environment = dict(os.environ)
+    environment = execution_environment()
     gh = executable("gh")
     environment.update(
         GH_HOST=host, GH_REPO=selection["repo"], GH_PATH=gh, GH_PROMPT_DISABLED="1"
@@ -347,6 +398,7 @@ CONTEXTS = {
     "git-worktree": git_directory,
     "document": document,
     "github-worktree": git_directory,
+    "media": media,
 }
 
 
@@ -390,8 +442,10 @@ def resolve(context: str, raw: str, selected: str | None = None) -> str:
     """Resolve one declared context; arbitrary cwd never selects a file or account."""
     if context not in CONTEXTS:
         raise ValueError(f"Unknown integration context: {context!r}")
-    if context == "document":
-        return document(raw, selected)
+    if context in ("document", "media"):
+        return (
+            document(raw, selected) if context == "document" else media(raw, selected)
+        )
     if selected is not None:
         raise ValueError(f"The {context} context does not accept a selected file")
     return CONTEXTS[context](raw)
@@ -424,9 +478,9 @@ def run(
             )
         if not Path(tool).is_absolute() or not Path(rex).is_absolute():
             raise ValueError("Absolute tool and Rex executable paths are required")
-        # A document target was validated as an explicit absolute selection or the
-        # invoking directory; re-check it in that same form at launch time.
-        checked = resolve(context, cwd, cwd if context == "document" else None)
+        # File targets are rechecked as explicit selections at launch time.
+        file_context = context in ("document", "media")
+        checked = resolve(context, cwd, cwd if file_context else None)
         if context == "github-worktree":
             if len(args) != 1:
                 raise ValueError(
@@ -449,11 +503,13 @@ def run(
                     check=False,
                 ).returncode
         else:
-            # A document integration receives its validated target as the last argument.
-            target = (checked,) if context == "document" else ()
-            # Inherit the actual pane TTY and the tool's normal configuration.
+            target = (checked,) if file_context else ()
+            # Inherit the pane TTY/configuration, but never search its cwd for helpers.
             exit_code = subprocess.run(
-                [tool, *args, *target], cwd=workdir(checked), check=False
+                [tool, *args, *target],
+                cwd=workdir(checked),
+                env=execution_environment(),
+                check=False,
             ).returncode
         if exit_code < 0:
             exit_code = 128 - exit_code

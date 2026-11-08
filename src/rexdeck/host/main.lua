@@ -2,7 +2,7 @@
 -- Every integration shares this action: frozen origin identity, validated context,
 -- shell-less argv, configured split layout and exact-origin return by the launcher.
 local contexts = {directory = true, ['git-worktree'] = true, document = true,
-  ['github-worktree'] = true}
+  ['github-worktree'] = true, media = true}
 local function nonempty(value)
   return type(value) == 'string' and value ~= '' and not value:find('%z')
 end
@@ -42,7 +42,7 @@ return function(opts)
   if not nonempty(launcher) then error(title .. ' requires its applied Python launcher', 0) end
   if not nonempty(opts.server) then error(title .. ' requires an explicit Rex server', 0) end
 
-  local document = opts.context == 'document'
+  local document = opts.context == 'document' or opts.context == 'media'
   local github = opts.context == 'github-worktree'
 
   rex.action{
@@ -56,6 +56,9 @@ return function(opts)
     run = function(ctx, action_args)
       local selected = nil
       if document and type(action_args) == 'table' then selected = action_args.file end
+      if opts.context == 'media' and selected == nil then
+        error(title .. ' requires an explicitly selected PDF, JPG, PNG or SVG file', 0)
+      end
       if selected ~= nil and not nonempty(selected) then
         error(title .. ' requires a nonempty selected file path', 0)
       end
