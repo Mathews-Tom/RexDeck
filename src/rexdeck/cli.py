@@ -7,8 +7,9 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Never
+from typing import Never, cast
 
 from rexdeck import attention, dependencies, integrations, lifecycle, report, settings
 
@@ -271,11 +272,40 @@ def _plugins(target: settings.SavedTarget | None) -> dict[str, object]:
     }
 
 
+def _each(
+    names: list[str], change: Callable[[str], dict[str, object]], success: str
+) -> dict[str, object]:
+    """Apply one change per plugin; a failure is reported in its row, not fatal."""
+    rows: dict[str, dict[str, object]] = {}
+    for name in names:
+        try:
+            rows[name] = change(name)
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            rows[name] = {"state": "failed", "error": str(error)}
+    states = {str(row.get("state")) for row in rows.values()}
+    return {
+        "state": "fault"
+        if states & _FAILURES
+        else success
+        if states == {success}
+        else "mixed",
+        "plugins": rows,
+    }
+
+
 def _print_report(command: str, result: dict[str, object], plugin: str | None) -> None:
-    """Interactive listing; a single-plugin status is shown as a one-row table."""
+    """Interactive table; a single-plugin result is shown as a one-row table."""
     if plugin is not None:
-        row = {**result, "integration": integrations.get(plugin).describe()}
-        result = {"state": result.get("state"), "plugins": {plugin: row}}
+        result = {"state": result.get("state"), "plugins": {plugin: result}}
+    raw = result.get("plugins")
+    rows = cast(dict[str, dict[str, object]], raw if isinstance(raw, dict) else {})
+    result = {
+        **result,
+        "plugins": {
+            name: {"integration": integrations.get(name).describe(), **row}
+            for name, row in rows.items()
+        },
+    }
     print(
         report.render(
             f"RexDeck {command}", result, color=report.use_color(sys.stdout.isatty())
@@ -345,12 +375,14 @@ def main() -> int:
     for name in ("enable", "disable", "status"):
         command = subcommands.add_parser(name)
         command.add_argument(
-            "plugin", choices=lifecycle.PLUGINS, nargs="?" if name == "status" else None
+            "plugin",
+            choices=lifecycle.PLUGINS,
+            nargs="?" if name == "status" else "+",
+            help="One plugin" if name == "status" else "One or more plugins",
         )
-        if name == "status":
-            command.add_argument(
-                "--json", action="store_true", help="Print the full JSON document"
-            )
+        command.add_argument(
+            "--json", action="store_true", help="Print the full JSON document"
+        )
         if name == "enable":
             command.add_argument(
                 "--placement",
@@ -408,23 +440,48 @@ def main() -> int:
                     result = attention.jump(target, args.id)
                 print(json.dumps(result, ensure_ascii=True, indent=2))
                 return 1 if result.get("state") in _FAILURES else 0
-            if args.command == "enable":
-                result = _enable(
-                    path, target, args.plugin, placement=args.placement, size=args.size
+            if args.command in {"enable", "disable"}:
+                names = list(dict.fromkeys(args.plugin))
+
+                def change(name: str) -> dict[str, object]:
+                    if args.command == "enable":
+                        return _enable(
+                            path,
+                            target,
+                            name,
+                            placement=args.placement,
+                            size=args.size,
+                        )
+                    return lifecycle.disable(target.setup(name))
+
+                # One name keeps the original single-result document and errors.
+                result = (
+                    change(names[0])
+                    if len(names) == 1
+                    else _each(
+                        names,
+                        change,
+                        "ready" if args.command == "enable" else "disabled",
+                    )
                 )
-            elif args.command == "disable":
-                result = lifecycle.disable(target.setup(args.plugin))
             else:
                 if args.plugin:
                     result = lifecycle.status(target.setup(args.plugin))
                 else:
                     result = _plugins(target)
+        single = (
+            args.plugin
+            if args.command == "status"
+            else args.plugin[0]
+            if args.command in {"enable", "disable"} and len(set(args.plugin)) == 1
+            else None
+        )
         if (
-            args.command in {"plugins", "status"}
+            args.command in {"plugins", "status", "enable", "disable"}
             and not args.json
             and sys.stdout.isatty()
         ):
-            _print_report(args.command, result, getattr(args, "plugin", None))
+            _print_report(args.command, result, single)
         else:
             print(json.dumps(result, ensure_ascii=True, indent=2))
         return 1 if result.get("state") in _FAILURES else 0

@@ -134,7 +134,7 @@ def render(
     if state == "not-configured":
         lines.append("Run `rexdeck setup` to select a Rex server first.")
     else:
-        lines.append("Enable or refresh one: rexdeck enable <plugin>")
+        lines.append("Enable or refresh: rexdeck enable <plugin> [<plugin> ...]")
     lines.append("Full details: add --json")
     return "\n".join(lines)
 

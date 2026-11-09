@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 — 2026-11-09
+
+- `rexdeck enable` and `rexdeck disable` accept several integrations at once (`rexdeck enable files git clickup`). Each is changed independently in the given order; a failure is reported in that integration's row while the others still change, and the command exits nonzero if any failed. Unknown names refuse the whole command before any change; repeated names count once; `--placement`/`--size` apply to every named integration (place them before or after the names). A single name keeps the single-integration JSON document.
+- At a terminal, `enable` and `disable` print the same readable table as `plugins`/`status`; `--json`, or piped output, keeps JSON.
+
 ## 0.3.0 — 2026-11-09
 
 - ClickUp: guided selection. On first run without a saved selection, the pane reads the account from the token and offers numbered, filterable menus for workspace, space and list (a single option at any step is chosen automatically and shown), then saves after confirmation and opens the list. `rexdeck clickup select` with no IDs runs the same menus; all three IDs still work for scripts, partial IDs and non-terminal guided runs are refused, and `q`, end of input or `Ctrl-C` saves nothing.

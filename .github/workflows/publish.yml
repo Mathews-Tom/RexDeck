@@ -1,4 +1,4 @@
-name: publish approved 0.3.0
+name: publish approved 0.4.0
 on:
   workflow_dispatch:
     inputs:
@@ -25,7 +25,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: pypi-0.3.0
+  group: pypi-0.4.0
   cancel-in-progress: false
 jobs:
   candidate:
@@ -51,7 +51,7 @@ jobs:
               throw new Error('Invalid artifact, hashes or repository approval URL');
             const repo = context.repo;
             const artifact = (await github.rest.actions.getArtifact({...repo, artifact_id: Number(i.artifact_id)})).data;
-            if (artifact.expired || artifact.name !== 'rexdeck-0.3.0' || artifact.workflow_run.head_sha !== i.commit)
+            if (artifact.expired || artifact.name !== 'rexdeck-0.4.0' || artifact.workflow_run.head_sha !== i.commit)
               throw new Error('Artifact does not match approved candidate');
             const run = (await github.rest.actions.getWorkflowRun({...repo, run_id: artifact.workflow_run.id})).data;
             if (run.head_repository.full_name !== context.payload.repository.full_name ||
@@ -65,8 +65,8 @@ jobs:
                 approvals[0].reviewers[0].type !== 'User' ||
                 approvals[0].reviewers[0].reviewer.login !== 'Mathews-Tom')
               throw new Error('pypi environment requires the repository owner as its sole reviewer');
-            let ref = (await github.rest.git.getRef({...repo, ref: 'tags/v0.3.0'})).data.object;
-            if (ref.type !== 'tag') throw new Error('v0.3.0 must be annotated');
+            let ref = (await github.rest.git.getRef({...repo, ref: 'tags/v0.4.0'})).data.object;
+            if (ref.type !== 'tag') throw new Error('v0.4.0 must be annotated');
             ref = (await github.rest.git.getTag({...repo, tag_sha: ref.sha})).data.object;
             if (ref.type !== 'commit' || ref.sha !== i.commit) throw new Error('Tag target mismatch');
             await core.summary.addHeading('Owner approval required: exact publication candidate')
@@ -106,8 +106,8 @@ jobs:
           import zipfile
 
           expected = {
-              'rexdeck-0.3.0-py3-none-any.whl': os.environ['WHEEL_SHA256'],
-              'rexdeck-0.3.0.tar.gz': os.environ['SDIST_SHA256'],
+              'rexdeck-0.4.0-py3-none-any.whl': os.environ['WHEEL_SHA256'],
+              'rexdeck-0.4.0.tar.gz': os.environ['SDIST_SHA256'],
           }
           with zipfile.ZipFile('candidate.zip') as archive:
               if sorted(archive.namelist()) != sorted(expected):
@@ -123,5 +123,5 @@ jobs:
       - name: Publish exact approved pair using PyPI Trusted Publishing
         run: >-
           uv publish --trusted-publishing always
-          approved/rexdeck-0.3.0.tar.gz
-          approved/rexdeck-0.3.0-py3-none-any.whl
+          approved/rexdeck-0.4.0.tar.gz
+          approved/rexdeck-0.4.0-py3-none-any.whl
