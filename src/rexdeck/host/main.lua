@@ -26,6 +26,15 @@ return function(opts)
     end
     paths[key] = value
   end
+  -- An `#!/usr/bin/env NAME` tool keeps the interpreter qualified with it: the app-started
+  -- server's PATH is minimal, so the pane gets that interpreter's directory first.
+  local path_prepend = nil
+  if opts.interpreter ~= nil then
+    local value = opts.interpreter
+    local directory = nonempty(value) and value:match('^(/.*)/[^/]+$')
+    if not directory then error(title .. ' requires an absolute interpreter path', 0) end
+    path_prepend = {directory}
+  end
   local args = opts.args
   if type(args) ~= 'table' then error(title .. ' requires an argument list', 0) end
   for index = 1, #args do
@@ -137,6 +146,7 @@ return function(opts)
             cwd = cwd,
             shell = 'none',
             login = false,
+            path_prepend = path_prepend,
             exit = {on_completion = true},
             command = command,
           },
