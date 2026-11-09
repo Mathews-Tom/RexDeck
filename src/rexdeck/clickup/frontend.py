@@ -203,8 +203,11 @@ class Status:
             text(data.get("color") or ""),
         )
 
-    def label(self) -> str:
-        return f"{self.name} (type={self.kind or 'unavailable'}, color={self.color or 'unavailable'})"
+
+@dataclass(frozen=True)
+class Assignee:
+    id: str
+    name: str
 
 
 @dataclass(frozen=True)
@@ -220,6 +223,9 @@ class Task:
     status_type: str = ""
     status_color: str = ""
     points: str = "-"
+    assignees: tuple[Assignee, ...] = ()
+    due: str = ""
+    priority: str = ""
 
     @classmethod
     def parse(cls, data: Mapping[str, object]) -> Task:
@@ -245,6 +251,17 @@ class Task:
             status.kind,
             status.color,
             sprint_points(data.get("points")),
+            tuple(
+                Assignee(
+                    text(item.get("id")),
+                    text(item.get("username") or ""),
+                )
+                for item in rows(data.get("assignees") or [])
+            ),
+            text(data["due_date"]) if data.get("due_date") is not None else "",
+            text(obj(data["priority"]).get("priority") or "")
+            if data.get("priority")
+            else "",
         )
 
 
@@ -292,6 +309,7 @@ class Comment:
     date: str
     body: str
     depth: int = 0
+    author: str = ""
 
 
 @dataclass(frozen=True)
@@ -306,6 +324,23 @@ class Listing:
     statuses: tuple[Status, ...]
     tasks: tuple[Task, ...]
     pages: int
+    workspace_name: str = ""
+    space_name: str = ""
+
+
+@dataclass(frozen=True)
+class Workspace:
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class ListChoice:
+    id: str
+    name: str
+    space_id: str
+    space_name: str
+    folder_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -338,6 +373,68 @@ class Service:
         self.selection = selection
         self.client = Client(selection)
 
+    def workspaces(self) -> tuple[Workspace, ...]:
+        """Enumerate only workspaces visible to the explicitly bound account."""
+        account = text(obj(self.client.get("/user").get("user")).get("id"))
+        if account != self.selection.account:
+            raise ClickUpError(
+                "account-mismatch", "Credential account differs from explicit selection"
+            )
+        return tuple(
+            Workspace(text(item.get("id")), text(item.get("name") or ""))
+            for item in rows(self.client.get("/team").get("teams"))
+        )
+
+    def hierarchy(self, team_id: str | None = None) -> tuple[ListChoice, ...]:
+        """Read foldered and folderless lists in an accessible workspace."""
+        team = self.selection.team if team_id is None else team_id
+        if team not in {workspace.id for workspace in self.workspaces()}:
+            raise ClickUpError(
+                "permission", "Selected workspace is not accessible to this account"
+            )
+        unarchived = {"archived": "false"}
+        choices: dict[str, ListChoice] = {}
+        for space in rows(
+            self.client.get(f"/team/{team}/space", unarchived).get("spaces")
+        ):
+            if space.get("archived"):
+                continue
+            space_id = text(space.get("id"))
+            space_name = text(space.get("name") or "")
+            for folder in rows(
+                self.client.get(f"/space/{space_id}/folder", unarchived).get("folders")
+            ):
+                if folder.get("archived"):
+                    continue
+                for entry in rows(folder.get("lists") or []):
+                    if not entry.get("archived"):
+                        choice = ListChoice(
+                            text(entry.get("id")),
+                            text(entry.get("name") or ""),
+                            space_id,
+                            space_name,
+                            text(folder.get("name") or ""),
+                        )
+                        choices[choice.id] = choice
+            for entry in rows(
+                self.client.get(f"/space/{space_id}/list", unarchived).get("lists")
+            ):
+                if not entry.get("archived"):
+                    choice = ListChoice(
+                        text(entry.get("id")),
+                        text(entry.get("name") or ""),
+                        space_id,
+                        space_name,
+                    )
+                    choices[choice.id] = choice
+        return tuple(choices.values())
+
+    def task_statuses(self, task: Task) -> tuple[Status, ...]:
+        """Read exact native statuses from this task's home list."""
+        self.authorize()
+        metadata = self.client.get(f"/list/{task.list_id}")
+        return tuple(Status.parse(item) for item in rows(metadata.get("statuses")))
+
     def authorize(self) -> Mapping[str, object]:
         selected = self.selection
         if (
@@ -367,6 +464,14 @@ class Service:
 
     def listing(self) -> Listing:
         metadata = self.authorize()
+        workspace_name = next(
+            (
+                workspace.name
+                for workspace in self.workspaces()
+                if workspace.id == self.selection.team
+            ),
+            "",
+        )
         page_count = 0
 
         def observed_page() -> None:
@@ -385,6 +490,8 @@ class Service:
             tuple(Status.parse(item) for item in rows(metadata.get("statuses"))),
             tuple(tasks.values()),
             page_count,
+            workspace_name,
+            text(obj(metadata.get("space")).get("name") or ""),
         )
 
     def detail(self, task: Task, identity: str) -> Detail:
@@ -410,6 +517,7 @@ class Service:
                     for part in rows(item.get("comment") or [])
                 ),
                 depth,
+                text(obj(item.get("user") or {}).get("username") or ""),
             )
             for item, depth in reads.comment_tree(self.client, result.id)
         )
@@ -586,6 +694,36 @@ class Controller:
     def snapshot(self) -> View:
         with self.lock:
             return self.view
+
+    def read[T](
+        self, operation: Callable[[Service], T], *, current_scope: bool
+    ) -> concurrent.futures.Future[T]:
+        """Run dialog reads without hiding authoritative access failures."""
+        with self.lock:
+            tag = self.generation, self.request
+            service = self.service
+
+            def load() -> T:
+                try:
+                    return operation(service)
+                except (ClickUpError, diagnostics.EngineError) as error:
+                    finding = (
+                        engine_error(error)
+                        if isinstance(error, diagnostics.EngineError)
+                        else error
+                    )
+                    authoritative = finding.state in {
+                        "account-mismatch",
+                        "authentication",
+                        "missing-credential",
+                    } or (current_scope and finding.state == "permission")
+                    with self.lock:
+                        if authoritative and tag == (self.generation, self.request):
+                            self.request += 1
+                            self._error(finding)
+                    raise
+
+            return self.pool.submit(load)
 
     def _set(self, **changes: Unpack[_ViewChanges]) -> None:
         self.view = replace(self.view, **changes, revision=self.view.revision + 1)
@@ -1027,69 +1165,6 @@ def configure(argv: list[str]) -> int:
         return 1
 
 
-def render(view: View, query: str, page: int) -> None:
-    selected = view.selection
-    print(
-        f"\nClickUp [{view.state.upper()}] account={selected.account} team={selected.team} list={selected.list}"
-    )
-    if view.error:
-        print(f"{view.error_state.upper()}: {view.error}")
-    listing = view.listing
-    if listing:
-        if view.state == "loading":
-            print("Previous data retained while refreshing; opener disabled")
-        visible = [
-            task
-            for task in listing.tasks
-            if query.casefold()
-            in f"{task.name} {task.status} {task.id} {task.custom_id}".casefold()
-        ]
-        print(
-            f"{listing.name}: {len(listing.tasks)} tasks / {listing.pages} API pages; FULL-LIST FILTER {query!r}: {len(visible)} matches; display page {page + 1}"
-        )
-        print(
-            "Native list statuses: "
-            + ", ".join(status.label() for status in listing.statuses)
-        )
-        for task in visible[page * 20 : (page + 1) * 20]:
-            print(f"{task.id} {task.custom_id or '-'} [{task.status}] {task.name}")
-        if not visible:
-            print("EMPTY: no matching tasks")
-    detail = view.detail
-    if detail:
-        task = detail.task
-        print(
-            f"\nTASK {task.id} custom={task.custom_id or '-'} native status={task.status} (type={task.status_type or 'unavailable'}, color={task.status_color or 'unavailable'}) points={task.points} home-list={task.list_id} updated={task.updated}"
-        )
-        print(task.name + "\n" + task.description)
-        print(
-            f"COMMENTS: {len(detail.comments)}; complete paginated history and replies"
-        )
-        for comment in detail.comments:
-            print(f"{'  ' * comment.depth}[{comment.id} {comment.date}] {comment.body}")
-    if view.output:
-        print("\nENGINE:\n" + view.output)
-    if view.pending is not None:
-        change = view.pending
-        print(
-            f"\nPROPOSED {change.action}: account={change.selection.account} "
-            f"team={change.selection.team} list={change.selection.list} task={change.task}"
-        )
-        print(change.text)
-        print("EXACT DIFF: " + json.dumps(change.mutation.diff, sort_keys=True))
-        print(f"Field concurrency digest: {change.mutation.field_digest}")
-        print(f"To apply ONCE: confirm {change.task} {change.approval}")
-        print("Selection, refresh or cancel discards this approval")
-    print(
-        "Commands: next | prev | filter TEXT | select INTERNAL/CUSTOM-ID | open | refresh | "
-        "sync | tasks | task | sprint | search TEXT | status NATIVE-STATUS | assignee ID/NAME | "
-        "due YYYY-MM-DD | description MARKDOWN | points NUMBER | field NAME=VALUE | comment TEXT | "
-        "confirm TASK-ID PROPOSAL-CODE | cancel | space [NAME] | "
-        "switch ACCOUNT TEAM LIST [ENV-NAME] | quit",
-        flush=True,
-    )
-
-
 def _guided_select(credential_env: str) -> int:
     """Interactive `select`; refuses without a terminal rather than guessing."""
     if not sys.stdin.isatty():
@@ -1244,102 +1319,14 @@ def main() -> int:
             )
             return 1
     controller = Controller(selected)
-    query, page, revision = "", 0, -1
-    controller.refresh()
-    try:
-        with selectors.DefaultSelector() as selector:
-            selector.register(sys.stdin, selectors.EVENT_READ)
-            while True:
-                view = controller.snapshot()
-                if view.revision != revision:
-                    render(view, query, page)
-                    revision = view.revision
-                if not selector.select(0.1):
-                    continue
-                line = sys.stdin.readline()
-                if not line:
-                    break
-                command, _, argument = line.strip().partition(" ")
-                try:
-                    if command in ("quit", "q"):
-                        break
-                    if command == "switch":
-                        parts = argument.split()
-                        if len(parts) not in (3, 4):
-                            raise ValueError(
-                                "switch requires ACCOUNT TEAM LIST [ENV-NAME]"
-                            )
-                        selection = Selection(*parts)
-                        # This is a pane-local switch, not a silent rewrite of saved selection.
-                        controller.switch(selection)
-                        query, page = "", 0
-                        print(
-                            "\x1b[3J\x1b[2J\x1b[HSelection changed: tasks/detail/comments/link cleared",
-                            flush=True,
-                        )
-                    elif command == "space":
-                        if view.state == "writing":
-                            raise ValueError(
-                                "Wait for the confirmed write to finish before changing space"
-                            )
-                        from rexdeck.clickup import picker
+    from rexdeck.clickup import tui
 
-                        # Prompts read this pane's input; the loop waits meanwhile.
-                        try:
-                            chosen = picker.switch_space(view.selection, argument)
-                        except picker.Cancelled:
-                            print("Space unchanged.", flush=True)
-                        else:
-                            controller.switch(chosen)
-                            query, page = "", 0
-                            print(
-                                "\x1b[3J\x1b[2J\x1b[HSpace changed: tasks/detail/comments/link cleared",
-                                flush=True,
-                            )
-                    elif command == "refresh":
-                        controller.refresh()
-                    elif command == "select":
-                        controller.select(argument)
-                    elif command in {"sync", "tasks", "task", "sprint", "search"}:
-                        controller.inspect(command, argument)
-                    elif command in WRITE_ACTIONS:
-                        controller.stage(command, argument)
-                    elif command == "confirm":
-                        parts = argument.split()
-                        if len(parts) != 2:
-                            raise ValueError(
-                                "confirm requires the exact TASK-ID and PROPOSAL-CODE shown"
-                            )
-                        controller.confirm(*parts)
-                    elif command == "cancel":
-                        controller.cancel()
-                    elif command == "open":
-                        if view.state != "ready" or view.detail is None:
-                            raise ValueError(
-                                "Select a fresh task first; no opener target retained"
-                            )
-                        open_task(view.detail.task, view.selection.credential_env)
-                        print("Opened validated task deep link", flush=True)
-                    elif command == "filter":
-                        query, page = clean(argument), 0
-                        render(view, query, page)
-                    elif command in ("next", "prev"):
-                        page = max(0, page + (1 if command == "next" else -1))
-                        render(view, query, page)
-                    elif command:
-                        raise ValueError("Unknown ClickUp command")
-                except (
-                    ValueError,
-                    ClickUpError,
-                    OSError,
-                    subprocess.SubprocessError,
-                ) as error:
-                    print("COMMAND ERROR: " + clean(str(error)), flush=True)
+    try:
+        return tui.run(controller)
     except KeyboardInterrupt:
         return 0
     finally:
         controller.close()
-    return 0
 
 
 if __name__ == "__main__":

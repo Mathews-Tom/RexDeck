@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import concurrent.futures
-import io
 import json
 import os
 import sys
@@ -11,7 +10,7 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Iterator
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,6 +56,7 @@ class Backend:
         self.ecode: str | None = None
         self.comments_requested = 0
         self.changed = False
+        self.routes: dict[str, dict[str, object]] = {}
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
@@ -74,6 +74,8 @@ class Backend:
                 json={"ECODE": self.ecode},
                 headers={"Retry-After": "30"} if self.fail == "429" else {},
             )
+        if path in self.routes:
+            return httpx.Response(200, json=self.routes[path])
         data: dict[str, object]
         if path == "/user":
             data = {
@@ -82,14 +84,19 @@ class Backend:
                 }
             }
         elif path == "/team":
-            data = {"teams": [{"id": "10"}, {"id": "20"}]}
+            data = {
+                "teams": [
+                    {"id": "10", "name": "Engineering workspace"},
+                    {"id": "20", "name": "Sales workspace"},
+                ]
+            }
         elif path.endswith("/space"):
             data = {"spaces": [{"id": "1000"}]}
         elif path in ("/list/100", "/list/200"):
             data = {
                 "id": path.rsplit("/", 1)[-1],
                 "name": "Selected list",
-                "space": {"id": "1000"},
+                "space": {"id": "1000", "name": "Product"},
                 "statuses": [
                     {"status": "native review", "type": "custom", "color": "#123456"}
                 ],
@@ -189,7 +196,7 @@ def test_all_pages_deduplicated_and_custom_id_detail_comments() -> None:
         assert older_request == {"start": ["1976"], "start_id": ["24"]}
 
 
-def test_controller_comments_merge_refresh_and_filter_output() -> None:
+def test_controller_comments_merge_and_refresh_selected_detail() -> None:
     backend = Backend()
     with backend_environment(backend):
         controller = cu.Controller(cu.Selection("1", "10", "100", "CLICKUP_TEST_A"))
@@ -198,11 +205,6 @@ def test_controller_comments_merge_refresh_and_filter_output() -> None:
             settled(controller.select("PROJ-1"))
             detail = controller.snapshot().detail
             assert detail is not None and len(detail.comments) == 28
-            output = io.StringIO()
-            with redirect_stdout(output):
-                cu.render(controller.snapshot(), "Last page", 0)
-            assert "FULL-LIST FILTER 'Last page': 1 matches" in output.getvalue()
-            assert "c - [native review] Last page" in output.getvalue()
             backend.changed = True
             settled(controller.refresh())
             view = controller.snapshot()
@@ -937,3 +939,208 @@ def test_labels_are_single_line_and_invisible_formats_are_removed() -> None:
     assert parsed.description == "description\nstill multiline"
     assert single_line("one\r\ntwo\rthree\tfour") == "one two three four"
     assert clean("normal\u202e\u2067\u200b\ufeff") == "normal"
+
+
+def test_optional_display_metadata_is_real_sanitized_and_not_invented() -> None:
+    payload = task("a")
+    payload.update(
+        assignees=[{"id": 7, "username": "Dev\n\x1b[31mAlice\u202e"}],
+        due_date="1796083200000",
+        priority={"id": "2", "priority": "High\n\u200b"},
+    )
+    parsed = cu.Task.parse(payload)
+    assert parsed.assignees == (cu.Assignee("7", "Dev Alice"),)
+    assert parsed.due == "1796083200000"
+    assert parsed.priority == "High "
+    minimal = task("b")
+    for key in ("assignees", "due_date", "priority"):
+        minimal.pop(key, None)
+    absent = cu.Task.parse(minimal)
+    assert absent.assignees == () and absent.due == "" and absent.priority == ""
+    backend = Backend()
+    backend.routes["/task/a/comment"] = {
+        "comments": [
+            {
+                "id": "1",
+                "date": "2000",
+                "comment_text": "Body",
+                "user": {"username": "Author\n\x1b]52;c;evil\x07\u202e"},
+            },
+            {"id": "2", "date": "1000", "comment_text": "No author"},
+        ]
+    }
+    with backend_environment(backend):
+        service = cu.Service(cu.Selection("1", "10", "100", "CLICKUP_TEST_A"))
+        try:
+            listing = service.listing()
+            assert listing.workspace_name == "Engineering workspace"
+            assert listing.space_name == "Product"
+            detail = service.detail(listing.tasks[0], "a")
+            assert {comment.id: comment.author for comment in detail.comments} == {
+                "1": "Author ",
+                "2": "",
+            }
+        finally:
+            service.client.close()
+
+
+def test_hierarchy_enumerates_foldered_and_folderless_unarchived_lists() -> None:
+    backend = Backend()
+    backend.routes.update(
+        {
+            "/team/20/space": {
+                "spaces": [
+                    {"id": "2000", "name": "Sales\n\u202e"},
+                    {"id": "3000", "name": "Old", "archived": True},
+                ]
+            },
+            "/space/2000/folder": {
+                "folders": [
+                    {
+                        "name": "Deals\x1b[31m",
+                        "lists": [
+                            {"id": "201", "name": "Pipeline"},
+                            {"id": "202", "name": "Old", "archived": True},
+                        ],
+                    },
+                    {"name": "Old", "archived": True, "lists": [{"id": "203"}]},
+                ]
+            },
+            "/space/2000/list": {
+                "lists": [
+                    {"id": "204", "name": "Inbox"},
+                    {"id": "205", "archived": True},
+                ]
+            },
+        }
+    )
+    with backend_environment(backend):
+        service = cu.Service(cu.Selection("1", "10", "100", "CLICKUP_TEST_A"))
+        try:
+            assert service.workspaces() == (
+                cu.Workspace("10", "Engineering workspace"),
+                cu.Workspace("20", "Sales workspace"),
+            )
+            assert service.hierarchy("20") == (
+                cu.ListChoice("201", "Pipeline", "2000", "Sales ", "Deals"),
+                cu.ListChoice("204", "Inbox", "2000", "Sales "),
+            )
+            hierarchy_calls = [
+                query
+                for path, query, _ in backend.calls
+                if path.startswith(("/team/20/", "/space/"))
+            ]
+            assert hierarchy_calls and all(
+                query == {"archived": ["false"]} for query in hierarchy_calls
+            )
+        finally:
+            service.client.close()
+
+
+@pytest.mark.parametrize("operation", ["workspaces", "hierarchy"])
+def test_hierarchy_rejects_another_token_account_before_discovery(
+    operation: str,
+) -> None:
+    backend = Backend()
+    with backend_environment(backend):
+        service = cu.Service(cu.Selection("2", "10", "100", "CLICKUP_TEST_A"))
+        try:
+            with pytest.raises(cu.ClickUpError) as raised:
+                if operation == "workspaces":
+                    service.workspaces()
+                else:
+                    service.hierarchy()
+            assert raised.value.state == "account-mismatch"
+            assert [path for path, _, _ in backend.calls] == ["/user"]
+        finally:
+            service.client.close()
+
+
+@pytest.mark.parametrize("team", [None, "99"])
+def test_hierarchy_refuses_inaccessible_selected_or_requested_workspace(
+    team: str | None,
+) -> None:
+    backend = Backend()
+    with backend_environment(backend):
+        service = cu.Service(cu.Selection("1", "99", "100", "CLICKUP_TEST_A"))
+        try:
+            with pytest.raises(cu.ClickUpError) as raised:
+                service.hierarchy(team)
+            assert raised.value.state == "permission"
+            assert [path for path, _, _ in backend.calls] == ["/user", "/team"]
+        finally:
+            service.client.close()
+
+
+def test_native_status_choices_use_task_home_list_not_tracked_list() -> None:
+    backend = Backend()
+    backend.routes["/list/300"] = {
+        "statuses": [{"status": "Home\nreview", "type": "custom", "color": "#abcdef"}]
+    }
+    with backend_environment(backend):
+        service = cu.Service(cu.Selection("1", "10", "100", "CLICKUP_TEST_A"))
+        try:
+            home_task = replace(cu.Task.parse(task("a")), list_id="300")
+            assert service.task_statuses(home_task) == (
+                cu.Status("Home review", "custom", "#abcdef"),
+            )
+        finally:
+            service.client.close()
+
+
+@pytest.mark.parametrize("failure", ["401", "403"])
+@pytest.mark.parametrize("current_scope", [False, True])
+def test_dialog_reads_clear_authoritative_access_failures_only(
+    failure: str, current_scope: bool
+) -> None:
+    backend = Backend()
+    with backend_environment(backend):
+        controller = cu.Controller(cu.Selection("1", "10", "100", "CLICKUP_TEST_A"))
+        try:
+            settled(controller.refresh())
+            settled(controller.select("a"))
+            backend.fail = failure
+            future = controller.read(
+                lambda service: service.hierarchy("20"), current_scope=current_scope
+            )
+            with pytest.raises(diagnostics.EngineError):
+                future.result(timeout=5)
+            view = controller.snapshot()
+            if failure == "401" or current_scope:
+                assert view.listing is None and view.detail is None
+                assert view.state == (
+                    "authentication" if failure == "401" else "permission"
+                )
+            else:
+                assert view.state == "ready"
+                assert view.detail is not None and view.detail.task.id == "a"
+        finally:
+            controller.close()
+
+
+def test_late_dialog_access_failure_cannot_clear_a_newer_refresh() -> None:
+    backend = Backend()
+    started, release = threading.Event(), threading.Event()
+    with backend_environment(backend):
+        controller = cu.Controller(cu.Selection("1", "10", "100", "CLICKUP_TEST_A"))
+
+        def denied(service: cu.Service) -> None:
+            started.set()
+            assert release.wait(5)
+            raise cu.ClickUpError("permission", "Old dialog request was denied")
+
+        try:
+            settled(controller.refresh())
+            future = controller.read(denied, current_scope=True)
+            assert started.wait(5)
+            settled(controller.refresh())
+            release.set()
+            with pytest.raises(cu.ClickUpError):
+                future.result(timeout=5)
+            view = controller.snapshot()
+            assert view.state == "ready"
+            assert view.listing is not None and view.listing.tasks[0].id == "a"
+            assert view.error == ""
+        finally:
+            release.set()
+            controller.close()
