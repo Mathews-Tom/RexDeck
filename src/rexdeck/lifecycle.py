@@ -247,8 +247,13 @@ def _interpreter(executable: str) -> str | None:
     such as tokscale would otherwise fail in the pane with `env: node: No such
     file or directory`. Absolute shebangs and binaries need no binding.
     """
-    with open(executable, "rb") as handle:
-        first = handle.readline(512)
+    try:
+        with open(executable, "rb") as handle:
+            first = handle.readline(512)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot read interpreter line of {executable}: {exc}"
+        ) from exc
     if not first.startswith(b"#!"):
         return None
     words = first[2:].decode("utf-8", errors="replace").split()

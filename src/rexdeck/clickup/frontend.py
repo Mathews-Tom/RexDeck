@@ -1153,7 +1153,8 @@ def shell_credential(name: str) -> str:
         # pipe open long after the shell printed the value.
         with selectors.DefaultSelector() as selector:
             selector.register(child.stdout, selectors.EVENT_READ)
-            while output.count(mark) < 2:
+            # Startup files may print a lot; a token never needs more than this.
+            while output.count(mark) < 2 and len(output) < 1 << 20:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 or not selector.select(remaining):
                     break

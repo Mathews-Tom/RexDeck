@@ -181,6 +181,37 @@ def test_cancelling_a_space_switch_keeps_the_saved_list(
     assert cu.load_selection() == current
 
 
+def test_a_space_switch_under_another_account_saves_nothing(config: Path) -> None:
+    current = cu.Selection("7", "900", "101", "CLICKUP_API_TOKEN")
+    cu.save_selection(current)
+
+    with pytest.raises(cu.ClickUpError) as raised:
+        picker.switch_space(
+            current, "", lambda _: None, scripted()[1], FakeClient(hierarchy())
+        )
+
+    assert raised.value.state == "account-mismatch"
+    assert cu.load_selection() == current
+
+
+def test_an_unmatched_space_name_asks_even_for_the_only_space(config: Path) -> None:
+    only = {"/team/900/space": {"spaces": [{"id": "10", "name": "Engineering"}]}}
+    said: list[str] = []
+    prompts, ask = scripted("1", "3")
+
+    chosen = picker.switch_space(
+        cu.Selection("42", "900", "101"),
+        "zzz",
+        said.append,
+        ask,
+        FakeClient(hierarchy(**only)),
+    )
+
+    assert chosen.list == "103"
+    assert "No space matches 'zzz'; showing all." in said
+    assert prompts[0] == "space number, text to filter, or q to cancel: "
+
+
 @pytest.mark.parametrize(
     ("argv", "error"),
     [

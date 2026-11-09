@@ -54,9 +54,6 @@ def _choose(
     """
     if not options:
         raise ClickUpError("empty", f"No {kind}s are available to this account")
-    if len(options) == 1:
-        say(f"{kind.capitalize()}: {options[0][1]} (the only one available)")
-        return options[0]
     shown = list(options)
     if query:
         matches = [item for item in options if query.casefold() in item[1].casefold()]
@@ -66,7 +63,11 @@ def _choose(
         if matches:
             shown = matches
         else:
+            # Never take the only option for a query it does not match; ask.
             say(f"No {kind} matches {query!r}; showing all.")
+    elif len(options) == 1:
+        say(f"{kind.capitalize()}: {options[0][1]} (the only one available)")
+        return options[0]
     while True:
         say(f"\nChoose a {kind}:")
         for number, (_, label) in enumerate(shown, 1):
@@ -213,6 +214,12 @@ def switch_space(
     """
     ask = _interruptible(ask)
     with _reader(selection.credential_env, client) as session:
+        # The token must still name the selection's account before it is rewritten.
+        if text(obj(session.get("/user").get("user")).get("id")) != selection.account:
+            raise ClickUpError(
+                "account-mismatch",
+                "Credential account differs from the pane's selection",
+            )
         _, space_name, listing, list_name = _space_and_list(
             say, ask, session, selection.team, query
         )
