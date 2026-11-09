@@ -331,26 +331,35 @@ def test_guided_select_command_reports_its_outcome(
     assert cu.configure(["select", "--credential-env", "CLICKUP_OTHER"]) == code
 
 
-def test_first_pane_run_opens_the_list_it_just_chose(
+def test_first_pane_run_launches_ui_with_confirmed_selection_and_closes_it(
     config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    chosen = cu.Selection("42", "900", "102", "CLICKUP_API_TOKEN")
-    opened: list[cu.Selection] = []
+    from rexdeck.clickup import tui
 
-    class Opened(Exception):
-        pass
+    guided = picker.guided
+    launched: list[cu.Controller] = []
 
-    def controller(selection: cu.Selection) -> object:
-        opened.append(selection)
-        raise Opened
+    def choose() -> cu.Selection:
+        return guided(
+            lambda _: None,
+            scripted("1", "2", "")[1],
+            client=FakeClient(hierarchy()),
+        )
 
-    monkeypatch.setattr(picker, "guided", lambda *a, **k: chosen)
-    monkeypatch.setattr(cu, "Controller", controller)
+    def run(controller: cu.Controller) -> int:
+        launched.append(controller)
+        assert controller.snapshot().selection == cu.load_selection()
+        assert controller.snapshot().selection.list == "102"
+        return 0
+
+    monkeypatch.setattr(picker, "guided", choose)
+    monkeypatch.setattr(tui, "run", run)
     monkeypatch.setattr(sys, "stdin", _Terminal())
 
-    with pytest.raises(Opened):
-        cu.main()
-    assert opened == [chosen]
+    assert cu.main() == 0
+    assert len(launched) == 1
+    with pytest.raises(RuntimeError, match="shutdown"):
+        launched[0].pool.submit(lambda: None)
 
 
 def test_a_dangling_selection_symlink_is_not_treated_as_first_run(

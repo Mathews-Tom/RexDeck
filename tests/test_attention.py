@@ -10,6 +10,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -1244,14 +1245,18 @@ def test_binding_timeout_after_capture_clears_focusable_fields(
     assert not backend.focused
 
 
+@pytest.mark.parametrize("late_binding", [False, True])
 def test_overall_hook_deadline_interrupts_native_subprocess_cleanup(
     native: tuple[Native, settings.SavedTarget],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    late_binding: bool,
 ) -> None:
     _, target = native
     hook_environment(monkeypatch, target)
     read_fd, write_fd = os.pipe()
+    release_wait = threading.Event()
+    reaped = threading.Event()
 
     class SlowCleanup:
         def __init__(self) -> None:
@@ -1265,7 +1270,8 @@ def test_overall_hook_deadline_interrupts_native_subprocess_cleanup(
             self.killed = True
 
         def wait(self, timeout: float | None = None) -> int:
-            time.sleep(2)
+            release_wait.wait(2)
+            reaped.set()
             return 0
 
     child = SlowCleanup()
@@ -1281,12 +1287,26 @@ def test_overall_hook_deadline_interrupts_native_subprocess_cleanup(
     monkeypatch.setattr(attention, "_status", blocked)
     monkeypatch.setattr(attention, "_HOOK_SECONDS", 0.18)
     monkeypatch.setattr(attention, "_BINDING_SECONDS", 0.03)
+    if late_binding:
+        original_timer = signal.setitimer
+
+        def delayed_timer(
+            which: int, seconds: float, interval: float = 0
+        ) -> tuple[float, float]:
+            if which == signal.ITIMER_REAL and seconds == 0.03:
+                seconds = 0.25  # Deliver the binding alarm after the overall deadline.
+            return original_timer(which, seconds, interval)
+
+        monkeypatch.setattr(signal, "setitimer", delayed_timer)
     try:
         started = time.monotonic()
         assert invoke_hook(monkeypatch, json.dumps(hook_payload()).encode()) == 0
         assert time.monotonic() - started < 0.8
         assert child.killed
+        assert not reaped.is_set()
     finally:
+        release_wait.set()
+        assert reaped.wait(1)
         child.stdout.close()
         os.close(write_fd)
     assert capsys.readouterr() == ("", "")

@@ -1,6 +1,6 @@
 # ClickUp
 
-New in 0.2.0. Python 3.12+, Rex, httpx and PyYAML are required; the Python dependencies are installed with RexDeck. This integration owns its frontend and vendors the owner's MIT ClickUp engine. Other integrations still host unmodified upstream tools. It is **write-capable**, not a read-only wrapper or a sandbox.
+Python 3.12+, Rex, Textual, httpx and PyYAML are required; the Python dependencies are installed with RexDeck. This integration owns its terminal frontend and vendors the owner's MIT ClickUp engine. Other integrations still host unmodified upstream tools. It is **write-capable**, not a read-only wrapper or a sandbox.
 
 ## Select and enable
 
@@ -25,41 +25,62 @@ rexdeck clickup status
 
 Invoke **RexDeck ClickUp** from the native palette. The shared host runs its installed interpreter as `python -I -m rexdeck.clickup`, preserves placement/size, and returns to the exact invoking terminal on quit. No external ClickUp executable or upstream-version probe is needed. The invoking directory is not an account selection.
 
-## Reads and navigation
+## Task desk
 
-- `next` / `prev`: display pages of 20 loaded rows. Task API pages include closed tasks, subtasks and tasks in multiple lists; duplicate IDs are merged. Missing `last_page` metadata triggers another-page probing until an empty result. A 50-page safety ceiling is an explicit error, never a silently complete prefix.
-- `filter TEXT`: case-insensitive **full-list** filtering over task names, native statuses, internal/custom IDs. `filter` clears it. This is not workspace search.
-- `select INTERNAL_ID` / `select CUSTOM_ID`: inspect a loaded-list member. Custom lookups include `custom_task_ids=true` and selected `team_id`; canonical identity must match. Description, native status name/type/color, home list and update time are retained without inventing generic status mappings.
-- Comments load through all older pages with paired `start`/`start_id` cursors, deduplication and loop detection; threaded replies are displayed indented.
-- `open`: send the selected task's canonical `https://app.clickup.com/t/INTERNAL_ID` link as one argv element to the OS browser opener, without a shell. Never automatic. `BROWSER` may name one absolute executable, not a command template. Loading/stale views cannot open links.
-- `refresh`: reload the complete list and selected detail/comment history. Old data is never presented as fresh after failure.
-- `sync`: explicitly discover hierarchy, members and per-list custom-field definitions in the selected space; write an identity/workspace/list-scoped local registry. This changes local metadata only, not ClickUp. It is required before engine projections or writes; it never happens silently.
-- `tasks`, `task`, `sprint`, `search TEXT`: expose the engine's task table, selected-task projection, native-status rollup and task-only workspace search. Search fetches the registry's space-scoped task pages and matches names locally; it does not search documents, dashboards or chats. Engine diagnostics remain visible. See [verb reference](references/verbs.md).
-- `space [NAME]`: track a list in another space of the same account and workspace. The pane shows the workspace's spaces (`NAME` narrows them; a single match is taken directly), then that space's lists, using the same numbered, filterable menus as first run; spaces without lists drop out. The chosen list opens immediately and becomes the saved selection, so the next pane opens there. `q` keeps the current list. Clears rows, detail, comments, link, proposal and terminal scrollback like `switch`.
-- `switch ACCOUNT WORKSPACE LIST [ENV_NAME]`: pane-local selection, without rewriting saved settings or globally switching accounts. Clears rows, detail, comments, link, proposal and terminal scrollback. Generation tags discard late results. Different accounts use separately inherited environment references.
-- `quit` / `q`: leave the pane and return to its exact captured Rex origin.
+The pane is an interactive task browser, not a scrolling command transcript. A selectable queue sits beside a Markdown task reader when there is enough width. Narrow panes show the queue or the selected task; `Esc` returns to the queue. Descriptions and threaded comments scroll inside the reader. Resizing keeps the current task and filter.
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓`, `j` / `k` | Move through tasks |
+| `Enter` | Open the highlighted task |
+| `/` | Focus the current-list filter |
+| `l` | Browse workspaces, spaces, folders and lists |
+| `a` | Open task actions, engine reads, metadata sync and advanced selection |
+| `r` | Refresh the complete list and selected task |
+| `o` | Open the selected task's validated ClickUp link |
+| `m` | Toggle tasks assigned to the authenticated account |
+| `c` | Toggle closed tasks |
+| `Esc` | Cancel a dialog or return to the queue |
+| `?` | Show help |
+| `q` | Quit and return to the exact captured Rex origin |
+
+Typing in a filter or editor does not invoke single-letter shortcuts. The footer shows contextual essentials; help and the action menu expose less frequent operations.
+
+### Reads and scope
+
+- The filter matches the complete loaded list, not just visible rows, using task names, native statuses and internal/custom IDs. This is not workspace search.
+- Task API pages include closed tasks, subtasks and tasks in multiple lists; duplicate IDs are merged. Missing `last_page` metadata triggers another-page probing until an empty result. The 50-page safety ceiling is an explicit error, never a silently complete prefix.
+- Task details retain native status names and colours, home list, update time, Sprint Points, assignees, due date and priority when present. Missing metadata stays unset. Comments load all older pages with paired `start`/`start_id` cursors, deduplication and loop detection; authors, dates and indented replies stay with the conversation.
+- The hierarchy picker browses every accessible space in the chosen workspace and includes foldered and folderless lists. Same-named folders remain separate. Selecting a list saves that choice for the next pane. Cancel keeps the current selection and stops subsequent discovery reads; an already dispatched request may finish. This is **one list at a time**, not an aggregate of all workspace tasks.
+- Advanced selection retains pane-local account/workspace/list/environment-reference switching without globally switching accounts. A selection change clears previous rows, detail, comments, opener and proposal; generation tags discard late results.
+- Browser opening uses only the selected task's canonical `https://app.clickup.com/t/INTERNAL_ID` link, passed as one argv element to the OS opener without a shell. It is never automatic. `BROWSER` may name one absolute executable, not a command template. Loading/stale views cannot open links, and rendered Markdown does not bypass this checked opener.
+- Refresh reloads the complete list and selected detail/comment history, retaining the selected identity when it remains present. Failures never present retained data as fresh.
+
+The action menu exposes **Sync registry**, **Task report**, **Selected task report**, **Sprint report** and **Search** in scrollable result views. Sync explicitly discovers hierarchy, members and per-list custom-field definitions in the selected space and writes an identity/workspace/list-scoped local registry. It changes local metadata only, not ClickUp; it is required before engine projections or writes and never runs silently. Engine search fetches the registry's space-scoped task pages and matches names locally; it does not search documents, dashboards or chats. See the [engine verb reference](references/verbs.md).
 
 ## Deliberate writes
 
-Select a fresh task and run `sync` first. The following commands **propose**, but do not apply, one engine mutation:
+Select a fresh task and explicitly sync metadata first. The action menu offers:
 
-- `status EXACT-NATIVE-STATUS`: use an exact status from the task's home list, not an invented workflow category.
-- `assignee ID/USERNAME/me`: replace the task's assignee set with the resolved member, as the engine's touch contract specifies.
-- `due YYYY-MM-DD`: set the due date.
-- `description MARKDOWN`: replace the whole task description with one line of Markdown. The proposal shows the current Markdown it replaces.
-- `points NUMBER`: set native Sprint Points (a finite number ≥ 0). Requires the workspace's Sprint Points ClickApp, and ClickUp only accepts values on the workspace's configured point scale: a value outside it is refused (`REJECTED`, HTTP 400 `ITEM_223`) and nothing is applied. The task detail shows `points=` after refresh.
-- `field NAME=VALUE`: set a supported list-specific custom field. Type/option validation comes from the engine; unsupported field types are refused.
-- `comment TEXT`: append one plain-text comment; `notify_all` is false.
+- **Status**: choose an exact native status from the task's home list, not a generic workflow category.
+- **Assignee**: replace the task's assignee set using a member ID, username or `me`, matching the engine's touch contract.
+- **Due date**: enter `YYYY-MM-DD`.
+- **Description**: edit replacement Markdown; the review includes the current Markdown it replaces.
+- **Sprint Points**: enter a finite number ≥ 0. The workspace must have the Sprint Points ClickApp, and ClickUp accepts only its configured point scale. Values outside that scale are refused (`REJECTED`, HTTP 400 `ITEM_223`) without applying a change.
+- **Custom field**: enter `NAME=VALUE`. The engine validates supported list-specific types/options and refuses unsupported types.
+- **Comment**: append plain text; `notify_all` is false.
 
-The pane displays exact selection/task/diff, field concurrency digest and a random-nonce-bound proposal code. Apply once using `confirm CANONICAL-TASK-ID PROPOSAL-CODE`. The code hashes selection, task, action, value, full diff, field digest and nonce: replacing a proposal invalidates older approvals. The engine independently rechecks field/thread concurrency. Selection/refresh/cancel/errors invalidate proposals. Every write rechecks approval after pacing, immediately before send. Refresh is refused while writing so its outcome remains visible.
+Submitting an editor **proposes** a change; it does not apply it. The review dialog shows the exact account/workspace/list/task and field diff. **Cancel** is initially focused. **Apply** submits only the exact proposal displayed, including its random-nonce-bound approval code and field concurrency digest. The code binds selection, task, action, value, full diff, digest and nonce: replacing a proposal invalidates old approvals. The engine independently rechecks field/thread concurrency. Selection, refresh, cancellation and errors invalidate proposals. Every write rechecks approval after pacing, immediately before send.
 
-After a write, the list, task and complete comments are refreshed. There are no hidden write retries. A transport failure may occur after the server applied a write: the consumed confirmation is not replayable, and the pane requires an explicit refresh before a new proposal. An already dispatched request cannot be recalled by switching or quitting. No create/delete/move/time-tracking/webhook UI is included.
+**Existing engine limitation:** custom-field approval binds the field name and current value, not the field UUID. If a task moves lists between review and apply, a same-named destination field with the same current value can pass the check and receive the update. This interface change does not repair that pre-existing race.
+
+Loading, stale and writing states disable inappropriate actions. Refresh is refused while a write is dispatched so its outcome remains visible. After a write, the list, task and complete comments are refreshed. There are no hidden write retries. A transport failure may occur after the server applied a write: the consumed confirmation is not replayable, and the pane requires an explicit refresh before a new proposal. An already dispatched request cannot be recalled by quitting. No create/delete/move/time-tracking/webhook UI is included.
 
 ## Storage, errors and privacy
 
 The [local registry](references/registry-format.md) contains hierarchy/member/custom-field metadata, not task content or credentials. The frontend scopes it by account, workspace and selected list under `$XDG_CONFIG_HOME/rexdeck/clickup/`; the rebuildable SQLite metadata cache is separately scoped under `$XDG_CACHE_HOME/rexdeck/clickup/`. Neither belongs in source control. Sync is explicit; an unsynced or digest-mismatched registry is refused.
 
-States distinguish loading/writing/ready/empty/stale, missing credentials, authentication, permission, not-found, rate-limited, network, malformed responses, refused requests (HTTP 400, shown as `REJECTED` with only ClickUp's short `ECODE`), account mismatch and registry/write diagnostics. Refresh failures retain data only as stale; identity/auth/access failures clear it. HTTP 429 exposes a numeric `Retry-After` hint when supplied. Requests use a fixed HTTPS API-v2 origin, reject arbitrary origins/path traversal/redirects and are paced across workers. No response/error body or credential is logged; credential echoes are redacted and remote terminal controls stripped.
+States distinguish loading/writing/ready/empty/stale, missing credentials, authentication, permission, not-found, rate-limited, network, malformed responses, refused requests (HTTP 400, shown as `REJECTED` with only ClickUp's short `ECODE`), account mismatch and registry/write diagnostics. Refresh failures retain data only as stale; identity, authentication and current-scope access failures clear it. An access failure during account preflight also clears retained task data; a permission failure in a different workspace leaves the current list intact. HTTP 429 exposes a numeric `Retry-After` hint when supplied. Requests use a fixed HTTPS API-v2 origin, reject arbitrary origins/path traversal/redirects and are paced across workers. No response/error body or credential is logged; credential echoes are redacted and remote terminal controls stripped.
 
 Proposal/engine-read errors preserve a fresh list as ready/empty; failed list refreshes remain stale. Empty/relative XDG cache roots are refused; cache directories are 0700 and files 0600. Labels/IDs are single-line; pane and engine CLI text remove terminal commands, bidi overrides and zero-width formatting.
 
