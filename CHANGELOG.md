@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- ClickUp: guided selection. On first run without a saved selection, the pane reads the account from the token and offers numbered, filterable menus for workspace, space and list (a single option at any step is chosen automatically and shown), then saves after confirmation and opens the list. `rexdeck clickup select` with no IDs runs the same menus; all three IDs still work for scripts, partial IDs and non-terminal guided runs are refused, and `q`, end of input or `Ctrl-C` saves nothing.
+
 ## 0.2.1 — 2026-11-09
 
 - `rexdeck plugins` and `rexdeck status` print a readable table at a terminal: one row per plugin with state, tool/versions and pane layout, then a **Needs attention** section that gives each problem and its fix once (shared causes such as Rex missing from `PATH` are not repeated per plugin). Server URLs are shown decoded; remote/receipt text is stripped of terminal control characters; state color follows `NO_COLOR`/`TERM=dumb`. `--json`, or piped output, keeps the full JSON document unchanged; exit codes are unchanged.

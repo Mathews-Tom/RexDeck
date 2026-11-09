@@ -7,13 +7,21 @@ New in 0.2.0. Python 3.12+, Rex, httpx and PyYAML are required; the Python depen
 Use an authorized personal-token environment reference inherited by the **Rex server and pane**, not merely the setup shell. Configure that environment through an existing secret-management/launch mechanism. Never paste a token into argv, a file, terminal history or source. RexDeck neither obtains nor revokes credentials.
 
 ```sh
-rexdeck clickup select --account USER_ID --team WORKSPACE_ID --list LIST_ID
-rexdeck clickup status
 rexdeck setup
 rexdeck enable clickup --placement right --size 50
 ```
 
-`--credential-env NAME` changes the variable **name**, default `CLICKUP_API_TOKEN`; names must match `CLICKUP_[A-Z0-9_]+`. Selection stores only numeric account/workspace/list IDs and this reference, atomically in mode-0600 `$XDG_CONFIG_HOME/rexdeck/clickup.json`. Selection makes no API request. Authenticated identity/list are checked before rows appear. Browser openers omit ClickUp credential references.
+Then open **RexDeck ClickUp** from the palette. On first run, with no saved selection, the pane walks you through it: your account is read from the token, then you choose a workspace, a space and a list from numbered menus (type a number, or text to filter; `q` cancels). A workspace, space or list that is the only one available is chosen automatically and shown. The pane saves the choice after you confirm it and opens the list.
+
+Run `rexdeck clickup select` in a terminal to choose again later, or pass every ID for scripts:
+
+```sh
+rexdeck clickup select                                   # guided, same menus
+rexdeck clickup select --account USER_ID --team WORKSPACE_ID --list LIST_ID
+rexdeck clickup status
+```
+
+`--credential-env NAME` changes the variable **name**, default `CLICKUP_API_TOKEN`; names must match `CLICKUP_[A-Z0-9_]+`. Selection stores only numeric account/workspace/list IDs and this reference, atomically in mode-0600 `$XDG_CONFIG_HOME/rexdeck/clickup.json`. Guided selection makes read-only requests (user, workspaces, unarchived spaces, folders and lists) and saves only after confirmation; ending input or `Ctrl-C` saves nothing. Passing all three IDs makes no API request; passing only some is refused. Without a terminal, guided selection is refused rather than guessed. Authenticated identity/list are checked before rows appear. Browser openers omit ClickUp credential references.
 
 Invoke **RexDeck ClickUp** from the native palette. The shared host runs its installed interpreter as `python -I -m rexdeck.clickup`, preserves placement/size, and returns to the exact invoking terminal on quit. No external ClickUp executable or upstream-version probe is needed. The invoking directory is not an account selection.
 
