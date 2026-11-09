@@ -3,6 +3,7 @@
 ## 0.3.0 — 2026-11-09
 
 - ClickUp: guided selection. On first run without a saved selection, the pane reads the account from the token and offers numbered, filterable menus for workspace, space and list (a single option at any step is chosen automatically and shown), then saves after confirmation and opens the list. `rexdeck clickup select` with no IDs runs the same menus; all three IDs still work for scripts, partial IDs and non-terminal guided runs are refused, and `q`, end of input or `Ctrl-C` saves nothing.
+- Published the approved main-CI wheel/sdist (commit `ace218e`, artifact `13642380730`) to GitHub and PyPI from tag `v0.3.0`; public asset and registry hashes match. The candidate wheel ran first-run guided selection and the ClickUp native action in a private Rex; a no-cache public-index install listed every integration.
 
 ## 0.2.1 — 2026-11-09
 
