@@ -851,6 +851,8 @@ class ClickUpApp(App[int]):
         table.add_column("Status", key="status", width=12)
         self._layout(self.size.width)
         await self.poll_view()
+        if not self.is_running:
+            return
         table.focus()
         self.set_interval(0.1, self.poll_view)
         if (
@@ -877,6 +879,8 @@ class ClickUpApp(App[int]):
             self._layout(event.size.width)
 
     def _layout(self, width: int) -> None:
+        if not self.is_running:
+            return
         was_narrow = self._narrow
         self._narrow = width < 95
         self.default_screen.set_class(self._narrow, "narrow")
@@ -902,7 +906,8 @@ class ClickUpApp(App[int]):
         self.query_one("#desk-help", Static).update(text)
 
     async def poll_view(self) -> None:
-        if self._rendering:
+        # Textual marks the app stopped before pruning screens, but stops timers later.
+        if not self.is_running or self._rendering:
             return
         view = self.controller.snapshot()
         if view.revision == self._seen_revision:
@@ -928,6 +933,8 @@ class ClickUpApp(App[int]):
             self._render_scope()
             self._render_queue()
             await self._render_detail()
+            if not self.is_running:
+                return
             self._render_state()
             if (
                 view.pending is not None
@@ -1029,6 +1036,8 @@ class ClickUpApp(App[int]):
         position = (reader.scroll_x, reader.scroll_y)
         comments = self.query_one("#comments", Vertical)
         await comments.remove_children()
+        if not self.is_running:
+            return
         if detail is None:
             self.query_one("#task-title", Static).update(
                 "Loading task…"
@@ -1038,6 +1047,8 @@ class ClickUpApp(App[int]):
             self.query_one("#task-status", Static).update("")
             self.query_one("#task-meta", Static).update("")
             await self.query_one("#description", Markdown).update("")
+            if not self.is_running:
+                return
             self.query_one("#comments-heading", Static).update("")
             return
         task = detail.task
@@ -1054,6 +1065,8 @@ class ClickUpApp(App[int]):
         await self.query_one("#description", Markdown).update(
             task.description or "_No description._"
         )
+        if not self.is_running:
+            return
         self.query_one("#comments-heading", Static).update(
             f"Comments ({len(detail.comments)})"
         )
@@ -1072,6 +1085,8 @@ class ClickUpApp(App[int]):
             )
             block.styles.margin = (0, 0, 1, depth * 2)
             await comments.mount(block)
+            if not self.is_running:
+                return
         if previous_id == task.id:
             reader.scroll_to(*position, animate=False, force=True)
         else:
