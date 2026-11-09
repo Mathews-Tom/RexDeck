@@ -240,16 +240,48 @@ def _executable(name: str) -> str:
     return str(Path(found).absolute())
 
 
+def _interpreter(executable: str) -> str | None:
+    """Bind the interpreter an `#!/usr/bin/env NAME` script finds on this PATH.
+
+    Rex servers started by the app have a minimal PATH, so an npm-style launcher
+    such as tokscale would otherwise fail in the pane with `env: node: No such
+    file or directory`. Absolute shebangs and binaries need no binding.
+    """
+    try:
+        with open(executable, "rb") as handle:
+            first = handle.readline(512)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Cannot read interpreter line of {executable}: {exc}"
+        ) from exc
+    if not first.startswith(b"#!"):
+        return None
+    words = first[2:].decode("utf-8", errors="replace").split()
+    if len(words) < 2 or Path(words[0]).name != "env":
+        return None
+    names = words[2:] if words[1] == "-S" else words[1:]
+    if not names or names[0].startswith("-") or "=" in names[0] or "/" in names[0]:
+        raise RuntimeError(
+            f"Unsupported interpreter line in {executable}: {first.decode(errors='replace').strip()}"
+        )
+    return _executable(names[0])
+
+
 def _tools(tool: str = "yazi", *, owned: bool = False) -> dict[str, str]:
     """Bind the interpreter, Rex and the selected upstream or owned frontend."""
     python = Path(sys.executable).absolute()
     if not python.is_file() or not os.access(python, os.X_OK):
         raise RuntimeError(f"Current Python interpreter is not executable: {python}")
-    return {
+    tools = {
         "python": str(python),
         "rex": _executable("rex"),
         tool: str(python) if owned else _executable(tool),
     }
+    if not owned:
+        interpreter = _interpreter(tools[tool])
+        if interpreter is not None:
+            tools["interpreter"] = interpreter
+    return tools
 
 
 def _selected_tools(setup: Setup) -> dict[str, str]:
@@ -729,7 +761,7 @@ def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
         raise RuntimeError("Setup receipt has malformed loader_separator")
     tools = _object(result.get("tools"), "receipt tools")
     tool = integrations.get(setup.plugin).tool
-    if set(tools) != {"python", "rex", tool} or any(
+    if set(tools) - {"interpreter"} != {"python", "rex", tool} or any(
         not isinstance(value, str) or not Path(value).is_absolute() or "\x00" in value
         for value in tools.values()
     ):

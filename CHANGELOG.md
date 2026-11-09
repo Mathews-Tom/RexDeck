@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1 — 2026-11-09
+
+Upgrading: the shared native host changed, so run `rexdeck enable <id>` (or `rexdeck enable <id> <id> ...`) for every enabled integration after installing 0.4.1.
+
+- Usage: tokscale opens in Rex panes started by an app-launched Rex server. Its npm launcher (`#!/usr/bin/env node`) previously failed with `env: node: No such file or directory` because that server's `PATH` has no nvm/Homebrew `node`. `rexdeck enable` now records the interpreter an `#!/usr/bin/env NAME` tool finds on the enabling `PATH` and puts its directory first in the pane's `PATH`; until an integration is re-enabled, `status` reports a refresh `fault`.
+- ClickUp: the pane finds a token exported from your shell profile even when the app-launched Rex server never ran it, by reading that one variable from your interactive login shell. If the shell does not export it, the pane asks for the token (hidden input, used only in that pane, never saved) instead of exiting. `rexdeck enable clickup` adds a **Next steps** reminder when the token is not exported in the enabling shell.
+- ClickUp: `space [NAME]` in the pane switches to another space of the same workspace through the first-run menus (space, then list; `NAME` narrows the spaces) and saves the choice, so the pane reopens there. `q` keeps the current list.
+
 ## 0.4.0 — 2026-11-09
 
 - `rexdeck enable` and `rexdeck disable` accept several integrations at once (`rexdeck enable files git clickup`). Each is changed independently in the given order; a failure is reported in that integration's row while the others still change, and the command exits nonzero if any failed. Unknown names refuse the whole command before any change; repeated names count once; `--placement`/`--size` apply to every named integration (place them before or after the names). A single name keeps the single-integration JSON document.

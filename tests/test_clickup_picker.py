@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import getpass
 import io
 import json
+import os
 import sys
+import time
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
@@ -66,6 +69,8 @@ def hierarchy(**overrides: object) -> dict[str, object]:
 @pytest.fixture
 def config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    # Pane runs below start with the token their shell would export.
+    monkeypatch.setenv("CLICKUP_API_TOKEN", "pk_test")
     yield tmp_path / "rexdeck/clickup.json"
 
 
@@ -143,6 +148,68 @@ def test_a_missing_token_is_explained_before_any_request(
     assert raised.value.state == "missing-credential"
     assert "CLICKUP_API_TOKEN" in str(raised.value)
     assert not config.exists()
+
+
+def test_switching_space_keeps_identity_and_saves_the_new_list(config: Path) -> None:
+    current = cu.Selection("42", "900", "101", "CLICKUP_TEAM_TOKEN")
+    said: list[str] = []
+    # "eng" matches one space, so only the list is asked for; no save prompt.
+    prompts, ask = scripted("3")
+
+    chosen = picker.switch_space(
+        current, "eng", said.append, ask, client=FakeClient(hierarchy())
+    )
+
+    assert chosen == cu.Selection("42", "900", "103", "CLICKUP_TEAM_TOKEN")
+    assert cu.load_selection() == chosen
+    assert prompts == ["list number, text to filter, or q to cancel: "]
+    assert "Space: Engineering (matches 'eng')" in said
+    assert "Now tracking Engineering / Backlog; saved for next time." in said
+
+
+@pytest.mark.parametrize("answers", [("q",), ("nomatch", "q"), ("1", "q")])
+def test_cancelling_a_space_switch_keeps_the_saved_list(
+    config: Path, answers: tuple[str, ...]
+) -> None:
+    current = cu.Selection("42", "900", "101", "CLICKUP_API_TOKEN")
+    cu.save_selection(current)
+    _, ask = scripted(*answers)
+
+    with pytest.raises(picker.Cancelled):
+        picker.switch_space(current, "", lambda _: None, ask, FakeClient(hierarchy()))
+
+    assert cu.load_selection() == current
+
+
+def test_a_space_switch_under_another_account_saves_nothing(config: Path) -> None:
+    current = cu.Selection("7", "900", "101", "CLICKUP_API_TOKEN")
+    cu.save_selection(current)
+
+    with pytest.raises(cu.ClickUpError) as raised:
+        picker.switch_space(
+            current, "", lambda _: None, scripted()[1], FakeClient(hierarchy())
+        )
+
+    assert raised.value.state == "account-mismatch"
+    assert cu.load_selection() == current
+
+
+def test_an_unmatched_space_name_asks_even_for_the_only_space(config: Path) -> None:
+    only = {"/team/900/space": {"spaces": [{"id": "10", "name": "Engineering"}]}}
+    said: list[str] = []
+    prompts, ask = scripted("1", "3")
+
+    chosen = picker.switch_space(
+        cu.Selection("42", "900", "101"),
+        "zzz",
+        said.append,
+        ask,
+        FakeClient(hierarchy(**only)),
+    )
+
+    assert chosen.list == "103"
+    assert "No space matches 'zzz'; showing all." in said
+    assert prompts[0] == "space number, text to filter, or q to cancel: "
 
 
 @pytest.mark.parametrize(
@@ -295,3 +362,56 @@ def test_a_dangling_selection_symlink_is_not_treated_as_first_run(
     config.symlink_to(config.parent / "missing.json")
 
     assert cu.main() == 1
+
+
+def _fake_shell(tmp_path: Path, exports: str) -> str:
+    """Interactive login shell whose startup files print noise and export tokens."""
+    shell = tmp_path / "fake-zsh"
+    shell.write_text(
+        "#!/bin/sh\n"
+        'echo "startup banner from ~/.zshrc"\n'
+        '[ "$1 $2 $3" = "-i -l -c" ] || exit 9\n'
+        f"{exports}\n"
+        'exec /bin/sh -c "$4"\n'
+    )
+    shell.chmod(0o755)
+    return str(shell)
+
+
+def test_pane_uses_the_token_exported_by_the_interactive_shell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The app-started Rex server never ran ~/.zshrc, so the pane env lacks it.
+    monkeypatch.setenv("CLICKUP_API_TOKEN", "")
+    monkeypatch.setenv(
+        "SHELL",
+        # A startup-file background job keeps the pipe open well past the answer.
+        _fake_shell(tmp_path, "export CLICKUP_API_TOKEN=pk_from_shell; sleep 20 &"),
+    )
+    monkeypatch.setattr(sys, "stdin", _Terminal())
+    monkeypatch.setattr(getpass, "getpass", lambda _: pytest.fail("prompted"))
+
+    started = time.monotonic()
+    assert cu.ensure_credential("CLICKUP_API_TOKEN")
+    assert time.monotonic() - started < 10
+    assert os.environ["CLICKUP_API_TOKEN"] == "pk_from_shell"
+
+
+@pytest.mark.parametrize(("typed", "ready"), [(" pk_typed\n", True), ("", False)])
+def test_pane_asks_for_a_token_its_shell_does_not_export(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    typed: str,
+    ready: bool,
+) -> None:
+    monkeypatch.setenv("CLICKUP_TEAM_TOKEN", "")
+    monkeypatch.setenv("SHELL", _fake_shell(tmp_path, "export OTHER=1"))
+    monkeypatch.setattr(sys, "stdin", _Terminal())
+    monkeypatch.setattr(getpass, "getpass", lambda _: typed)
+
+    assert cu.ensure_credential("CLICKUP_TEAM_TOKEN") is ready
+    out = capsys.readouterr().out
+    assert "export CLICKUP_TEAM_TOKEN=<token>" in out
+    assert os.environ["CLICKUP_TEAM_TOKEN"] == ("pk_typed" if ready else "")
+    assert ("MISSING-CREDENTIAL" in out) is not ready

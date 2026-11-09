@@ -4,7 +4,7 @@ New in 0.2.0. Python 3.12+, Rex, httpx and PyYAML are required; the Python depen
 
 ## Select and enable
 
-Use an authorized personal-token environment reference inherited by the **Rex server and pane**, not merely the setup shell. Configure that environment through an existing secret-management/launch mechanism. Never paste a token into argv, a file, terminal history or source. RexDeck neither obtains nor revokes credentials.
+Export an authorized personal token from your shell profile, for example `export CLICKUP_API_TOKEN=<token>` in `~/.zshrc`. A Rex server started by the app does not run your shell's startup files, so when the pane's environment lacks the token, the pane asks your interactive login shell (`$SHELL -i -l`) for that one exported variable; the value travels over a pipe, never argv or disk. If your shell does not export it either, the pane asks you to paste the token (hidden input) and uses it only in that pane; nothing is saved. `rexdeck enable clickup` reminds you when the token is not exported in the enabling shell. Never paste a token into argv, a file, terminal history or source. RexDeck neither obtains nor revokes credentials.
 
 ```sh
 rexdeck setup
@@ -35,6 +35,7 @@ Invoke **RexDeck ClickUp** from the native palette. The shared host runs its ins
 - `refresh`: reload the complete list and selected detail/comment history. Old data is never presented as fresh after failure.
 - `sync`: explicitly discover hierarchy, members and per-list custom-field definitions in the selected space; write an identity/workspace/list-scoped local registry. This changes local metadata only, not ClickUp. It is required before engine projections or writes; it never happens silently.
 - `tasks`, `task`, `sprint`, `search TEXT`: expose the engine's task table, selected-task projection, native-status rollup and task-only workspace search. Search fetches the registry's space-scoped task pages and matches names locally; it does not search documents, dashboards or chats. Engine diagnostics remain visible. See [verb reference](references/verbs.md).
+- `space [NAME]`: track a list in another space of the same account and workspace. The pane shows the workspace's spaces (`NAME` narrows them; a single match is taken directly), then that space's lists, using the same numbered, filterable menus as first run; spaces without lists drop out. The chosen list opens immediately and becomes the saved selection, so the next pane opens there. `q` keeps the current list. Clears rows, detail, comments, link, proposal and terminal scrollback like `switch`.
 - `switch ACCOUNT WORKSPACE LIST [ENV_NAME]`: pane-local selection, without rewriting saved settings or globally switching accounts. Clears rows, detail, comments, link, proposal and terminal scrollback. Generation tags discard late results. Different accounts use separately inherited environment references.
 - `quit` / `q`: leave the pane and return to its exact captured Rex origin.
 

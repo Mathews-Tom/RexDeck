@@ -264,6 +264,56 @@ action.run({session_id = "session", block_id = "origin"})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(marker.exists(), "Opening Files imported project code")
 
+    def test_env_script_pane_starts_with_its_qualified_interpreter_first(
+        self,
+    ) -> None:
+        # The app-started Rex server PATH lacks e.g. nvm's node for `env node` tools.
+        harness = self.root / "split-request.lua"
+        harness.write_text(
+            r"""
+local action
+rex = {
+  action = function(value) action = value end,
+  call = function(name)
+    if name == "session.attach" then return {} end
+    return {pwd = arg[2]}
+  end,
+  exec = function() return {ok = true, stdout = "{}"} end,
+  json = {decode = function() return {cwd = arg[2], target = arg[2]} end},
+  session = {new_split = function(request)
+    local options = request.layout.block.options
+    assert(options.shell == "none", "tool must start without a shell")
+    local prepend = options.path_prepend
+    print(prepend == nil and "<none>" or table.concat(prepend, ":"))
+    return {block_ids = {"launched"}}
+  end},
+}
+dofile(arg[1])
+action.run({session_id = "session", block_id = "origin"})
+"""
+        )
+
+        def prepended(tools: dict[str, str]) -> str:
+            with patch.object(life, "_tools", return_value=tools):
+                life.apply_setup(self.setup)
+                life.start(self.setup)
+                # The interpreter is part of the receipt's qualified tool set.
+                self.assertEqual(life.status(self.setup)["state"], "ready")
+            result = subprocess.run(
+                [self.lua, str(harness), str(self.module), str(self.root)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip()
+
+        tools = {"python": sys.executable, "rex": "/rex", "yazi": "/opt/yazi"}
+        self.assertEqual(prepended(tools), "<none>")
+        tools["interpreter"] = "/home/u/.nvm/versions/node/v23/bin/node"
+        self.assertEqual(prepended(tools), "/home/u/.nvm/versions/node/v23/bin")
+
     def test_oversized_planned_config_is_rejected_before_owned_writes(self) -> None:
         self.target.write_bytes(b"--" + b"x" * (life._MAX_READ - 2))
         before = self.snapshot()
@@ -1062,6 +1112,38 @@ class ProcessBoundaryTests(unittest.TestCase):
             {"REX_SERVER", "REX_SESSION", "REX_BLOCK", "REX_CLIENT"}.isdisjoint(env)
         )
         self.assertEqual(env["REX_CONFIG"], "/selected.lua")
+
+    def test_env_script_tools_bind_the_interpreter_found_on_enabling_path(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            tools, runtime = root / "tools", root / "runtime"
+            tools.mkdir()
+            runtime.mkdir()
+
+            def executable(path: Path, body: str) -> None:
+                path.write_text(body)
+                path.chmod(0o755)
+
+            executable(tools / "rex", "#!/bin/sh\n")
+            executable(runtime / "node", "#!/bin/sh\n")
+            executable(tools / "npm-tool", "#!/usr/bin/env node\nrequire('x')\n")
+            executable(tools / "split-tool", "#!/usr/bin/env -S node --flag\n")
+            executable(tools / "sh-tool", "#!/bin/sh\n")
+            executable(tools / "bad-tool", "#!/usr/bin/env -i node\n")
+            path = os.pathsep.join((str(tools), str(runtime), "relative/bin"))
+            with patch.dict(os.environ, {"PATH": path}):
+                for name in ("npm-tool", "split-tool"):
+                    self.assertEqual(
+                        life._tools(name)["interpreter"], str(runtime / "node")
+                    )
+                self.assertNotIn("interpreter", life._tools("sh-tool"))
+                with self.assertRaisesRegex(RuntimeError, "Unsupported interpreter"):
+                    life._tools("bad-tool")
+                (runtime / "node").unlink()
+                with self.assertRaises(life.MissingDependency):
+                    life._tools("npm-tool")
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ Watch AI token usage, models, sessions and projects in a native Rex pane with un
 ## Requirements
 
 - macOS arm64, a running Rex server, and RexDeck set up as described in the [root README](../../README.md#getting-started).
-- tokscale **4.21.0** on a trusted absolute `PATH` entry. Install it yourself, for example with `npm install -g tokscale@4.21.0`, and check `tokscale --version`. RexDeck never installs, upgrades or removes it. Other versions are refused with manual guidance until they are qualified.
+- tokscale **4.21.0** on a trusted absolute `PATH` entry. Install it yourself, for example with `npm install -g tokscale@4.21.0`, and check `tokscale --version`. RexDeck never installs, upgrades or removes it. Other versions are refused with manual guidance until they are qualified. The npm launcher starts with `#!/usr/bin/env node`, so `rexdeck enable usage` also records the `node` it finds on your `PATH` and puts that directory first in the pane's `PATH`; a Rex server started by the app otherwise has no nvm/Homebrew `node`. Rerun `rexdeck enable usage` after switching Node versions.
 
 ## Enable
 

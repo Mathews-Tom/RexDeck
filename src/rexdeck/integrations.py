@@ -33,6 +33,7 @@ _RESERVED = frozenset(
     (
         "python",
         "rex",
+        "interpreter",
         "server",
         "launcher_code",
         "plugin",

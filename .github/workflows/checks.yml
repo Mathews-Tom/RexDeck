@@ -25,7 +25,7 @@ jobs:
         run: |
           uv build --no-sources --out-dir "$RUNNER_TEMP/rexdeck-dist"
           uv venv "$RUNNER_TEMP/rexdeck-wheel"
-          uv pip install --python "$RUNNER_TEMP/rexdeck-wheel/bin/python" "$RUNNER_TEMP/rexdeck-dist/rexdeck-0.4.0-py3-none-any.whl"
+          uv pip install --python "$RUNNER_TEMP/rexdeck-wheel/bin/python" "$RUNNER_TEMP/rexdeck-dist/rexdeck-0.4.1-py3-none-any.whl"
       - name: Installed CLI, adapters, metadata and shared Lua
         working-directory: ${{ runner.temp }}
         run: |
@@ -46,7 +46,7 @@ jobs:
           from pathlib import Path
 
           package = distribution("rexdeck")
-          assert package.version == "0.4.0"
+          assert package.version == "0.4.1"
           assert package.metadata["License-Expression"] == "MIT"
           assert any(str(path).endswith("/licenses/LICENSE") for path in package.files)
           assert files("rexdeck").joinpath("host/launch.py").is_file()
@@ -57,9 +57,9 @@ jobs:
       - name: Retain exact candidate artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rexdeck-0.4.0
+          name: rexdeck-0.4.1
           path: |
-            ${{ runner.temp }}/rexdeck-dist/rexdeck-0.4.0.tar.gz
-            ${{ runner.temp }}/rexdeck-dist/rexdeck-0.4.0-py3-none-any.whl
+            ${{ runner.temp }}/rexdeck-dist/rexdeck-0.4.1.tar.gz
+            ${{ runner.temp }}/rexdeck-dist/rexdeck-0.4.1-py3-none-any.whl
           if-no-files-found: error
           retention-days: 14
