@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -1089,6 +1090,35 @@ class ProcessBoundaryTests(unittest.TestCase):
         child.kill.assert_called_once_with()
         child.wait.assert_called_once_with(timeout=2)
         child.stdout.close.assert_called_once_with()
+
+    def test_alarm_during_spawn_keeps_exact_child_owned_and_reaped(self) -> None:
+        reaped = threading.Event()
+        child = Mock()
+        child.poll.return_value = None
+
+        def waited() -> int:
+            reaped.set()
+            return 0
+
+        child.wait.side_effect = waited
+
+        def expired(_signum: int, _frame: object) -> None:
+            raise life.CommandDeadline("Caller deadline")
+
+        def interrupted_popen(*_args: object, **_kwargs: object) -> Mock:
+            os.kill(os.getpid(), signal.SIGALRM)
+            return child
+
+        previous = signal.signal(signal.SIGALRM, expired)
+        try:
+            with patch.object(subprocess, "Popen", side_effect=interrupted_popen):
+                with self.assertRaises(life.CommandDeadline):
+                    life._run([sys.executable, "-c", "pass"], {})
+            child.kill.assert_called_once_with()
+            self.assertTrue(reaped.wait(1), "Killed child was not reaped")
+            self.assertIs(signal.getsignal(signal.SIGALRM), expired)
+        finally:
+            signal.signal(signal.SIGALRM, previous)
 
     def test_rex_environment_removes_ambient_targets(self) -> None:
         setup = life.Setup(

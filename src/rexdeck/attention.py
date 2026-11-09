@@ -53,11 +53,11 @@ _BINDING_REASONS = {
 }
 
 
-class _HookDeadline(RuntimeError):
+class _HookDeadline(lifecycle.CommandDeadline):
     """Interrupt native subprocess waits while retaining their cleanup path."""
 
 
-class _BindingDeadline(RuntimeError):
+class _BindingDeadline(lifecycle.CommandDeadline):
     """Bound receipt-time lookup without spending the receiver's storage budget."""
 
 
@@ -80,8 +80,8 @@ def _binding_budget() -> Iterator[None]:
     started = time.monotonic()
 
     def expired(signum: int, frame: object) -> None:
-        # The binding alarm is one-shot. Rearm the overall alarm before raising
-        # so lifecycle._run's subprocess cleanup cannot spend another two seconds.
+        # The binding alarm is one-shot; preserve the overall deadline for
+        # the receiver work that remains after binding cancellation.
         if remaining:
             left = remaining - (time.monotonic() - started)
             if left <= 0:

@@ -31,6 +31,10 @@ _COMMAND_WAIT = 8.0
 PLUGINS = integrations.PLUGINS
 
 
+class CommandDeadline(RuntimeError):
+    """Cancel a helper without spending an expired caller budget on reaping."""
+
+
 @dataclass(frozen=True)
 class QualifiedTool:
     """Freeze a logical executable binding and its followed target's identity."""
@@ -317,7 +321,7 @@ def _run(
     """Bound merged diagnostic output and child lifetime."""
     child: subprocess.Popen[bytes] | None = None
     try:
-        with _defer_cancellation():
+        with _defer_cancellation(include_alarm=True):
             child = subprocess.Popen(
                 argv,
                 env=env,
@@ -350,11 +354,18 @@ def _run(
             child.wait(timeout=max(0.01, deadline - time.monotonic())), bytes(output)
         )
     except (RuntimeError, OSError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
-        with _defer_cancellation():
+        with _defer_cancellation(include_alarm=isinstance(exc, CommandDeadline)):
             if child is not None:
                 if child.poll() is None:
                     child.kill()
-                child.wait(timeout=2)
+                if isinstance(exc, CommandDeadline):
+                    # Retain the child until it is reaped, without making a
+                    # one-shot caller deadline depend on a second alarm.
+                    threading.Thread(
+                        target=child.wait, name="rexdeck-reap", daemon=True
+                    ).start()
+                else:
+                    child.wait(timeout=2)
         if isinstance(exc, (RuntimeError, KeyboardInterrupt)):
             raise
         raise RuntimeError(f"Command failed: {argv[0]}: {exc}") from exc
@@ -825,12 +836,14 @@ def _current_bundle(setup: Setup, paths: _Paths, receipt: dict[str, object]) -> 
 
 
 @contextmanager
-def _defer_cancellation() -> Iterator[None]:
+def _defer_cancellation(*, include_alarm: bool = False) -> Iterator[None]:
     """Finish an ownership handoff or recovery before delivering cancellation."""
     if threading.current_thread() is not threading.main_thread():
         yield
         return
     signals: tuple[int, ...] = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    if include_alarm:
+        signals += (signal.SIGALRM,)
     previous = {signum: signal.getsignal(signum) for signum in signals}
     interrupted: int | None = None
 
