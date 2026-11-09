@@ -113,9 +113,7 @@ def save_selection(selection: Selection) -> None:
 def load_selection() -> Selection:
     path = selection_path()
     if path.is_symlink() or not path.is_file():
-        raise ValueError(
-            "No explicit ClickUp selection; run rexdeck clickup select --account ID --team ID --list ID"
-        )
+        raise ValueError("No ClickUp selection; run rexdeck clickup select")
     if path.stat().st_size > 16384:
         raise ValueError("ClickUp selection is too large")
     document = obj(json.loads(path.read_text()))
@@ -975,14 +973,33 @@ class Controller:
 
 
 def configure(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Explicit nonsecret ClickUp selection")
+    parser = argparse.ArgumentParser(description="Nonsecret ClickUp selection")
     commands = parser.add_subparsers(dest="command", required=True)
-    select = commands.add_parser("select")
+    select = commands.add_parser(
+        "select",
+        help="Pick account/workspace/list interactively, or pass all three IDs",
+    )
     for field in ("account", "team", "list"):
-        select.add_argument("--" + field, required=True)
+        select.add_argument("--" + field)
     select.add_argument("--credential-env", default="CLICKUP_API_TOKEN")
     commands.add_parser("status")
     args = parser.parse_args(argv)
+    if args.command == "select":
+        given = [args.account, args.team, args.list]
+        if not any(given):
+            return _guided_select(args.credential_env)
+        if not all(given):
+            print(
+                json.dumps(
+                    {
+                        "state": "invalid-selection",
+                        "error": "Pass all of --account, --team and --list, or none "
+                        "to choose interactively",
+                    }
+                ),
+                file=sys.stderr,
+            )
+            return 1
     try:
         selected = (
             Selection(args.account, args.team, args.list, args.credential_env)
@@ -1069,15 +1086,61 @@ def render(view: View, query: str, page: int) -> None:
     )
 
 
+def _guided_select(credential_env: str) -> int:
+    """Interactive `select`; refuses without a terminal rather than guessing."""
+    if not sys.stdin.isatty():
+        print(
+            json.dumps(
+                {
+                    "state": "invalid-selection",
+                    "error": "Interactive selection needs a terminal; otherwise pass "
+                    "--account, --team and --list",
+                }
+            ),
+            file=sys.stderr,
+        )
+        return 1
+    from rexdeck.clickup import picker
+
+    try:
+        picker.guided(credential_env=credential_env)
+    except picker.Cancelled:
+        print("Cancelled; nothing was saved.")
+        return 1
+    except (OSError, ValueError, ClickUpError) as error:
+        print(f"ClickUp selection failed: {clean(str(error))}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main() -> int:
     try:
         selected = load_selection()
     except (OSError, ValueError, ClickUpError):
-        print(
-            "ClickUp [INVALID-SELECTION]: run rexdeck clickup select --account ID --team ID --list ID",
-            flush=True,
-        )
-        return 1
+        path = selection_path()
+        # A dangling symlink is not a first run: saving through it is refused.
+        if path.is_symlink() or path.exists() or not sys.stdin.isatty():
+            print(
+                "ClickUp [INVALID-SELECTION]: run rexdeck clickup select",
+                flush=True,
+            )
+            return 1
+        # First run: choose from the account's own workspaces instead of typing IDs.
+        print("No ClickUp selection yet. Choose one now.\n", flush=True)
+        from rexdeck.clickup import picker
+
+        try:
+            selected = picker.guided()
+        except picker.Cancelled:
+            print("Cancelled; nothing was saved.", flush=True)
+            return 0
+        except (OSError, ValueError, ClickUpError) as error:
+            print(
+                f"ClickUp [{getattr(error, 'state', 'invalid-selection').upper()}]: "
+                f"{clean(str(error))}",
+                flush=True,
+            )
+            return 1
     controller = Controller(selected)
     query, page, revision = "", 0, -1
     controller.refresh()
