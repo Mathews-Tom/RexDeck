@@ -5,6 +5,7 @@
 - Identify ClickUp's RexDeck-authored interface with a `[RexDeck UI]` badge instead of a `(built-in)` suffix in terminal plugin/status reports; leave other tool labels and JSON output unchanged.
 - Use compact column spacing when a terminal plugin/status table's normal gutters would exceed the terminal width.
 - Stop ClickUp desk polling, layout and resumed detail rendering once shutdown begins, preventing missing-widget crashes when closing after a list selection.
+- Published the owner-approved main-CI wheel/sdist (commit `15fd6d3`, artifact `13708536000`) to GitHub and PyPI from annotated tag `v0.5.2` through [protected publish 42694229310](https://github.com/Mathews-Tom/RexDeck/actions/runs/42694229310); public hashes match. After index propagation, no-cache public-index CLI installation and actual candidate/public private Rex queue/detail, loading-to-fresh refresh and exact-origin quit passed. ClickUp was disabled, config/authentication restored byte-for-byte and owned sessions/servers removed afterward.
 
 ## 0.5.1 — 2026-11-09
 

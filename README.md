@@ -181,7 +181,7 @@ The host suits programs that own an interactive TTY until the user quits. A one-
 
 ## Release workflow and owner gate
 
-Version **0.5.1** is published: its [GitHub Release](https://github.com/Mathews-Tom/RexDeck/releases/tag/v0.5.1) and [PyPI files](https://pypi.org/project/rexdeck/0.5.1/) carry the same approved wheel/sdist hashes. **0.1.0**, **0.1.1**, **0.2.0**, **0.2.1**, **0.3.0**, **0.4.0**, **0.4.1** and **0.5.0** were published and verified earlier. Do not rebuild, retag or republish any of them. A later release needs a separately named version target; its release-preparation change updates the package version and the version-specific names in the steps below. Local version metadata, a tag or a GitHub Release alone does not prove PyPI delivery.
+Version **0.5.2** is published: its [GitHub Release](https://github.com/Mathews-Tom/RexDeck/releases/tag/v0.5.2) and [PyPI files](https://pypi.org/project/rexdeck/0.5.2/) carry the same approved wheel/sdist hashes. **0.1.0**, **0.1.1**, **0.2.0**, **0.2.1**, **0.3.0**, **0.4.0**, **0.4.1**, **0.5.0** and **0.5.1** were published and verified earlier. Do not rebuild, retag or republish any of them. A later release needs a separately named version target; its release-preparation change updates the package version and the version-specific names in the steps below. Local version metadata, a tag or a GitHub Release alone does not prove PyPI delivery.
 
 The manual [`publish.yml`](https://github.com/Mathews-Tom/RexDeck/blob/main/.github/workflows/publish.yml) workflow supports [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) using [uv](https://docs.astral.sh/uv/guides/package/#publishing-your-package). No ordinary push, PR, or tag publishes anything; no release-time rebuild occurs.
 
