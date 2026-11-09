@@ -715,6 +715,68 @@ class CliTests(unittest.TestCase):
         code, text = self.invoke_terminal("status", "files", "--json")
         self.assertEqual((code, json.loads(text)["state"]), (0, "ready"))
 
+    def test_enable_and_disable_several_plugins_in_one_command(self) -> None:
+        """Each named plugin is changed and reported; repeated names count once."""
+        self.configure()
+
+        code, result = self.invoke("enable", "files", "git", "files")
+        self.assertEqual((code, result["state"]), (0, "ready"))
+        plugins = cast(dict[str, dict[str, object]], result["plugins"])
+        self.assertEqual(list(plugins), ["files", "git"])
+        self.assertEqual({row["state"] for row in plugins.values()}, {"ready"})
+        for name in ("files", "git"):
+            self.assertEqual(self.invoke("status", name)[1]["state"], "ready")
+
+        code, result = self.invoke("disable", "git", "files")
+        self.assertEqual((code, result["state"]), (0, "disabled"))
+        for name in ("files", "git"):
+            self.assertEqual(self.invoke("status", name)[1]["state"], "disabled")
+
+        # A single name keeps the original single-result document.
+        code, single = self.invoke("enable", "git", "git")
+        self.assertEqual((code, single["state"]), (0, "ready"))
+        self.assertNotIn("plugins", single)
+
+    def test_one_failing_plugin_does_not_stop_the_others(self) -> None:
+        """A broken sibling is reported in its row while the rest still change."""
+        self.configure()
+        (self.workspace / "git").mkdir(parents=True)
+        (self.workspace / "git/setup.json").write_text("{malformed")
+
+        code, result = self.invoke("enable", "git", "files")
+
+        self.assertEqual((code, result["state"]), (1, "fault"))
+        plugins = cast(dict[str, dict[str, object]], result["plugins"])
+        self.assertEqual(plugins["git"]["state"], "failed")
+        self.assertIn("git", str(plugins["git"]["error"]))
+        self.assertEqual(plugins["files"]["state"], "ready")
+        self.assertEqual(self.invoke("status", "files")[1]["state"], "ready")
+
+    def test_an_unknown_name_refuses_the_whole_command_before_any_change(self) -> None:
+        self.configure()
+
+        code, result = self.invoke("enable", "files", "clickp")
+
+        self.assertEqual((code, result["state"]), (2, "failed"))
+        self.assertIn("clickp", str(result["error"]))
+        self.assertEqual(self.invoke("status", "files")[1]["state"], "disabled")
+
+    def test_several_plugins_at_a_terminal_are_one_table(self) -> None:
+        self.configure()
+
+        code, text = self.invoke_terminal("enable", "files", "git")
+
+        self.assertEqual(code, 0)
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "RexDeck enable: ready")
+        rows = [
+            line.split()[:2]
+            for line in lines
+            if line.split()[:1] in (["files"], ["git"])
+        ]
+        self.assertEqual(rows, [["files", "ready"], ["git", "ready"]])
+        self.assertNotIn('"state"', text)
+
     def test_status_reports_selected_tool_removed_after_enable(self) -> None:
         """A vanished upstream tool is a missing dependency, not a generic fault."""
         self.configure()
