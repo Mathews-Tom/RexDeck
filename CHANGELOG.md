@@ -4,6 +4,7 @@
 
 - `rexdeck enable` and `rexdeck disable` accept several integrations at once (`rexdeck enable files git clickup`). Each is changed independently in the given order; a failure is reported in that integration's row while the others still change, and the command exits nonzero if any failed. Unknown names refuse the whole command before any change; repeated names count once; `--placement`/`--size` apply to every named integration (place them before or after the names). A single name keeps the single-integration JSON document.
 - At a terminal, `enable` and `disable` print the same readable table as `plugins`/`status`; `--json`, or piped output, keeps JSON.
+- Published the approved main-CI wheel/sdist (commit `5774d6d`, artifact `13643477755`) to GitHub and PyPI from tag `v0.4.0`; public asset and registry hashes match. The candidate wheel enabled and disabled several integrations in one command in a private Rex; a no-cache public-index install listed every integration.
 
 ## 0.3.0 — 2026-11-09
 
