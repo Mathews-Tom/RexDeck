@@ -6,6 +6,7 @@
 - Add a version-free launch banner, GIF and MP4 with editable illustration sources; align their copy with the approved project positioning and use fictional sample data.
 - Separate the seven selectable pane plugins from built-in CLI extensions. Document `rexdeck attention --help` and explain why `attention` is not listed by `rexdeck plugins`.
 - Runtime behavior, dependencies and the native host are unchanged.
+- Published the owner-approved main-CI wheel/sdist (commit `76c3aef`, artifact `13686839744`) to GitHub and PyPI from annotated tag `v0.5.1` through [protected publish 42649248972](https://github.com/Mathews-Tom/RexDeck/actions/runs/42649248972); public hashes match. No-cache public-index CLI installation and actual private Rex queue/detail, loading-to-fresh refresh and exact-origin quit passed. ClickUp was disabled, config restored byte-for-byte and owned sessions/servers removed afterward.
 
 ## 0.5.0 — 2026-11-09
 
