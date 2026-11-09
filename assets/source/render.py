@@ -1,10 +1,12 @@
 """Render the RexDeck launch banner, video and GIF from the HTML sources.
 
-Run from the repository root:
+Install Chromium and run from the repository root:
+
+    uv run --no-project --with playwright playwright install chromium
 
     uv run --no-project --with playwright python assets/source/render.py
 
-Requires ffmpeg on PATH and a Playwright Chromium (`playwright install chromium`).
+Requires ffmpeg on PATH.
 Frames are captured deterministically by seeking `window.setTime(t)`.
 """
 
