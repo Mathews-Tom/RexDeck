@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rexdeck"
-version = "0.4.1"
+version = "0.5.0"
 description = "Native Rex integrations for independently selectable existing tools"
 readme = "README.md"
 requires-python = ">=3.12"

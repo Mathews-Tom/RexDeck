@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — 2026-11-09
+
+- Replace ClickUp's append-only command transcript with a responsive Textual task desk: selectable/filterable task queue, Markdown descriptions, scrollable threaded comments, native status labels, task metadata, workspace/list hierarchy browsing and single-screen list/detail navigation in narrow panes.
+- Expose existing engine reads, explicit metadata sync and every supported mutation through dialogs. A write review initially focuses Cancel and applies only the exact displayed proposal; identity isolation, concurrency checks, stale-data refusal and no automatic retries remain in force.
+- Add Textual as a packaged Python dependency; no external ClickUp executable is required.
+
 ## 0.4.1 — 2026-11-09
 
 Upgrading: the shared native host changed, so run `rexdeck enable <id>` (or `rexdeck enable <id> <id> ...`) for every enabled integration after installing 0.4.1.
