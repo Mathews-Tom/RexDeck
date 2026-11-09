@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rexdeck"
-version = "0.5.0"
-description = "Native Rex integrations for independently selectable existing tools"
+version = "0.5.1"
+description = "Terminal tools and purpose-built CLI/API interfaces in native Rex panes"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

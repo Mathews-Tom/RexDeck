@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 — 2026-11-09
+
+- Present RexDeck as a common home for familiar terminal tools and purpose-built CLI/API interfaces, with a simpler README quick start and explicit upstream attribution.
+- Add a version-free launch banner, GIF and MP4 with editable illustration sources; align their copy with the approved project positioning and use fictional sample data.
+- Separate the seven selectable pane plugins from built-in CLI extensions. Document `rexdeck attention --help` and explain why `attention` is not listed by `rexdeck plugins`.
+- Runtime behavior, dependencies and the native host are unchanged.
+
 ## 0.5.0 — 2026-11-09
 
 - Replace ClickUp's append-only command transcript with a responsive Textual task desk: selectable/filterable task queue, Markdown descriptions, scrollable threaded comments, native status labels, task metadata, workspace/list hierarchy browsing and single-screen list/detail navigation in narrow panes.
