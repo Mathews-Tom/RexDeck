@@ -7,6 +7,7 @@
 - Add Textual as a packaged Python dependency; no external ClickUp executable is required.
 - Keep hierarchy selections isolated: clearing a workspace clears its list choice, malformed choices remain recoverable, same-named folders retain distinct identities, and closing discovery stops subsequent reads. Account-preflight access failures clear retained task data; a different workspace's access failure does not clear the current list.
 - Keep provider hooks within their deadline when a binding alarm arrives late: kill the exact native helper and reap it outside the hook's critical path instead of entering a fresh two-second cleanup wait.
+- Published the approved main-CI wheel/sdist (commit `5b34cda`, artifact `13655957088`) to GitHub and PyPI from annotated tag `v0.5.0`; public asset and registry hashes match. A no-cache public-index install listed all seven integrations. Both the candidate wheel and public package passed actual private Rex queue/detail, loading-to-fresh refresh and exact-origin quit; ClickUp was disabled, config restored byte-for-byte and owned sessions/servers removed afterward.
 
 ## 0.4.1 — 2026-11-09
 
