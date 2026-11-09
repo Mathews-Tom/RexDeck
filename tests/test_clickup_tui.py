@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -17,6 +18,7 @@ from textual.widgets import (
     Markdown,
     OptionList,
     Select,
+    Static,
     TextArea,
     Tree,
 )
@@ -77,7 +79,10 @@ class ReadOnlyHierarchy(cu.Service):
 
     def hierarchy(self, team_id: str | None = None) -> tuple[cu.ListChoice, ...]:
         if team_id == "901":
-            return (cu.ListChoice("201", "Incidents", "20", "Support", "On call"),)
+            return (
+                cu.ListChoice("201", "Incidents", "20", "Support", "On call", "30"),
+                cu.ListChoice("202", "Escalations", "20", "Support", "On call", "31"),
+            )
         return (cu.ListChoice("101", "Backlog", "10", "Product"),)
 
 
@@ -114,7 +119,11 @@ class DeskController(cu.Controller):
         return self.view
 
     def read[T](
-        self, operation: Callable[[cu.Service], T], *, current_scope: bool
+        self,
+        operation: Callable[[cu.Service], T],
+        *,
+        current_scope: bool,
+        cancel: threading.Event | None = None,
     ) -> concurrent.futures.Future[T]:
         return completed(operation(self.service))
 
@@ -406,6 +415,8 @@ def test_hierarchy_workspace_filter_and_explicit_choice_save_only_selected_list(
             await pilot.pause()
             await app.workers.wait_for_complete()
             await pilot.pause()
+            tree = picker.query_one("#hierarchy-tree", Tree)
+            assert len(tree.root.children[0].children) == 2
             picker.query_one("#hierarchy-filter", Input).value = "incidents"
             await pilot.pause()
             tree = picker.query_one("#hierarchy-tree", Tree)
@@ -416,11 +427,92 @@ def test_hierarchy_workspace_filter_and_explicit_choice_save_only_selected_list(
             assert saved == []
             tree.select_node(leaf)
             await pilot.pause()
+            cancel = picker.read_cancel
+            picker.query_one("#workspace", Select).value = Select.BLANK
+            await pilot.pause()
+            assert cancel.is_set()
+            assert picker.workspace == ""
+            assert picker.choices == ()
+            assert picker.chosen is None
+            assert not tree.root.children
+            assert picker.query_one("#choose-list", Button).disabled
+            picker.choose_list()
+            assert isinstance(app.screen, tui.HierarchyModal)
+            assert app.screen is picker
+            assert saved == [] and controller.scopes == []
+            picker.query_one("#workspace", Select).value = "901"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            tree.select_node(tree.root.children[0].children[0].children[0])
+            await pilot.pause()
+            assert picker.chosen is not None
+            valid_choice = picker.chosen
+            picker.chosen = replace(valid_choice, id="not-numeric")
+            picker.choose_list()
+            await pilot.pause()
+            assert isinstance(app.screen, tui.HierarchyModal)
+            assert app.screen is picker
+            assert saved == [] and controller.scopes == []
+            assert "Could not select list" in str(
+                picker.query_one("#hierarchy-note", Static).render()
+            )
+            picker.chosen = valid_choice
+            cancel = picker.read_cancel
             await pilot.click("#choose-list")
             await pilot.pause()
             expected = replace(_SELECTION, team="901", list="201")
             assert saved == [expected]
             assert controller.scopes == [expected]
+            assert cancel.is_set()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("exit_method", ["escape", "cancel", "dismiss", "quit"])
+@pytest.mark.parametrize("loading_workspaces", [False, True])
+def test_hierarchy_exit_cancels_discovery_without_changing_scope(
+    exit_method: str, loading_workspaces: bool
+) -> None:
+    class PendingController(DeskController):
+        def read[T](
+            self,
+            operation: Callable[[cu.Service], T],
+            *,
+            current_scope: bool,
+            cancel: threading.Event | None = None,
+        ) -> concurrent.futures.Future[T]:
+            if loading_workspaces:
+                return concurrent.futures.Future()
+            return super().read(operation, current_scope=current_scope, cancel=cancel)
+
+    async def scenario() -> None:
+        controller = PendingController()
+        original_view = controller.snapshot()
+        app = tui.ClickUpApp(controller)
+        async with app.run_test(size=(60, 24)) as pilot:
+            await pilot.pause()
+            await pilot.press("l")
+            await pilot.pause()
+            if not loading_workspaces:
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+            picker = app.screen
+            assert isinstance(picker, tui.HierarchyModal)
+            cancel = picker.read_cancel
+            assert not cancel.is_set()
+            if exit_method == "escape":
+                await pilot.press("escape")
+            elif exit_method == "cancel":
+                await pilot.click("#cancel-hierarchy")
+            elif exit_method == "dismiss":
+                picker.dismiss(None)
+            else:
+                app.exit()
+            await pilot.pause()
+        assert cancel.is_set()
+        assert controller.scopes == []
+        assert controller.snapshot() == original_view
 
     asyncio.run(scenario())
 

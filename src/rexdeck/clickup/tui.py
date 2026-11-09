@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import subprocess
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -382,7 +383,7 @@ class ScopeModal(ModalScreen[frontend.Selection | None]):
 
 
 class HierarchyModal(ModalScreen[frontend.Selection | None]):
-    BINDINGS = [Binding("escape", "dismiss", show=False)]
+    BINDINGS = [Binding("escape", "cancel_hierarchy", show=False)]
 
     def __init__(
         self, controller: frontend.Controller, selection: frontend.Selection
@@ -394,6 +395,7 @@ class HierarchyModal(ModalScreen[frontend.Selection | None]):
         self.workspace = selection.team
         self.chosen: frontend.ListChoice | None = None
         self.generation = 0
+        self.read_cancel = threading.Event()
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
@@ -428,20 +430,38 @@ class HierarchyModal(ModalScreen[frontend.Selection | None]):
         self.run_worker(self.load_workspaces(), exit_on_error=False)
         self.query_one("#cancel-hierarchy", Button).focus()
 
+    def cancel_read(self) -> None:
+        self.read_cancel.set()
+        self.generation += 1
+
+    def on_unmount(self) -> None:
+        self.cancel_read()
+
+    def action_cancel_hierarchy(self) -> None:
+        self.cancel_hierarchy()
+
     async def load_workspaces(self) -> None:
+        cancel = self.read_cancel
+        generation = self.generation
         try:
             workspaces = await asyncio.wrap_future(
                 self.controller.read(
-                    lambda service: service.workspaces(), current_scope=True
+                    lambda service: service.workspaces(),
+                    current_scope=True,
+                    cancel=cancel,
                 )
             )
         except Exception as error:
-            if self.is_mounted:
+            if (
+                self.is_mounted
+                and generation == self.generation
+                and not cancel.is_set()
+            ):
                 self.query_one("#hierarchy-note", Static).update(
                     Text(f"Could not read workspaces: {clean(str(error))}; no retry.")
                 )
             return
-        if not self.is_mounted:
+        if not self.is_mounted or generation != self.generation or cancel.is_set():
             return
         if not workspaces:
             self.query_one("#hierarchy-note", Static).update(
@@ -461,36 +481,46 @@ class HierarchyModal(ModalScreen[frontend.Selection | None]):
 
     @on(Select.Changed, "#workspace")
     def workspace_changed(self, event: Select.Changed) -> None:
-        if not isinstance(event.value, str):
-            return
-        self.workspace = event.value
-        self.generation += 1
+        self.cancel_read()
+        self.workspace = event.value if isinstance(event.value, str) else ""
         self.choices = ()
         self.chosen = None
         self.query_one("#choose-list", Button).disabled = True
         self.rebuild_tree()
+        if not self.workspace:
+            self.query_one("#hierarchy-note", Static).update("Choose a workspace.")
+            return
+        self.read_cancel = threading.Event()
         self.query_one("#hierarchy-note", Static).update(
             "Reading spaces, folders and lists…"
         )
         self.run_worker(
-            self.load_hierarchy(event.value, self.generation), exit_on_error=False
+            self.load_hierarchy(self.workspace, self.generation, self.read_cancel),
+            exit_on_error=False,
         )
 
-    async def load_hierarchy(self, workspace: str, generation: int) -> None:
+    async def load_hierarchy(
+        self, workspace: str, generation: int, cancel: threading.Event
+    ) -> None:
         try:
             choices = await asyncio.wrap_future(
                 self.controller.read(
                     lambda service: service.hierarchy(workspace),
                     current_scope=workspace == self.selection.team,
+                    cancel=cancel,
                 )
             )
         except Exception as error:
-            if self.is_mounted and generation == self.generation:
+            if (
+                self.is_mounted
+                and generation == self.generation
+                and not cancel.is_set()
+            ):
                 self.query_one("#hierarchy-note", Static).update(
                     Text(f"Could not read lists: {clean(str(error))}; no retry.")
                 )
             return
-        if not self.is_mounted or generation != self.generation:
+        if not self.is_mounted or generation != self.generation or cancel.is_set():
             return
         self.choices = choices
         self.rebuild_tree()
@@ -522,7 +552,7 @@ class HierarchyModal(ModalScreen[frontend.Selection | None]):
                 )
             parent = spaces[choice.space_id]
             if choice.folder_name:
-                key = (choice.space_id, choice.folder_name)
+                key = (choice.space_id, choice.folder_id)
                 if key not in folders:
                     folders[key] = parent.add(Text(choice.folder_name), expand=True)
                 parent = folders[key]
@@ -540,12 +570,21 @@ class HierarchyModal(ModalScreen[frontend.Selection | None]):
     @on(Button.Pressed, "#choose-list")
     def choose_list(self) -> None:
         if self.chosen is not None:
-            self.dismiss(
-                replace(self.selection, team=self.workspace, list=self.chosen.id)
-            )
+            try:
+                selection = replace(
+                    self.selection, team=self.workspace, list=self.chosen.id
+                )
+            except ValueError as error:
+                self.query_one("#hierarchy-note", Static).update(
+                    Text(f"Could not select list: {clean(str(error))}")
+                )
+                return
+            self.cancel_read()
+            self.dismiss(selection)
 
     @on(Button.Pressed, "#cancel-hierarchy")
     def cancel_hierarchy(self) -> None:
+        self.cancel_read()
         self.dismiss(None)
 
 

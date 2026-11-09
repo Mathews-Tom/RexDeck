@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import contextlib
+import contextvars
 import getpass
 import json
 import os
@@ -41,6 +42,9 @@ from rexdeck.clickup.text import clean, single_line
 _ID = re.compile(r"[A-Za-z0-9_-]+\Z")
 WRITE_ACTIONS = frozenset(
     {"status", "assignee", "due", "description", "points", "field", "comment"}
+)
+_READ_CANCELLED: contextvars.ContextVar[Callable[[], bool] | None] = (
+    contextvars.ContextVar("clickup_read_cancelled", default=None)
 )
 
 
@@ -185,6 +189,9 @@ class Client(backend.Client):
         return super().post(path, body)
 
     def _before_send(self, method: str, path: str) -> None:
+        cancelled = _READ_CANCELLED.get()
+        if method == "GET" and cancelled is not None and cancelled():
+            raise concurrent.futures.CancelledError()
         if method in {"PUT", "POST"}:
             self._approved(path)
 
@@ -341,6 +348,7 @@ class ListChoice:
     space_id: str
     space_name: str
     folder_name: str = ""
+    folder_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -414,6 +422,7 @@ class Service:
                             space_id,
                             space_name,
                             text(folder.get("name") or ""),
+                            text(folder.get("id")),
                         )
                         choices[choice.id] = choice
             for entry in rows(
@@ -696,17 +705,35 @@ class Controller:
             return self.view
 
     def read[T](
-        self, operation: Callable[[Service], T], *, current_scope: bool
+        self,
+        operation: Callable[[Service], T],
+        *,
+        current_scope: bool,
+        cancel: threading.Event | None = None,
     ) -> concurrent.futures.Future[T]:
         """Run dialog reads without hiding authoritative access failures."""
         with self.lock:
             tag = self.generation, self.request
             service = self.service
 
+            def cancelled() -> bool:
+                with self.lock:
+                    return (cancel is not None and cancel.is_set()) or (
+                        tag[0] != self.generation
+                    )
+
             def load() -> T:
+                token = _READ_CANCELLED.set(cancelled)
                 try:
-                    return operation(service)
+                    if cancelled():
+                        raise concurrent.futures.CancelledError()
+                    result = operation(service)
+                    if cancelled():
+                        raise concurrent.futures.CancelledError()
+                    return result
                 except (ClickUpError, diagnostics.EngineError) as error:
+                    if cancelled():
+                        raise concurrent.futures.CancelledError() from None
                     finding = (
                         engine_error(error)
                         if isinstance(error, diagnostics.EngineError)
@@ -716,12 +743,29 @@ class Controller:
                         "account-mismatch",
                         "authentication",
                         "missing-credential",
-                    } or (current_scope and finding.state == "permission")
+                    } or (
+                        finding.state == "permission"
+                        and (
+                            current_scope
+                            or (
+                                isinstance(error, diagnostics.EngineError)
+                                and error.diagnostic.evidence.get("method") == "GET"
+                                and error.diagnostic.evidence.get("path")
+                                in {"/user", "/team"}
+                            )
+                        )
+                    )
                     with self.lock:
-                        if authoritative and tag == (self.generation, self.request):
+                        if (
+                            authoritative
+                            and not cancelled()
+                            and tag == (self.generation, self.request)
+                        ):
                             self.request += 1
                             self._error(finding)
                     raise
+                finally:
+                    _READ_CANCELLED.reset(token)
 
             return self.pool.submit(load)
 

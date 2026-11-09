@@ -997,11 +997,17 @@ def test_hierarchy_enumerates_foldered_and_folderless_unarchived_lists() -> None
             "/space/2000/folder": {
                 "folders": [
                     {
+                        "id": "2100",
                         "name": "Deals\x1b[31m",
                         "lists": [
                             {"id": "201", "name": "Pipeline"},
                             {"id": "202", "name": "Old", "archived": True},
                         ],
+                    },
+                    {
+                        "id": "2200",
+                        "name": "Deals",
+                        "lists": [{"id": "206", "name": "Other pipeline"}],
                     },
                     {"name": "Old", "archived": True, "lists": [{"id": "203"}]},
                 ]
@@ -1022,7 +1028,10 @@ def test_hierarchy_enumerates_foldered_and_folderless_unarchived_lists() -> None
                 cu.Workspace("20", "Sales workspace"),
             )
             assert service.hierarchy("20") == (
-                cu.ListChoice("201", "Pipeline", "2000", "Sales ", "Deals"),
+                cu.ListChoice("201", "Pipeline", "2000", "Sales ", "Deals", "2100"),
+                cu.ListChoice(
+                    "206", "Other pipeline", "2000", "Sales ", "Deals", "2200"
+                ),
                 cu.ListChoice("204", "Inbox", "2000", "Sales "),
             )
             hierarchy_calls = [
@@ -1090,8 +1099,9 @@ def test_native_status_choices_use_task_home_list_not_tracked_list() -> None:
 
 @pytest.mark.parametrize("failure", ["401", "403"])
 @pytest.mark.parametrize("current_scope", [False, True])
+@pytest.mark.parametrize("preflight", ["/user", "/team"])
 def test_dialog_reads_clear_authoritative_access_failures_only(
-    failure: str, current_scope: bool
+    failure: str, current_scope: bool, preflight: str
 ) -> None:
     backend = Backend()
     with backend_environment(backend):
@@ -1099,21 +1109,25 @@ def test_dialog_reads_clear_authoritative_access_failures_only(
         try:
             settled(controller.refresh())
             settled(controller.select("a"))
-            backend.fail = failure
+            original_handle = backend.handle
+
+            def denied(request: httpx.Request) -> httpx.Response:
+                if request.url.path == f"/api/v2{preflight}":
+                    return httpx.Response(int(failure), json={})
+                return original_handle(request)
+
+            backend.handle = denied  # type: ignore[method-assign]
             future = controller.read(
                 lambda service: service.hierarchy("20"), current_scope=current_scope
             )
             with pytest.raises(diagnostics.EngineError):
                 future.result(timeout=5)
             view = controller.snapshot()
-            if failure == "401" or current_scope:
-                assert view.listing is None and view.detail is None
-                assert view.state == (
-                    "authentication" if failure == "401" else "permission"
-                )
-            else:
-                assert view.state == "ready"
-                assert view.detail is not None and view.detail.task.id == "a"
+            assert view.listing is None and view.detail is None
+            assert view.state == (
+                "authentication" if failure == "401" else "permission"
+            )
+            assert view.selection == cu.Selection("1", "10", "100", "CLICKUP_TEST_A")
         finally:
             controller.close()
 
@@ -1141,6 +1155,95 @@ def test_late_dialog_access_failure_cannot_clear_a_newer_refresh() -> None:
             assert view.state == "ready"
             assert view.listing is not None and view.listing.tasks[0].id == "a"
             assert view.error == ""
+        finally:
+            release.set()
+            controller.close()
+
+
+def test_other_workspace_permission_failure_preserves_selected_list() -> None:
+    backend = Backend()
+    with backend_environment(backend):
+        controller = cu.Controller(cu.Selection("1", "10", "100", "CLICKUP_TEST_A"))
+        try:
+            settled(controller.refresh())
+            settled(controller.select("a"))
+            before = controller.snapshot()
+            original_handle = backend.handle
+
+            def denied(request: httpx.Request) -> httpx.Response:
+                if request.url.path == "/api/v2/team/20/space":
+                    return httpx.Response(403, json={})
+                return original_handle(request)
+
+            backend.handle = denied  # type: ignore[method-assign]
+            future = controller.read(
+                lambda service: service.hierarchy("20"), current_scope=False
+            )
+            with pytest.raises(diagnostics.EngineError):
+                future.result(timeout=5)
+            assert controller.snapshot() == before
+        finally:
+            controller.close()
+
+
+@pytest.mark.parametrize("action", ["cancel", "close", "switch"])
+def test_hierarchy_cancellation_stops_following_http_requests(action: str) -> None:
+    backend = Backend()
+    started, release, cancel = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    with backend_environment(backend):
+        controller = cu.Controller(cu.Selection("1", "10", "100", "CLICKUP_TEST_A"))
+        try:
+            settled(controller.refresh())
+            settled(controller.select("a"))
+            before = controller.snapshot()
+            first_call = len(backend.calls)
+            original_handle = backend.handle
+
+            def blocked(request: httpx.Request) -> httpx.Response:
+                response = original_handle(request)
+                if request.url.path == "/api/v2/user":
+                    started.set()
+                    assert release.wait(5)
+                return response
+
+            backend.handle = blocked  # type: ignore[method-assign]
+            future = controller.read(
+                lambda service: service.hierarchy("20"),
+                current_scope=False,
+                cancel=cancel,
+            )
+            assert started.wait(5)
+            switched = None
+            if action == "cancel":
+                cancel.set()
+            elif action == "close":
+                controller.close()
+            else:
+                switched = controller.switch(
+                    cu.Selection("1", "20", "200", "CLICKUP_TEST_A")
+                )
+            release.set()
+            with pytest.raises(concurrent.futures.CancelledError):
+                future.result(timeout=5)
+            if switched is not None:
+                settled(switched)
+                assert controller.snapshot().selection.list == "200"
+                assert controller.snapshot().error == ""
+            else:
+                assert [path for path, _, _ in backend.calls[first_call:]] == ["/user"]
+                assert controller.snapshot() == before
+            if action == "cancel":
+                # A completed worker must not leak its cancellation into later reads.
+                assert controller.read(
+                    lambda service: service.workspaces(), current_scope=False
+                ).result(timeout=5) == (
+                    cu.Workspace("10", "Engineering workspace"),
+                    cu.Workspace("20", "Sales workspace"),
+                )
         finally:
             release.set()
             controller.close()
