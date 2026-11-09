@@ -1,0 +1,215 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RexDeck launch</title>
+<link rel="stylesheet" href="deck.css">
+<style>
+  .canvas { position: relative; width: 1920px; height: 1080px; overflow: hidden; background:
+    radial-gradient(1100px 700px at 78% 18%, rgba(255, 181, 71, 0.10), transparent 70%),
+    radial-gradient(900px 600px at 10% 95%, rgba(58, 214, 181, 0.08), transparent 70%),
+    var(--ink); }
+  .grid-bg { position: absolute; inset: 0; opacity: 0.35;
+    background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 48px 48px; }
+  .layer { position: absolute; }
+  #title { left: 160px; top: 300px; }
+  #title .l1 { font: 700 104px/1.02 var(--display); color: var(--fg); letter-spacing: -0.02em; }
+  #title .l2 { font: 700 104px/1.02 var(--display); color: var(--amber); letter-spacing: -0.02em; }
+  #title .mark { margin-top: 44px; font: 600 28px var(--display); color: var(--muted); letter-spacing: 0.32em; text-transform: uppercase; }
+  #rex { left: 190px; top: 70px; width: 1540px; height: 820px; }
+  #shell, #right, #right2 { font-size: 17px; }
+  #palette { position: absolute; left: 50%; top: 90px; width: 620px; margin-left: -310px;
+    background: #191c22; border: 1px solid #3a3f4a; border-radius: 12px; box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+    font: 17px var(--mono); color: var(--fg); overflow: hidden; }
+  #palette .pin { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  #palette .caret { display: inline-block; width: 9px; height: 19px; background: var(--amber); vertical-align: -3px; margin-left: 2px; }
+  #palette .prow { display: flex; justify-content: space-between; padding: 10px 18px; }
+  #palette .prow.on { background: rgba(255, 181, 71, 0.14); box-shadow: inset 3px 0 0 var(--amber); }
+  #caption { left: 0; right: 0; top: 940px; text-align: center; }
+  #caption .chip { font-size: 30px; padding: 14px 28px; }
+  #caption .chip b { color: var(--amber); }
+  #grid { left: 120px; top: 190px; width: 1680px; height: 760px; }
+  #grid .card { position: absolute; width: 820px; height: 360px; }
+  #grid .card .rex { position: absolute; inset: 0; }
+  #grid .card .pane { left: 0; right: 0; font-size: 15px; }
+  #grid .card .label { position: absolute; right: 18px; top: -20px; }
+  #grid .card .label .chip { font-size: 21px; padding: 8px 18px; }
+  #head5 { left: 0; right: 0; top: 70px; text-align: center; font: 700 56px var(--display); color: var(--fg); letter-spacing: -0.01em; }
+  #head5 span { color: var(--amber); }
+  #keyq { left: 1380px; top: 520px; font-size: 96px; }
+  #end { left: 0; right: 0; top: 0; bottom: 0; }
+  #end .word { position: absolute; left: 160px; top: 230px; font: 800 150px/1 var(--display); color: var(--fg); letter-spacing: -0.03em; }
+  #end .word span { color: var(--amber); }
+  #end .tag { position: absolute; left: 166px; top: 410px; width: 950px; font: 600 34px/1.35 var(--display); color: var(--fg); }
+  #end .tools { position: absolute; left: 160px; top: 580px; width: 980px; }
+  #end .tools .chip { font-size: 20px; padding: 7px 14px; }
+  #end .code { position: absolute; left: 160px; top: 700px; padding: 22px 30px; border-radius: 12px; background: #15181e;
+    border: 1px solid var(--line); font: 28px/1.6 var(--mono); color: var(--fg); white-space: pre; }
+  #end .url { position: absolute; left: 166px; top: 900px; font: 600 26px var(--display); color: var(--muted); }
+  #end .mini { left: 1190px; top: 190px; width: 640px; height: 700px; }
+  #end .mini .pane { left: 0; right: 0; font-size: 14px; }
+  #end .mini .pane + .pane { border-left: 0; border-top: 1px solid var(--line); }
+  .disclosure { position: absolute; right: 40px; bottom: 18px; font: 20px var(--display); color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="canvas" id="stage">
+  <div class="grid-bg"></div>
+
+  <div class="layer" id="title">
+    <div class="l1">Your tools and data.</div>
+    <div class="l2">At home in Rex.</div>
+    <div class="mark">RexDeck</div>
+  </div>
+
+  <div class="rex layer" id="rex">
+    <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="tab"><b>Rex</b> — ~/projects/rexdeck</span></div>
+    <div class="body">
+      <div class="pane" id="shell"></div>
+      <div class="pane" id="right"></div>
+      <div class="pane" id="right2"></div>
+      <div id="palette"></div>
+    </div>
+  </div>
+
+  <div class="layer" id="grid"></div>
+  <div class="layer" id="head5">Familiar tools. <span>Purpose-built views.</span></div>
+  <div class="layer" id="keyq"><span class="key">q</span></div>
+  <div class="layer" id="caption"><span class="chip"></span></div>
+
+  <div class="layer" id="end">
+    <div class="word">Rex<span>Deck</span></div>
+    <div class="tag">Discover and enable familiar terminal tools and purpose-built interfaces for CLI output and APIs—all in native Rex panes.</div>
+    <div class="tools">
+      <div class="tool-group"><div class="tool-label">Tools &amp; views</div><div class="tool-row" id="tools"></div></div>
+    </div>
+    <div class="code"><span class="a">$</span> uv tool install rexdeck
+<span class="a">$</span> rexdeck setup
+<span class="a">$</span> rexdeck enable files git clickup</div>
+    <div class="url">github.com/Mathews-Tom/RexDeck</div>
+    <div class="rex mini"><div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="tab"><b>Rex</b> — ~/projects/rexdeck</span></div>
+      <div class="body"><div class="pane focus" id="endTop" style="top:0; bottom:50%"></div><div class="pane" id="endBottom" style="top:50%; bottom:0"></div></div></div>
+  </div>
+  <div class="disclosure">Illustrated previews · sample data</div>
+</div>
+<script src="tui.js"></script>
+<script>
+const DURATION = 21;
+const $ = (id) => document.getElementById(id);
+const clamp = (x) => Math.max(0, Math.min(1, x));
+const ease = (x) => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const ramp = (t, a, b) => ease((t - a) / (b - a));
+const win = (t, a, b, c, d) => Math.min(ramp(t, a, b), 1 - ramp(t, c, d));
+const show = (el, o, dy = 0, s = 1) => {
+  el.style.opacity = o.toFixed(3);
+  el.style.transform = `translateY(${dy.toFixed(1)}px) scale(${s.toFixed(4)})`;
+  el.style.visibility = o > 0.001 ? "visible" : "hidden";
+};
+
+// Static content
+document.querySelector("#end #tools").innerHTML = [...TUI.hostedTools, "ClickUp · API-backed pane"].map((x) => `<span class="chip"><i></i>${x}</span>`).join("");
+const cards = [
+  ["gh-dash", "pull requests & issues", TUI.ghdash(), 0, 0],
+  ["markdown-reader", "docs with in-pane Mermaid", TUI.mdreader(), 860, 0],
+  ["tokscale", "token usage, live", TUI.tokscale(), 0, 400],
+  ["ClickUp", "API-backed task desk", TUI.clickup(), 860, 400],
+];
+$("grid").innerHTML = cards.map(([name, what, body, x, y], i) => `
+  <div class="card" id="card${i}" style="left:${x}px; top:${y}px">
+    <div class="rex"><div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="tab"><b>Rex</b> — ${name}</span></div><div class="body"><div class="pane" style="left:0;right:0">${body}</div></div></div>
+    <div class="label"><span class="chip"><i></i>${name} <span class="m" style="font-weight:500">· ${what}</span></span></div>
+  </div>`).join("");
+$("right").innerHTML = TUI.yazi();
+$("right2").innerHTML = TUI.lazygit();
+$("endTop").innerHTML = TUI.lazygit();
+$("endBottom").innerHTML = TUI.tokscale();
+
+const captions = [
+  [5.9, 8.3, "<b>Yazi</b> — browse files without leaving Rex"],
+  [8.9, 11.3, "<b>lazygit</b> — stage, commit and diff in place"],
+  [15.3, 17.0, "Press <b>q</b> — focus returns exactly where you were"],
+];
+
+function typed(text, t, a, b) {
+  const n = Math.round(clamp((t - a) / (b - a)) * text.length);
+  return text.slice(0, n);
+}
+
+function setTime(t) {
+  // Scene 1: title
+  const tIn1 = ramp(t, 0.2, 0.9), tIn2 = ramp(t, 0.7, 1.4), tIn3 = ramp(t, 1.2, 1.8), tOut = 1 - ramp(t, 2.6, 3.0);
+  const kids = $("title").children;
+  show(kids[0], tIn1 * tOut, 30 * (1 - tIn1));
+  show(kids[1], tIn2 * tOut, 30 * (1 - tIn2));
+  show(kids[2], tIn3 * tOut, 20 * (1 - tIn3));
+  show($("title"), t < 3.05 ? 1 : 0);
+
+  // Rex window: scenes 2-4 and 6
+  const rexIn = ramp(t, 3.0, 3.6), rexOut = 1 - ramp(t, 11.3, 11.7);
+  const rexBack = win(t, 15.0, 15.4, 17.0, 17.4);
+  const rexO = t < 13 ? rexIn * rexOut : rexBack;
+  show($("rex"), rexO, 0, 0.96 + 0.04 * (t < 13 ? rexIn : ramp(t, 15.0, 15.4)));
+
+  // Split: shell full until 5.5, then right pane opens; closes at 16.0 after q.
+  let split;
+  if (t < 13) split = ramp(t, 5.45, 6.05);
+  else split = 1 - ramp(t, 16.0, 16.5);
+  const shellW = 100 - 50 * split;
+  $("shell").style.left = "0"; $("shell").style.width = shellW + "%";
+  for (const id of ["right", "right2"]) { $(id).style.left = shellW + "%"; $(id).style.width = 50 * split + "%"; }
+  const lazy = t < 13 ? ramp(t, 8.45, 8.75) : 1;
+  $("right").style.opacity = (1 - lazy).toFixed(3);
+  $("right2").style.opacity = lazy.toFixed(3);
+  const rightFocused = split > 0.5;
+  $("shell").classList.toggle("focus", !rightFocused);
+  $("right").classList.toggle("focus", rightFocused && lazy < 0.5);
+  $("right2").classList.toggle("focus", rightFocused && lazy >= 0.5);
+  $("shell").innerHTML = TUI.shell();
+
+  // Palette: launch Files, then Git
+  const p1 = win(t, 3.8, 4.0, 5.1, 5.35), p2 = win(t, 7.85, 8.0, 8.35, 8.5);
+  const pal = $("palette");
+  if (p1 > 0.001) pal.innerHTML = TUI.palette(typed("files", t, 4.05, 4.7), 0);
+  else if (p2 > 0.001) pal.innerHTML = TUI.palette(typed("git", t, 8.0, 8.25), 0);
+  pal.querySelectorAll(".caret").forEach((c) => (c.style.opacity = Math.floor(t * 3) % 2 ? 0.2 : 1));
+  show(pal, Math.max(p1, p2), -12 * (1 - Math.max(p1, p2)));
+
+  // Captions
+  let cap = null, capO = 0;
+  for (const [a, b, html] of captions) {
+    const o = win(t, a, a + 0.35, b - 0.3, b);
+    if (o > capO) { capO = o; cap = html; }
+  }
+  if (cap) $("caption").firstElementChild.innerHTML = cap;
+  show($("caption"), capO, 16 * (1 - capO));
+
+  // Scene 5: montage
+  show($("head5"), win(t, 11.7, 12.2, 14.7, 15.0), 0);
+  for (let i = 0; i < 4; i++) {
+    const a = 11.9 + i * 0.32;
+    const o = win(t, a, a + 0.45, 14.7, 15.0);
+    show($("card" + i), o, 40 * (1 - ramp(t, a, a + 0.45)), 0.97 + 0.03 * ramp(t, a, a + 0.45));
+  }
+  show($("grid"), t > 11.6 && t < 15.2 ? 1 : 0);
+
+  // Scene 6: q
+  const q = win(t, 15.55, 15.75, 16.15, 16.45);
+  show($("keyq"), q, 0, 0.8 + 0.2 * ramp(t, 15.55, 15.75) - 0.08 * ramp(t, 15.8, 15.95) + 0.08 * ramp(t, 15.95, 16.1));
+
+  // Scene 7: end card
+  const e = $("end").children;
+  const eIn = (i) => ramp(t, 17.5 + i * 0.25, 18.1 + i * 0.25);
+  for (let i = 0; i < e.length; i++) show(e[i], eIn(i), 28 * (1 - eIn(i)));
+  show($("end"), t > 17.4 ? 1 : 0);
+}
+window.DURATION = DURATION;
+window.setTime = setTime;
+setTime(Number(new URLSearchParams(location.search).get("t") || 1.5));
+</script>
+</body>
+</html>

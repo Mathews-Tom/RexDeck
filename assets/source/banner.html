@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RexDeck banner</title>
+<link rel="stylesheet" href="deck.css">
+<style>
+  .canvas { position: relative; width: 1280px; height: 640px; overflow: hidden; background:
+    radial-gradient(700px 480px at 85% 10%, rgba(255, 181, 71, 0.13), transparent 70%),
+    radial-gradient(600px 420px at 0% 100%, rgba(58, 214, 181, 0.09), transparent 70%),
+    var(--ink); }
+  .grid-bg { position: absolute; inset: 0; opacity: 0.35;
+    background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 32px 32px; }
+  .copy { position: absolute; left: 64px; top: 64px; width: 520px; }
+  .word { font: 800 68px/1 var(--display); color: var(--fg); letter-spacing: -0.03em; }
+  .word span { color: var(--amber); }
+  .head { margin-top: 22px; font: 700 34px/1.15 var(--display); color: var(--fg); letter-spacing: -0.01em; }
+  .head span { color: var(--amber); }
+  .sub { margin-top: 14px; font: 500 18px/1.5 var(--display); color: var(--muted); }
+  .tools { margin-top: 20px; }
+  .tools .chip { font-size: 14px; padding: 6px 10px; gap: 7px; }
+  .tools .chip i { width: 7px; height: 7px; }
+  .code { position: absolute; left: 64px; bottom: 56px; font: 18px var(--mono); color: var(--fg); }
+  .code .a { margin-right: 10px; }
+  #rex { left: 630px; top: 64px; width: 610px; height: 360px; }
+  #rex .pane { font-size: 11.5px; }
+  #rex2 { left: 720px; top: 360px; width: 520px; height: 230px; }
+  #rex2 .pane { font-size: 11.5px; left: 0; right: 0; }
+  .rex .chrome { height: 30px; }
+  .rex .chrome .dot { width: 10px; height: 10px; }
+  .rex .tab { font-size: 11px; }
+  .rex .body { top: 30px; }
+  .bar { height: 20px; font-size: 10px; }
+  .cols { bottom: 20px; }
+  .box h6 { font-size: 10.5px; }
+  .tag { position: absolute; font: 600 13px var(--display); }
+  .tag .chip { font-size: 14px; padding: 6px 12px; gap: 7px; }
+  .tag .chip i { width: 7px; height: 7px; }
+  .disclosure { position: absolute; right: 40px; bottom: 15px; font: 11px var(--display); color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="canvas">
+  <div class="grid-bg"></div>
+  <div class="copy">
+    <div class="word">Rex<span>Deck</span></div>
+    <div class="head">Your tools and data.<br><span>At home in Rex.</span></div>
+    <div class="sub">Discover and enable familiar terminal tools and purpose-built interfaces for CLI output and APIs—all in native Rex panes.</div>
+    <div class="tools">
+      <div class="tool-group"><div class="tool-label">Enable the tools and views you need</div><div class="tool-row" id="pane-tools"></div></div>
+    </div>
+  </div>
+  <div class="code"><span class="a">$</span>uv tool install rexdeck</div>
+
+  <div class="rex" id="rex">
+    <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="tab"><b>Rex</b> — ~/projects/rexdeck</span></div>
+    <div class="body">
+      <div class="pane" id="left" style="left:0; width:40%"></div>
+      <div class="pane focus" id="right" style="left:40%; right:0"></div>
+    </div>
+  </div>
+  <div class="rex" id="rex2">
+    <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="tab"><b>Rex</b> — ClickUp task desk</span></div>
+    <div class="body"><div class="pane" id="clickup"></div></div>
+  </div>
+  <div class="tag" style="left: 1040px; top: 34px"><span class="chip"><i></i>Yazi + lazygit</span></div>
+  <div class="disclosure">Illustrated previews · sample data</div>
+</div>
+<script src="tui.js"></script>
+<script>
+  document.getElementById("pane-tools").innerHTML = [...TUI.hostedTools, "ClickUp"].map((x) => `<span class="chip"><i></i>${x}</span>`).join("");
+  document.getElementById("left").innerHTML = TUI.yazi(true);
+  document.getElementById("right").innerHTML = TUI.lazygit();
+  document.getElementById("clickup").innerHTML = TUI.clickup();
+</script>
+</body>
+</html>
