@@ -1,63 +1,97 @@
 # RexDeck
 
-A collection of independently selectable plugins and extensions that bring existing tools into your own Rex application.
+![RexDeck: terminal tools and purpose-built views in Rex](https://raw.githubusercontent.com/Mathews-Tom/RexDeck/main/assets/rexdeck-banner.png)
 
-Files, local Git, Markdown, Usage, GitHub and rich-format viewing bring unmodified Yazi, lazygit, markdown-reader, tokscale and gh-dash into native Rex terminals. ClickUp adds an identity-bound read/write pane backed by the owner's MIT engine with explicit confirmation. Native attention retains exact terminal navigation; opt-in Claude Code/Codex hooks add provider-reported subagent parentage (script-qualified, owner live-event proof pending). Linear is not implemented; contributions are welcome. Select only the tools you need.
+**Your tools and data, at home in Rex.**
 
-## Plugins and extensions
+Discover and enable familiar terminal tools and purpose-built interfaces for CLI output and APIs—all in native Rex panes.
 
-| Integration | Purpose | Status |
-| --- | --- | --- |
-| [Files](plugins/files/README.md) | Browse, preview, and manage files using unmodified Yazi in a native Rex terminal | Available |
-| [Git](plugins/git/README.md) | Inspect, stage, and commit in the invoking repository/worktree using unmodified lazygit | Available |
-| [Markdown](plugins/markdown/README.md) | Read a selected Markdown file or the invoking directory with in-pane Mermaid diagrams using unmodified markdown-reader | New in 0.2.0 |
-| [Usage](plugins/usage/README.md) | Watch machine-wide token usage, models, sessions and projects for omp with upstream online refresh using unmodified tokscale | New in 0.2.0 |
-| [GitHub](plugins/github/README.md) | Repository-scoped PRs/issues with explicit host/account using unmodified gh-dash | New in 0.2.0; github.com with one account tested |
-| [Viewer](plugins/viewer/README.md) | Selected PDF (page navigation), JPG, PNG and SVG previews using Yazi and Rex Kitty graphics | New in 0.2.0 |
-| [ClickUp](plugins/clickup/README.md) | Responsive task desk, Markdown detail/comments, workspace/list browsing and reviewed task changes | Available |
-| [Native attention](plugins/attention/README.md) | Retain explicit native worker status, filter by project/location, and revalidate exact terminal navigation | New in 0.2.0; provider identity remains unknown |
-| [Provider subagents](plugins/attention/README.md#optional-provider-hooks-d11-implement-and-hold-for-owner) | Opt-in Claude Code/Codex start/stop metadata, parentage and exact inherited-terminal navigation | New in 0.2.0; script-qualified, real provider events not yet observed; omp interface missing |
-| Linear | Independently selectable Linear workflows | Not implemented — help wanted |
+Keep the TUIs you already use, and add focused views over the commands and APIs behind your workflow. Each integration has its own setup and controls; ClickUp is one example of an existing API presented through a RexDeck interface.
 
-Published RexDeck releases are available on [PyPI](https://pypi.org/project/rexdeck/); `rexdeck plugins` is new in version 0.1.1, and every integration above except Files and Git is new in 0.2.0.
-
-### Untested environments — feedback and PRs welcome
-
-The maintainer can only qualify what they can access. These gaps are known, not hidden:
-
-- **Linear** is not implemented: the maintainer has no Linear account to qualify it against. A contributed integration should follow [Adding an integration](#adding-an-integration) and exercise real Linear data.
-- **GitHub Enterprise Server and multiple GitHub accounts**: the GitHub integration's explicit `repo=HOST/OWNER/REPO` and `account=LOGIN` checks apply to any host, but they have only been exercised on `github.com` with one account.
-- **ClickUp with a second account or workspace**: isolation is covered by tests and a deliberate account-mismatch check, not by a second real account.
-
-If you have one of these environments, open an issue with what you ran and what you observed, or raise a PR with the fix and its evidence.
+Choose what you need, open it from Rex, and return to your invoking terminal when you quit a hosted pane. Installing RexDeck does not enable a suite of tools or replace your existing applications.
 
 ## Getting started
 
-The qualified platform is **macOS arm64, Rex API revision 10 baseline, and Python 3.12+**. Revision 10 is not an exact-version compatibility gate. Rex must already be installed and running; RexDeck does not bootstrap Rex, Homebrew, Python, or uv. Other platforms, remote hosts, and multi-device operation are not qualified.
+You need **Rex already running, Python 3.12+ and [uv](https://docs.astral.sh/uv/)**. The qualified platform is **macOS arm64 with Rex API revision 10 as the baseline**, not an exact-version gate. Other platforms and remote/multi-device operation are not yet qualified.
 
-Install the latest published release from PyPI:
+Install RexDeck, select your Rex configuration/server, and see the available integrations:
 
 ```sh
 uv tool install --default-index https://pypi.org/simple rexdeck
+rexdeck setup
+rexdeck plugins
 ```
 
-Integrations merged after the latest release are available from an exact public source commit until the next published version. Pin the full commit, never a branch:
+Start with the built-in [ClickUp task desk](plugins/clickup/README.md), which needs no separate TUI executable:
+
+```sh
+rexdeck enable clickup
+```
+
+Open **RexDeck ClickUp** from Rex's command palette. The [ClickUp guide](plugins/clickup/README.md#select-and-enable) covers token setup and first-run workspace/list selection. Task changes require an explicit proposal review; the pane is write-capable, not a sandbox.
+
+Already use Yazi and lazygit? Enable both together:
+
+```sh
+rexdeck enable files git
+```
+
+Install each selected upstream tool yourself first; the [dependency guide](#selected-dependencies) lists qualified versions. RexDeck never installs Rex, Python, uv or upstream tools. Pick a [pane placement and size](#pane-placement-and-size), and leave everything else disabled.
+
+## Explore the deck
+
+| Pane plugin | Built with | What you can do |
+| --- | --- | --- |
+| [ClickUp](plugins/clickup/README.md) | RexDeck interface for the ClickUp API, powered by Textual | Browse a task queue, read Markdown details/comments, choose a workspace/list and review task changes |
+| [Files](plugins/files/README.md) | Unmodified Yazi | Browse, preview and manage files |
+| [Git](plugins/git/README.md) | Unmodified lazygit | Inspect, stage and commit in the invoking repository/worktree |
+| [Markdown](plugins/markdown/README.md) | Unmodified markdown-reader | Read Markdown with in-pane Mermaid diagrams |
+| [Usage](plugins/usage/README.md) | Unmodified tokscale | Explore machine-wide token usage, models, sessions and projects for omp, with upstream online refresh |
+| [GitHub](plugins/github/README.md) | Unmodified gh-dash | Work with repository-scoped PRs/issues using an explicit host/account |
+| [Viewer](plugins/viewer/README.md) | Yazi, pdftoppm and resvg | Preview PDF pages, JPG, PNG and SVG through Rex Kitty graphics |
+
+The hosted TUIs remain upstream projects with their own licenses, settings and capabilities. Purpose-built panes adapt supported commands and APIs to the Rex workspace. Plugin-specific setup, controls and limitations live in the linked guides.
+
+### Built-in CLI extensions
+
+`rexdeck plugins` lists the seven selectable pane plugins above. **`attention` is a built-in CLI command, not a pane plugin**, so it does not appear in that list and there is no `rexdeck enable attention` step. After `rexdeck setup`, explore it with:
+
+```sh
+rexdeck attention --help
+rexdeck attention list
+```
+
+The [attention guide](plugins/attention/README.md) covers explicitly observing a terminal's reported status and navigating back to that exact terminal after revalidation. This is an on-demand CLI, not a visual dashboard or background monitor. Optional Claude Code/Codex provider hooks are script-qualified, not yet real-provider-event-qualified; an omp hook interface is still missing.
+
+### A look inside
+
+[![Illustrated RexDeck walkthrough: familiar TUIs and an API-backed ClickUp view in Rex](https://raw.githubusercontent.com/Mathews-Tom/RexDeck/main/assets/rexdeck-launch.gif)](https://github.com/Mathews-Tom/RexDeck/blob/main/assets/rexdeck-launch.mp4)
+
+[Watch or download the MP4](https://github.com/Mathews-Tom/RexDeck/blob/main/assets/rexdeck-launch.mp4) · [Editable media sources](assets/source/)
+
+The banner and animation are stylized illustrations with fictional sample data, not live screen recordings. The media deliberately omit version numbers.
+
+### Help cover more environments
+
+Feedback and PRs are welcome, especially for environments the maintainer cannot currently qualify:
+
+- **Linear:** no integration yet; the maintainer has no Linear account to qualify one. Follow [Adding an integration](#adding-an-integration) and exercise real Linear data.
+- **GitHub Enterprise Server or multiple GitHub accounts:** explicit host/repository/account checks are implemented, but only `github.com` with one account has been exercised.
+- **A second ClickUp account or workspace:** isolation has test coverage and a deliberate account-mismatch check, not a second real account.
+
+Include what you ran and what you observed in an issue or PR. The [development guide](#development) covers local checks.
+
+## Usage and configuration
+
+Published releases are available on [PyPI](https://pypi.org/project/rexdeck/). For changes merged after a release, pin an exact public source commit rather than a moving branch:
 
 ```sh
 uv tool install "rexdeck @ git+https://github.com/Mathews-Tom/RexDeck@<full-commit-sha>"
 ```
 
-Installing or upgrading either way replaces only the RexDeck package. After an upgrade that changes the bundled host (for example from 0.1.0), `status` reports each previously enabled integration as a `fault` asking for a refresh; run `rexdeck enable <id>` for each one. If an integration's tool is missing at that point, `status` reports `missing-dependency` instead; restore the tool first, then run `rexdeck enable <id>`. Integrations you never enabled stay unselected, and no upstream tool is installed.
+Installing or upgrading replaces only the RexDeck package. If an upgrade changes the bundled host, `status` reports a refresh `fault` for previously enabled integrations; run `rexdeck enable <id>` for each one. A missing selected tool reports `missing-dependency` instead: restore that tool first, then rerun `rexdeck enable <id>`. Integrations you never enabled stay unselected.
 
-Then save your target and enable only the integrations you need:
-
-```sh
-rexdeck setup
-rexdeck enable files git clickup     # one or more integrations
-rexdeck status
-```
-
-The installed command works from any directory; the package includes the shared native action and Python launcher for every integration. No shell wrapper, `RD_*` variables, or developer checkout is needed at runtime. Ensure the tool executable directory reported by `uv` is on `PATH`.
+The installed command works from any directory; the package includes the shared native action and Python launcher for every integration. No shell wrapper, `RD_*` variables or developer checkout is needed. Ensure the tool executable directory reported by `uv` is on `PATH`.
 
 `setup` remembers the selected Rex configuration and running server without changing Rex configuration. Interactive setup asks for approval before saving a personal-server target. Use `enable <id> [<id> ...]` for one or more integrations (`files`, `git`, `markdown`, `usage`, `github`, `viewer`, `clickup`), `status [<id>]` to inspect ownership/registration, and `disable <id> [<id> ...]` to remove only the named integrations. With several names, each one is enabled or disabled independently in the order given; a failure is reported in that integration's row while the others still change, and the command exits nonzero if any failed. An unknown name refuses the whole command before anything changes. `--placement`/`--size` apply to every named integration; put them before or after the list of names, not between names. At a terminal, `enable`, `disable`, `status` and `plugins` print a table; add `--json` (or pipe the output) for JSON. A single name keeps the single-integration JSON document. Unqualified `status` reports every integration, retaining healthy results alongside an integration-specific fault if a sibling cannot be inspected. See the plugin READMEs for prerequisites, capabilities, updates, and removal.
 
@@ -109,7 +143,7 @@ Rex, Yazi, lazygit, Git, Homebrew, Python and uv remain externally managed prere
 
 ## Design principles
 
-- **Reuse tools, do not rebuild them.** Preserve their normal interfaces, configuration, authentication, and capabilities.
+- **Make tools and output useful in Rex.** Host established TUIs without rewriting their interfaces, and build focused views for supported CLI output and APIs.
 - **Prefer native Rex integration.** Use native actions and panes where sufficient. LazyRex is optional only where a particular integration needs an existing capability; it is not a collection-wide dependency.
 - **Keep features independently selectable.** Install only the dependencies needed by the chosen integration; no implicit default suite, hooks, or autostart.
 - **Preserve user context and ownership.** Pass explicit launch context and structured arguments, keep unrelated work intact, and make removal reversible.

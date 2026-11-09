@@ -1,0 +1,148 @@
+/* Shared look for the RexDeck launch banner and video. System fonts only. */
+:root {
+  --ink: #0e0f12;
+  --ink-2: #16181d;
+  --ink-3: #1d2027;
+  --line: #2a2e37;
+  --fg: #e8e6e1;
+  --muted: #8b8f98;
+  --amber: #ffb547;
+  --teal: #3ad6b5;
+  --coral: #ff6f59;
+  --sky: #6cb6ff;
+  --lilac: #c3a6ff;
+  --mono: "SF Mono", "SFNSMono", Menlo, monospace;
+  --display: "Avenir Next", "Avenir", "Helvetica Neue", sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--ink); }
+
+/* Rex window */
+.rex {
+  position: absolute;
+  background: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  overflow: hidden;
+}
+.rex .chrome {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: #121419;
+}
+.rex .dot { width: 12px; height: 12px; border-radius: 50%; }
+.rex .dot.r { background: #ff5f57; }
+.rex .dot.y { background: #febc2e; }
+.rex .dot.g { background: #28c840; }
+.rex .tab {
+  margin-left: 18px;
+  font: 600 13px var(--display);
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.rex .tab b { color: var(--fg); font-weight: 600; }
+.rex .body { position: absolute; top: 38px; left: 0; right: 0; bottom: 0; }
+
+/* Panes */
+.pane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+  background: var(--ink-2);
+  font: 14px/1.55 var(--mono);
+  color: var(--fg);
+  white-space: pre;
+}
+.pane.focus { box-shadow: inset 0 0 0 1.5px var(--amber); }
+.pane + .pane { border-left: 1px solid var(--line); }
+.pad { padding: 14px 16px; }
+
+/* Terminal colors */
+.a { color: var(--amber); }
+.t { color: var(--teal); }
+.c { color: var(--coral); }
+.s { color: var(--sky); }
+.l { color: var(--lilac); }
+.m { color: var(--muted); }
+.b { font-weight: 700; }
+.sel { background: #2b3a55; color: #fff; display: inline-block; width: 100%; }
+.hl { background: rgba(255, 181, 71, 0.16); }
+.bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 26px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #11131a;
+  border-top: 1px solid var(--line);
+  font: 12px var(--mono);
+  color: var(--muted);
+}
+.bar .mode { background: var(--amber); color: #111; padding: 1px 8px; border-radius: 3px; font-weight: 700; }
+
+/* TUI layouts */
+.cols { position: absolute; inset: 0 0 26px 0; display: grid; }
+.col { overflow: hidden; padding: 10px 12px; border-right: 1px solid var(--line); }
+.col:last-child { border-right: 0; }
+.box { border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; overflow: hidden; }
+.box.on { border-color: var(--teal); }
+.box h6 { font: 600 12px var(--mono); color: var(--teal); margin-bottom: 4px; }
+.box.on h6 { color: var(--teal); }
+.box:not(.on) h6 { color: var(--muted); }
+
+/* Labels */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: rgba(22, 24, 29, 0.92);
+  border: 1px solid var(--line);
+  font: 600 22px var(--display);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.chip i { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); display: inline-block; }
+.tool-group + .tool-group { margin-top: 12px; }
+.tool-label { font: 600 13px var(--display); color: var(--muted); margin-bottom: 7px; }
+.tool-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Illustration of RexDeck's own queue/reader, using fictional task data. */
+.desk { position: absolute; inset: 0 0 26px; display: flex; flex-direction: column; white-space: normal; }
+.desk-scope { padding: 5px 10px 0; font-weight: 700; }
+.desk-fresh { padding: 0 10px; color: var(--teal); font-size: 0.85em; }
+.desk-toolbar { padding: 4px 10px; border-bottom: 1px solid var(--line); color: var(--sky); }
+.desk-columns { display: grid; grid-template-columns: 43% 57%; flex: 1; min-height: 0; }
+.desk-queue, .desk-reader { padding: 6px 10px; overflow: hidden; }
+.desk-queue { border-right: 1px solid var(--line); }
+.desk-filter { border: 1px solid var(--line); padding: 2px 5px; color: var(--muted); margin-bottom: 4px; }
+.desk-controls, .desk-meta { font-size: 0.85em; color: var(--muted); }
+.desk-task { display: flex; gap: 6px; justify-content: space-between; padding: 3px 4px; white-space: nowrap; }
+.desk-task b { overflow: hidden; text-overflow: ellipsis; font-weight: 400; }
+.desk-task span { font-size: 0.8em; flex-shrink: 0; }
+.desk-reader h5 { font: 700 1em var(--mono); margin-bottom: 3px; }
+.desk-reader p { margin: 5px 0; }
+.desk-comment { border-left: 2px solid var(--line); padding-left: 6px; font-size: 0.9em; }
+.desk + .bar { gap: 10px; font-size: 0.8em; }
+.key {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0.05em 0.45em;
+  border-radius: 8px;
+  border: 1px solid #4a4f5b;
+  border-bottom-width: 4px;
+  background: #1f232b;
+  font: 700 1em var(--mono);
+  color: var(--fg);
+  text-align: center;
+}
