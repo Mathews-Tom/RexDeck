@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Identify ClickUp's RexDeck-authored interface with a `[RexDeck UI]` badge instead of a `(built-in)` suffix in terminal plugin/status reports; leave other tool labels and JSON output unchanged.
+- Use compact column spacing when a terminal plugin/status table's normal gutters would exceed the terminal width.
+
 ## 0.5.1 — 2026-11-09
 
 - Present RexDeck as a common home for familiar terminal tools and purpose-built CLI/API interfaces, with a simpler README quick start and explicit upstream attribution.

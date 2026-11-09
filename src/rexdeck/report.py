@@ -42,8 +42,8 @@ def _tool(row: Mapping[str, object]) -> str:
     tool = _plain(integration.get("tool", "-"))
     versions = integration.get("versions")
     if isinstance(versions, list) and versions:
-        return f"{tool} {'/'.join(_plain(version) for version in versions)}"
-    return f"{tool} (built-in)" if integration.get("owned_module") else tool
+        tool = f"{tool} {'/'.join(_plain(version) for version in versions)}"
+    return f"{tool} [RexDeck UI]" if integration.get("owned_module") else tool
 
 
 def _pane(row: Mapping[str, object]) -> str:
@@ -82,7 +82,8 @@ def render(
         lines.append(f"Rex server: {server}")
     lines.append("")
 
-    table = [
+    available = width or shutil.get_terminal_size((100, 24)).columns
+    table: list[tuple[str, str, str, str]] = [
         (name, _plain(row.get("state", "unknown")), _tool(row), _pane(row))
         for name, row in rows.items()
     ]
@@ -93,16 +94,16 @@ def render(
         else len(headers[index])
         for index in range(len(headers))
     ]
+    separator = "  " if sum(widths) + 2 * (len(headers) - 1) <= available else " "
 
     def format_row(cells: tuple[str, str, str, str], row_state: str) -> str:
         padded = [cell.ljust(widths[index]) for index, cell in enumerate(cells)]
         padded[1] = _paint(padded[1], row_state, color)
-        return "  ".join(padded).rstrip()
+        return separator.join(padded).rstrip()
 
     lines.append(format_row(headers, ""))
     lines.extend(format_row(cells, cells[1]) for cells in table)
 
-    available = width or shutil.get_terminal_size((100, 24)).columns
     wrap = max(40, available - 4)
     # One shared cause (for example Rex missing from PATH) is listed once.
     grouped: dict[str, list[str]] = {}

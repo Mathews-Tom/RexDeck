@@ -70,3 +70,32 @@ def test_color_is_applied_only_when_requested() -> None:
     assert "\x1b[" not in report.render("RexDeck plugins", document, width=100)
     colored = report.render("RexDeck plugins", document, color=True, width=100)
     assert "\x1b[32mready" in colored
+
+
+def test_narrow_table_fits_without_dropping_fields() -> None:
+    document = {
+        "state": "missing-dependency",
+        "plugins": {
+            "markdown": {
+                "state": "ready",
+                "integration": {"tool": "markdown-reader", "versions": ["1.35.4"]},
+                "layout": {"placement": "right", "size": 50},
+            },
+            "clickup": {
+                "state": "missing-dependency",
+                "integration": {
+                    "tool": "rexdeck-clickup",
+                    "owned_module": "rexdeck.clickup",
+                },
+                "layout": {"placement": "right", "size": 50},
+            },
+        },
+    }
+    wide = report.render("RexDeck plugins", document, width=100)
+    narrow = report.render("RexDeck plugins", document, width=68)
+
+    for name in ("markdown", "clickup"):
+        wide_row = next(line for line in wide.splitlines() if line.startswith(name))
+        narrow_row = next(line for line in narrow.splitlines() if line.startswith(name))
+        assert len(narrow_row) <= 68
+        assert narrow_row.split() == wide_row.split()
