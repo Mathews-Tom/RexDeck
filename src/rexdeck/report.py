@@ -129,6 +129,22 @@ def render(
         )
     if problems:
         lines.extend(["", "Needs attention:", *problems])
+    notices: list[str] = []
+    for name, row in rows.items():
+        if row.get("notice"):
+            notices.append(f"  {name}:")
+            notices.extend(
+                textwrap.wrap(
+                    _plain(row["notice"]),
+                    wrap,
+                    initial_indent="    ",
+                    subsequent_indent="    ",
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                )
+            )
+    if notices:
+        lines.extend(["", "Next steps:", *notices])
 
     lines.append("")
     if state == "not-configured":

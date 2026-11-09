@@ -203,6 +203,24 @@ def _configure(args: argparse.Namespace, path: Path) -> dict[str, object]:
     return {"state": "configured", "settings": str(path), **candidate.document()}
 
 
+def _clickup_credential_notice() -> str | None:
+    """Nudge when the token the ClickUp pane will need is not exported here."""
+    from rexdeck.clickup import frontend
+    from rexdeck.clickup.engine import credentials
+
+    try:
+        name = frontend.load_selection().credential_env
+    except (OSError, ValueError, frontend.ClickUpError):
+        name = credentials.TOKEN_ENV
+    if os.environ.get(name, "").strip():
+        return None
+    return (
+        f"ClickUp needs your personal API token: add `export {name}=<token>` to your "
+        "shell profile (for example ~/.zshrc). The pane reads it from your shell when "
+        "it opens; without it, the pane asks for the token on first open."
+    )
+
+
 def _enable(
     path: Path,
     target: settings.SavedTarget,
@@ -229,7 +247,12 @@ def _enable(
         setup, expected_tool=qualified_tool, placement=placement, size=size
     )
     if result.get("state") == "applied":
-        return lifecycle.start(setup, expected_tool=qualified_tool)
+        started = lifecycle.start(setup, expected_tool=qualified_tool)
+        if plugin == "clickup" and started.get("state") == "ready":
+            notice = _clickup_credential_notice()
+            if notice:
+                started["notice"] = notice
+        return started
     if result.get("state") not in _FAILURES:
         raise RuntimeError(
             f"{plugin} apply did not succeed; integration was not started"

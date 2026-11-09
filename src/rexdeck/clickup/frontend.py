@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
+import getpass
 import json
 import os
 import re
 import secrets
 import selectors
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
@@ -1080,7 +1084,7 @@ def render(view: View, query: str, page: int) -> None:
         "Commands: next | prev | filter TEXT | select INTERNAL/CUSTOM-ID | open | refresh | "
         "sync | tasks | task | sprint | search TEXT | status NATIVE-STATUS | assignee ID/NAME | "
         "due YYYY-MM-DD | description MARKDOWN | points NUMBER | field NAME=VALUE | comment TEXT | "
-        "confirm TASK-ID PROPOSAL-CODE | cancel | "
+        "confirm TASK-ID PROPOSAL-CODE | cancel | space [NAME] | "
         "switch ACCOUNT TEAM LIST [ENV-NAME] | quit",
         flush=True,
     )
@@ -1113,9 +1117,95 @@ def _guided_select(credential_env: str) -> int:
     return 0
 
 
+_SHELL_MARK = "__REXDECK_CLICKUP_CREDENTIAL__"
+
+
+def shell_credential(name: str) -> str:
+    """Read one exported variable from the user's interactive login shell.
+
+    The app-started Rex server does not run shell startup files, so a token
+    exported from `~/.zshrc` never reaches this pane. The value travels over a
+    pipe between markers (startup files may print), never through argv or disk.
+    """
+    credentials.validate_env_name(name)
+    shell = os.environ.get("SHELL", "")
+    if not Path(shell).is_absolute() or not os.access(shell, os.X_OK):
+        return ""
+    script = f"printf '%s' {_SHELL_MARK}; /usr/bin/printenv {name}; printf '%s' {_SHELL_MARK}"
+    mark = _SHELL_MARK.encode()
+    try:
+        # A new session keeps the interactive shell off this pane's terminal.
+        child = subprocess.Popen(
+            [shell, "-i", "-l", "-c", script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return ""
+    if child.stdout is None:
+        return ""
+    output = b""
+    deadline = time.monotonic() + 15
+    try:
+        # Stop at the closing marker: a startup-file background job may keep the
+        # pipe open long after the shell printed the value.
+        with selectors.DefaultSelector() as selector:
+            selector.register(child.stdout, selectors.EVENT_READ)
+            while output.count(mark) < 2:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    break
+                chunk = os.read(child.stdout.fileno(), 65536)
+                if not chunk:
+                    break
+                output += chunk
+    finally:
+        child.stdout.close()
+        try:
+            child.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            # Only a shell that outlived its answer loses its process group.
+            with contextlib.suppress(OSError):
+                os.killpg(child.pid, signal.SIGKILL)
+            child.wait()
+    parts = output.decode(errors="replace").split(_SHELL_MARK)
+    return parts[1].strip() if len(parts) >= 3 else ""
+
+
+def ensure_credential(name: str) -> bool:
+    """Use the shell's exported token, else ask once for this pane; never save it."""
+    if os.environ.get(name, "").strip():
+        return True
+    shell = Path(os.environ.get("SHELL", "shell")).name
+    print(f"Looking for {name} in your {shell} startup files...", flush=True)
+    token = shell_credential(name)
+    if not token and sys.stdin.isatty():
+        print(
+            f"\nClickUp needs your personal API token ({name}); your shell does not "
+            "export it.\nPaste it to use it in this pane only. Nothing is saved.\n"
+            f"To skip this next time, add to your shell profile:  export {name}=<token>\n",
+            flush=True,
+        )
+        try:
+            token = getpass.getpass("ClickUp token (hidden; empty cancels): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            token = ""
+    if not token:
+        print(
+            f"ClickUp [MISSING-CREDENTIAL]: {name} is not set. Add "
+            f"`export {name}=<token>` to your shell profile, then reopen the pane.",
+            flush=True,
+        )
+        return False
+    os.environ[name] = token
+    return True
+
+
 def main() -> int:
     try:
-        selected = load_selection()
+        selected: Selection | None = load_selection()
     except (OSError, ValueError, ClickUpError):
         path = selection_path()
         # A dangling symlink is not a first run: saving through it is refused.
@@ -1125,6 +1215,17 @@ def main() -> int:
                 flush=True,
             )
             return 1
+        selected = None
+    try:
+        ready = ensure_credential(
+            selected.credential_env if selected else credentials.TOKEN_ENV
+        )
+    except KeyboardInterrupt:
+        print("Cancelled; no token was read.", flush=True)
+        return 1
+    if not ready:
+        return 1
+    if selected is None:
         # First run: choose from the account's own workspaces instead of typing IDs.
         print("No ClickUp selection yet. Choose one now.\n", flush=True)
         from rexdeck.clickup import picker
@@ -1175,6 +1276,25 @@ def main() -> int:
                             "\x1b[3J\x1b[2J\x1b[HSelection changed: tasks/detail/comments/link cleared",
                             flush=True,
                         )
+                    elif command == "space":
+                        if view.state == "writing":
+                            raise ValueError(
+                                "Wait for the confirmed write to finish before changing space"
+                            )
+                        from rexdeck.clickup import picker
+
+                        # Prompts read this pane's input; the loop waits meanwhile.
+                        try:
+                            chosen = picker.switch_space(view.selection, argument)
+                        except picker.Cancelled:
+                            print("Space unchanged.", flush=True)
+                        else:
+                            controller.switch(chosen)
+                            query, page = "", 0
+                            print(
+                                "\x1b[3J\x1b[2J\x1b[HSpace changed: tasks/detail/comments/link cleared",
+                                flush=True,
+                            )
                     elif command == "refresh":
                         controller.refresh()
                     elif command == "select":

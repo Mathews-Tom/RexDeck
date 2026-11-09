@@ -8,7 +8,9 @@ one option is selected without asking, but still shown.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import replace
 from typing import Protocol
 
 from rexdeck.clickup.engine import client as backend
@@ -40,15 +42,31 @@ class Cancelled(Exception):
 
 
 def _choose(
-    say: Say, ask: Ask, kind: str, options: Sequence[tuple[str, str]]
+    say: Say,
+    ask: Ask,
+    kind: str,
+    options: Sequence[tuple[str, str]],
+    query: str = "",
 ) -> tuple[str, str]:
-    """Return one `(id, label)`; a number picks, other text filters, `q` cancels."""
+    """Return one `(id, label)`; a number picks, other text filters, `q` cancels.
+
+    A `query` narrows the first menu; a single match is chosen and shown.
+    """
     if not options:
         raise ClickUpError("empty", f"No {kind}s are available to this account")
     if len(options) == 1:
         say(f"{kind.capitalize()}: {options[0][1]} (the only one available)")
         return options[0]
     shown = list(options)
+    if query:
+        matches = [item for item in options if query.casefold() in item[1].casefold()]
+        if len(matches) == 1:
+            say(f"{kind.capitalize()}: {matches[0][1]} (matches {query!r})")
+            return matches[0]
+        if matches:
+            shown = matches
+        else:
+            say(f"No {kind} matches {query!r}; showing all.")
     while True:
         say(f"\nChoose a {kind}:")
         for number, (_, label) in enumerate(shown, 1):
@@ -99,22 +117,17 @@ def _named(items: object) -> list[tuple[str, str]]:
     return [(text(item.get("id")), text(item.get("name"))) for item in rows(items)]
 
 
-def guided(
-    say: Say = print,
-    ask: Ask = input,
-    credential_env: str = credentials.TOKEN_ENV,
-    client: Reader | None = None,
-) -> Selection:
-    """Walk account → workspace → space → list, confirm, save and return it."""
+@contextmanager
+def _reader(credential_env: str, client: Reader | None) -> Iterator[Reader]:
+    """Authenticated reads; engine errors and Ctrl-C mid-request map to the picker's."""
     credentials.validate_env_name(credential_env)
-    ask = _interruptible(ask)
     token = os.environ.get(credential_env, "").strip()
     if client is None and not token:
         raise ClickUpError(
             "missing-credential",
-            f"{credential_env} is not set in this terminal's environment. Make your "
-            "ClickUp personal token available to the Rex server (and this shell) as "
-            f"{credential_env}, then try again.",
+            f"{credential_env} is not set in this terminal's environment. Run "
+            f"`export {credential_env}=<token>` (add it to your shell profile to "
+            "keep it), then try again.",
         )
     owned: backend.Client | None = None
     session: Reader
@@ -123,25 +136,7 @@ def guided(
     else:
         session = client
     try:
-        user = obj(session.get("/user").get("user"))
-        account = text(user.get("id"))
-        say(f"ClickUp account: {text(user.get('username') or account)} ({account})")
-        team, team_name = _choose(
-            say, ask, "workspace", _named(session.get("/team").get("teams"))
-        )
-        spaces = _named(
-            session.get(f"/team/{team}/space", {"archived": "false"}).get("spaces")
-        )
-        while True:
-            space, space_name = _choose(say, ask, "space", spaces)
-            lists = _lists(session, space)
-            if lists:
-                break
-            spaces = [item for item in spaces if item[0] != space]
-            if not spaces:
-                raise ClickUpError("empty", "No space in this workspace has any lists")
-            say(f"Space {space_name} has no lists; choose another space.")
-        listing, list_name = _choose(say, ask, "list", lists)
+        yield session
     except diagnostics.EngineError as error:
         raise engine_error(error) from None
     except KeyboardInterrupt:
@@ -150,6 +145,45 @@ def guided(
     finally:
         if owned is not None:
             owned.close()
+
+
+def _space_and_list(
+    say: Say, ask: Ask, session: Reader, team: str, query: str = ""
+) -> tuple[str, str, str, str]:
+    """Pick a space of one workspace, then one of its lists; empty spaces drop out."""
+    spaces = _named(
+        session.get(f"/team/{team}/space", {"archived": "false"}).get("spaces")
+    )
+    while True:
+        space, space_name = _choose(say, ask, "space", spaces, query)
+        query = ""
+        lists = _lists(session, space)
+        if lists:
+            break
+        spaces = [item for item in spaces if item[0] != space]
+        if not spaces:
+            raise ClickUpError("empty", "No space in this workspace has any lists")
+        say(f"Space {space_name} has no lists; choose another space.")
+    listing, list_name = _choose(say, ask, "list", lists)
+    return space, space_name, listing, list_name
+
+
+def guided(
+    say: Say = print,
+    ask: Ask = input,
+    credential_env: str = credentials.TOKEN_ENV,
+    client: Reader | None = None,
+) -> Selection:
+    """Walk account → workspace → space → list, confirm, save and return it."""
+    ask = _interruptible(ask)
+    with _reader(credential_env, client) as session:
+        user = obj(session.get("/user").get("user"))
+        account = text(user.get("id"))
+        say(f"ClickUp account: {text(user.get('username') or account)} ({account})")
+        team, team_name = _choose(
+            say, ask, "workspace", _named(session.get("/team").get("teams"))
+        )
+        space, space_name, listing, list_name = _space_and_list(say, ask, session, team)
 
     selection = Selection(account, team, listing, credential_env)
     say(
@@ -163,3 +197,26 @@ def guided(
     save_selection(selection)
     say("Saved. Change it later with: rexdeck clickup select")
     return selection
+
+
+def switch_space(
+    selection: Selection,
+    query: str = "",
+    say: Say = print,
+    ask: Ask = input,
+    client: Reader | None = None,
+) -> Selection:
+    """Track a list in another space of the same account/workspace, and save it.
+
+    The menu choice is the confirmation; `query` narrows the space menu and a
+    single match is taken directly. Cancelling keeps the current list.
+    """
+    ask = _interruptible(ask)
+    with _reader(selection.credential_env, client) as session:
+        _, space_name, listing, list_name = _space_and_list(
+            say, ask, session, selection.team, query
+        )
+    chosen = replace(selection, list=listing)
+    save_selection(chosen)
+    say(f"Now tracking {space_name} / {list_name}; saved for next time.")
+    return chosen
