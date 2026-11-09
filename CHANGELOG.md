@@ -4,6 +4,7 @@
 
 - Identify ClickUp's RexDeck-authored interface with a `[RexDeck UI]` badge instead of a `(built-in)` suffix in terminal plugin/status reports; leave other tool labels and JSON output unchanged.
 - Use compact column spacing when a terminal plugin/status table's normal gutters would exceed the terminal width.
+- Stop ClickUp desk polling, layout and resumed detail rendering once shutdown begins, preventing missing-widget crashes when closing after a list selection.
 
 ## 0.5.1 — 2026-11-09
 

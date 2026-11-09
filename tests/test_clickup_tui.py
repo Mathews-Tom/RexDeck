@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import threading
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import pytest
-from textual.containers import VerticalScroll
+from textual.await_complete import AwaitComplete
+from textual.containers import Vertical, VerticalScroll
+from textual.events import Resize
+from textual.screen import Screen
+from textual.widget import Widget
 from textual.widgets import (
     Button,
     Checkbox,
@@ -195,6 +200,116 @@ class DeskController(cu.Controller):
 
     def close(self) -> None:
         pass
+
+
+def test_shutdown_ignores_late_scope_poll_and_resize() -> None:
+    async def scenario() -> None:
+        controller = DeskController()
+        unmounted = asyncio.Event()
+
+        class ShutdownScreen(Screen[None]):
+            async def on_unmount(self) -> None:
+                # Unmount follows child removal; is_mounted alone remains true.
+                assert not app.is_running
+                assert self.is_mounted and not self.children
+                controller.switch(replace(_SELECTION, team="901", list="201"))
+                await app.poll_view()
+                app.on_resize(Resize(self.size, self.size))
+                unmounted.set()
+
+        class ShutdownApp(tui.ClickUpApp):
+            def get_default_screen(self) -> Screen[None]:
+                return ShutdownScreen(id="_default")
+
+        app = ShutdownApp(controller)
+        await app.poll_view()
+        async with app.run_test(size=(60, 24)) as pilot:
+            await pilot.pause()
+            assert app.view.selection == _SELECTION
+            assert app.query_one(tui.TaskQueue).row_count == 2
+        assert unmounted.is_set()
+        await app.poll_view()
+        assert app.view.selection == _SELECTION
+        assert controller.view.selection.list == "201"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "pause_at", ["remove_comments", "clear_description", "description", "mount_comment"]
+)
+def test_shutdown_abandons_suspended_detail_render(
+    monkeypatch: pytest.MonkeyPatch, pause_at: str
+) -> None:
+    async def scenario() -> None:
+        controller = DeskController(selected=True)
+        app = tui.ClickUpApp(controller)
+        # Keep automatic polling from racing the explicitly suspended render.
+        monkeypatch.setattr(app, "set_interval", partial(app.set_interval, pause=True))
+        suspended = asyncio.Event()
+        resume = asyncio.Event()
+        rendering: asyncio.Task[None] | None = None
+
+        def pause_after(operation: Awaitable[object]) -> AwaitComplete:
+            async def finish_operation() -> None:
+                # Complete the real DOM operation before suspending its caller.
+                await operation
+                suspended.set()
+                await resume.wait()
+
+            return AwaitComplete(finish_operation())
+
+        try:
+            async with app.run_test(size=(60, 24)) as pilot:
+                await pilot.pause()
+                comments = app.query_one("#comments", Vertical)
+                description = app.query_one("#description", Markdown)
+                if pause_at == "remove_comments":
+                    remove_children = comments.remove_children
+
+                    def remove_comments() -> AwaitComplete:
+                        return pause_after(remove_children())
+
+                    monkeypatch.setattr(comments, "remove_children", remove_comments)
+                elif pause_at == "mount_comment":
+                    mount = comments.mount
+
+                    def mount_comment(widget: Widget) -> AwaitComplete:
+                        return pause_after(mount(widget))
+
+                    monkeypatch.setattr(comments, "mount", mount_comment)
+                else:
+                    update = description.update
+
+                    def update_description(markdown: str) -> AwaitComplete:
+                        return pause_after(update(markdown))
+
+                    monkeypatch.setattr(description, "update", update_description)
+                assert controller.view.detail is not None
+                detail = (
+                    None
+                    if pause_at == "clear_description"
+                    else replace(
+                        controller.view.detail,
+                        task=task("two", "Second task"),
+                        comments=(
+                            cu.Comment("c2", "1794182400000", "First reply", 0, "Ada"),
+                            cu.Comment("c3", "1794182400000", "Second reply", 0, "Ada"),
+                        ),
+                    )
+                )
+                controller.transition(replace(controller.view, detail=detail))
+                rendering = asyncio.create_task(app.poll_view())
+                await asyncio.wait_for(suspended.wait(), timeout=5)
+            # The screen is genuinely gone before the render's await completes.
+            assert not app.is_running
+            assert not app.default_screen.children
+        finally:
+            resume.set()
+            if rendering is not None:
+                await rendering
+
+    asyncio.run(scenario())
 
 
 def test_narrow_reader_back_and_resize_preserve_selection_filter_and_scroll() -> None:
