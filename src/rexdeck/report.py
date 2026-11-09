@@ -42,8 +42,8 @@ def _tool(row: Mapping[str, object]) -> str:
     tool = _plain(integration.get("tool", "-"))
     versions = integration.get("versions")
     if isinstance(versions, list) and versions:
-        return f"{tool} {'/'.join(_plain(version) for version in versions)}"
-    return f"{tool} (built-in)" if integration.get("owned_module") else tool
+        tool = f"{tool} {'/'.join(_plain(version) for version in versions)}"
+    return f"{tool} [RexDeck UI]" if integration.get("owned_module") else tool
 
 
 def _pane(row: Mapping[str, object]) -> str:
@@ -82,7 +82,7 @@ def render(
         lines.append(f"Rex server: {server}")
     lines.append("")
 
-    table = [
+    table: list[tuple[str, str, str, str]] = [
         (name, _plain(row.get("state", "unknown")), _tool(row), _pane(row))
         for name, row in rows.items()
     ]

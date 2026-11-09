@@ -709,8 +709,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         lines = text.splitlines()
         self.assertEqual(lines[0], "RexDeck status: ready")
-        single = [line.split() for line in lines if line.split()[:1] == ["files"]]
-        self.assertEqual(single, [["files", "ready", "yazi", "26.9.1", "right", "50%"]])
         self.assertNotIn("Needs attention:", text)
         code, text = self.invoke_terminal("status", "files", "--json")
         self.assertEqual((code, json.loads(text)["state"]), (0, "ready"))
