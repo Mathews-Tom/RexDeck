@@ -25,6 +25,40 @@ rexdeck enable <id>        # turn on only what you need
 
 Install a hosted tool yourself before enabling it: RexDeck never installs Rex, Python, uv or upstream tools. Then open the integration from Rex's command palette as **RexDeck &lt;Title&gt;**, or run `rex do rexdeck_<id>` in a Rex terminal. Some integrations need arguments, such as `file=` for a selected file or `account=` for a GitHub account; each integration's guide lists them. Quit the tool or view to return focus to the invoking terminal.
 
+## Available plugins
+
+Enable any of these by id with `rexdeck enable <id>`. Each name links to its guide; [Integrations](https://github.com/Mathews-Tom/RexDeck/blob/main/docs/integrations.md) groups them by category with the tool each one runs.
+
+| Plugin | id | What it does |
+| --- | --- | --- |
+| [Files](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/files/README.md) | `files` | Browse, preview and manage files with Yazi |
+| [Git](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/git/README.md) | `git` | Inspect, stage and commit in the current repository with lazygit |
+| [GitHub](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/github/README.md) | `github` | Work with the repository's pull requests and issues in gh-dash |
+| [Actions](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/actions/README.md) | `actions` | Read GitHub Actions runs, jobs and log tails for a branch or commit |
+| [Markdown](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/markdown/README.md) | `markdown` | Read Markdown, including Mermaid diagrams |
+| [Viewer](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/viewer/README.md) | `viewer` | Preview a PDF, JPG, PNG or SVG file |
+| [Slides](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/slides/README.md) | `slides` | Present a Markdown slide deck with presenterm |
+| [JSON](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/json/README.md) | `json` | Collapse, search and copy JSON with jless |
+| [Logs](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/logs/README.md) | `logs` | Filter, query and navigate log files with lnav |
+| [SQL](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/sql/README.md) | `sql` | Query a SQLite database read-only with Harlequin |
+| [Tables](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/tables/README.md) | `tables` | Sort and summarize CSV, TSV, JSON or JSONL with VisiData |
+| [Dependencies](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/deps/README.md) | `deps` | Inspect a package's dependency graph, licenses and advisories |
+| [Images](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/images/README.md) | `images` | Browse public container image tags, digests and platforms |
+| [System](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/system/README.md) | `system` | Monitor processes, CPU, memory, disks and network with bottom |
+| [Disk](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/disk/README.md) | `disk` | Explore directory disk usage with dua |
+| [Containers](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/containers/README.md) | `containers` | Inspect Docker containers, logs and stats with lazydocker |
+| [Redis](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/redis/README.md) | `redis` | Browse Redis keys, values, TTLs and server metrics |
+| [Processes](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/procs/README.md) | `procs` | Start, attach to and stop project tasks from a `dekit.yaml` |
+| [HTTP](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/http/README.md) | `http` | Send requests from a Slumber collection and inspect responses |
+| [Dashboard](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/dashboard/README.md) | `dashboard` | Open a Dashbrew board with script and API panels |
+| [ClickUp](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/clickup/README.md) | `clickup` | Browse a ClickUp list or space and apply reviewed task changes |
+| [Inbox](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/inbox/README.md) | `inbox` | Read unread GitHub notifications |
+| [Usage](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/usage/README.md) | `usage` | Explore omp token usage by model, session and project with tokscale |
+| [Focus](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/focus/README.md) | `focus` | Run a pomo work timer |
+| [Music](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/music/README.md) | `music` | Browse Spotify playlists and control playback with spotify_player |
+
+Some plugins need arguments or setup outside RexDeck, such as a GitHub login or a Docker daemon; `rexdeck enable` prints what each one needs.
+
 ## Documentation
 
 | Guide | What it covers |
