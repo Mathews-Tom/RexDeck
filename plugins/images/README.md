@@ -5,10 +5,12 @@ and enter `nginx`, `team/image` or `ghcr.io/astral-sh/uv`. RexDeck shows the
 normalized reference (`nginx` → `docker.io/library/nginx`). This is the packaged
 `rexdeck.images` Textual view, launched with `-I -m`; it does not inspect the cwd.
 
-Tags are fetched one page at a time (30 requested). Use arrows and Enter to select
-a tag, `n`/`p` for pages, `r` to refresh the current page and selected manifest,
-`e` to edit the reference, Escape to return to the tag table, and `q` to return to
-the exact invoking terminal. The detail area scrolls. Source and fetched-at times
+Tags are fetched one page at a time (30 requested). The reference field has focus on
+startup and after `e`, where letters are typed as text: press Escape to focus the tag
+table before using the letter shortcuts. From the table, use arrows and Enter to
+select a tag, `n`/`p` for pages, `r` to refresh the current page and selected
+manifest, `e` to edit the reference, and `q` to return to the exact invoking
+terminal. The detail area scrolls. Source and fetched-at times
 are shown separately for tags and manifest; refresh is explicit, never polling.
 Loading, empty, stale, permission, rate-limit and network states remain visible.
 A failed refresh preserves the last successful data as stale; `r` retries.
