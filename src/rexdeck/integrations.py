@@ -3,11 +3,14 @@
 An integration is one installed upstream terminal program opened in a native Rex
 pane. The shared host (``host/main.lua`` and ``host/launch.py``) and lifecycle
 ownership consume only these fields; adding an interactive tool means adding a
-descriptor here plus its plugin README, not copying lifecycle or focus code.
+descriptor module under ``rexdeck/catalogue/`` plus its plugin README, not
+copying lifecycle or focus code.
 """
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
 import re
 from dataclasses import dataclass
 
@@ -176,206 +179,34 @@ class Integration:
         }
 
 
-INTEGRATIONS: dict[str, Integration] = {
-    integration.id: integration
-    for integration in (
-        Integration(
-            id="files",
-            title="Files",
-            tool="yazi",
-            tool_label="Yazi",
-            description="Open yazi in the invoking terminal directory",
-            keywords="files yazi explorer",
-            context="directory",
-            versions=("26.9.1",),
-            version_pattern=(
-                r"^Yazi(?:[ \t]+|[ \t]*\r?\n[ \t]*Version:[ \t]*)"
-                r"(\d+\.\d+\.\d+)(?:\s|$)"
-            ),
-            release="https://github.com/sxyazi/yazi/releases/tag/v26.9.1",
-            license="MIT",
-            capabilities=(
-                "filesystem read/write: create, rename, move, copy, delete, open",
-                "runs configured openers, previewers and shell commands",
-                "launch directory is a start point, not a root jail",
-            ),
-            default_layout=Layout("right", 50),
-        ),
-        Integration(
-            id="git",
-            title="Git",
-            tool="lazygit",
-            tool_label="lazygit",
-            description="Open lazygit in the invoking terminal directory",
-            keywords="git lazygit",
-            context="git-worktree",
-            versions=("0.66.2", "0.66.3"),
-            version_pattern=r"(?:^|,\s*)version=(\d+\.\d+\.\d+)(?=,|\s*$)",
-            release="https://github.com/jesseduffield/lazygit/releases/tag/v0.66.3",
-            license="MIT",
-            capabilities=(
-                "repository writes: stage, commit, branch, rebase, discard, stash",
-                "network when the user fetches, pulls or pushes with existing Git auth",
-                "runs configured editors, pagers and custom commands",
-            ),
-            default_layout=Layout("right", 50),
-            prerequisites=(("git", "https://git-scm.com/downloads"),),
-        ),
-        Integration(
-            id="markdown",
-            title="Markdown",
-            tool="markdown-reader",
-            tool_label="markdown-reader",
-            description=(
-                "Open markdown-reader on a selected Markdown file or the invoking "
-                "directory, with Mermaid diagrams rendered in the pane"
-            ),
-            keywords="markdown md mermaid docs readme reader",
-            context="document",
-            versions=("1.35.4",),
-            version_pattern=r"^markdown-reader (\d+\.\d+\.\d+)\s*$",
-            release="https://github.com/leboiko/markdown-reader/releases/tag/v1.35.4",
-            license="MIT",
-            capabilities=(
-                "file writes: hybrid (i) and fullscreen (I) edit modes save Markdown "
-                "in place with :w",
-                "reads the browsed directory tree; stores its own config, session "
-                "and cache under the user's Library",
-                "runs `git status` (PATH git, inherited GIT_* environment and "
-                "repository config honoured) in the browsed root at launch and on file "
-                "changes to colour the tree; this may refresh the Git index",
-                "network: checks crates.io for a newer version at most daily unless "
-                "[updates] check_for_updates = false; --check-external is not used",
-                "renders Mermaid in-process; in Rex panes it selects Unicode text "
-                "diagrams, with no browser or hosted renderer",
-            ),
-            default_layout=Layout("right", 50),
-        ),
-        Integration(
-            id="usage",
-            title="Usage",
-            tool="tokscale",
-            tool_label="tokscale",
-            description=(
-                "Open the tokscale usage TUI for local omp sessions with upstream "
-                "online pricing and refresh"
-            ),
-            keywords="usage tokens cost tokscale omp models",
-            # Usage is machine-wide; the invoking directory is only the pane cwd.
-            context="directory",
-            versions=("4.21.0",),
-            version_pattern=r"^tokscale (\d+\.\d+\.\d+)\s*$",
-            release="https://github.com/junhoyeo/tokscale/releases/tag/v4.21.0",
-            license="MIT",
-            capabilities=(
-                "reads local AI-client session logs machine-wide (omp sessions under "
-                "~/.omp) and caches derived usage; launching in a project is not a "
-                "project filter",
-                "network: first data load downloads model pricing when its 1-hour "
-                "cache expired; when signed in to Tokscale it fetches account stats; "
-                "the Usage tab (on open and each refresh) queries provider quotas "
-                "with existing provider credentials regardless of --client",
-                "writes its own settings and caches under ~/.config/tokscale (Shift+R "
-                "persists the auto-refresh choice; the Usage tab can import and "
-                "later refresh the current Codex login in codex-credentials.json)",
-                "runs helpers: macOS security keychain reads, grok agent when Grok "
-                "credentials exist, codex login from its UI",
-                "its UI exposes account controls (provider login, account switch, "
-                "removal, Codex reset-credit use); RexDeck never invokes login, "
-                "submit, autosubmit or report",
-            ),
-            default_layout=Layout("right", 50),
-            args=("tui", "--client", "omp"),
-        ),
-        Integration(
-            id="github",
-            title="GitHub",
-            tool="gh-dash",
-            tool_label="gh-dash",
-            description="Open GitHub PRs and issues with explicit repository and account",
-            keywords="github gh dashboard pull requests issues",
-            context="github-worktree",
-            versions=("4.26.2",),
-            version_pattern=r"^module version: v(\d+\.\d+\.\d+), checksum:",
-            release="https://github.com/dlvhdr/gh-dash/releases/tag/v4.26.2",
-            license="MIT",
-            capabilities=(
-                "authenticated GitHub network reads and writes: comments, reviews, "
-                "merge, close, assignments and other upstream actions",
-                "requires account=LOGIN matching existing gh authentication; never "
-                "switches global accounts or copies credentials",
-                "launch-scoped repository sections replace custom sections; normal "
-                "global/repository theme, keybindings and custom commands are retained",
-                "runs gh, configured editors, pagers, browser and custom commands; "
-                "upstream may initialize its normal config/cache",
-                "initial repository scope is not a sandbox: upstream navigation "
-                "and editable filters may deliberately leave it",
-            ),
-            default_layout=Layout("right", 50),
-            prerequisites=(
-                ("git", "https://git-scm.com/downloads"),
-                ("gh", "https://cli.github.com/"),
-            ),
-        ),
-        Integration(
-            id="viewer",
-            title="Viewer",
-            tool="yazi",
-            tool_label="Yazi",
-            description="Preview an explicitly selected PDF, JPG, PNG or SVG in Yazi",
-            keywords="viewer pdf jpg jpeg png svg image",
-            context="media",
-            versions=("26.9.1",),
-            version_pattern=(
-                r"^Yazi(?:[ \t]+|[ \t]*\r?\n[ \t]*Version:[ \t]*)"
-                r"(\d+\.\d+\.\d+)(?:\s|$)"
-            ),
-            release="https://github.com/sxyazi/yazi/releases/tag/v26.9.1",
-            license="MIT",
-            capabilities=(
-                "in-pane Kitty graphics previews; PDF pages use pdftoppm; SVG uses "
-                "resvg, not a browser; unbundled helper prerequisites: "
-                "pdftoppm/Poppler (GPL), resvg (MIT/Apache-2.0)",
-                "filesystem read/write and configured openers, editors and shell "
-                "commands: the same unrestricted Yazi as Files",
-                "selected file is a start point, not a root jail or sandbox",
-                "opens the parent folder and type-checks/preloads visible siblings "
-                "using file(1), pdftoppm, resvg and ImageMagick; use trusted or "
-                "isolated folders for untrusted files",
-                "Enter/open follows the owner's openers (macOS default application), "
-                "which may fetch resources and run SVG scripts; RexDeck never invokes "
-                "an external opener automatically",
-            ),
-            default_layout=Layout("right", 50),
-            prerequisites=(
-                ("pdftoppm", "https://poppler.freedesktop.org/"),
-                ("resvg", "https://github.com/linebender/resvg/releases/tag/v0.49.0"),
-            ),
-        ),
-        Integration(
-            id="clickup",
-            title="ClickUp",
-            tool="rexdeck-clickup",
-            tool_label="ClickUp engine and pane",
-            description="Inspect tasks and deliberately confirm changes in an explicit ClickUp selection",
-            keywords="clickup tasks status comments confirmed changes",
-            context="directory",
-            versions=(),
-            version_pattern="",
-            release="https://github.com/Mathews-Tom/RexDeck",
-            license="MIT",
-            capabilities=(
-                "owned MIT engine/frontend; confirmed status/assignee/due/description/points/field/comment writes",
-                "explicit account/workspace/list; credential environment-name reference",
-                "all task pages, native statuses, complete comments/replies and engine projections",
-                "explicit validated browser deep link; never opens automatically",
-            ),
-            default_layout=Layout("right", 50),
-            args=("-I", "-m", "rexdeck.clickup"),
-            owned_module="rexdeck.clickup",
-        ),
-    )
-}
+# The original plugins keep their published order; later catalogue modules
+# follow them sorted by id, so listings never depend on filesystem order.
+_ORDER = ("files", "git", "markdown", "usage", "github", "viewer", "clickup")
+
+
+def _discover() -> dict[str, Integration]:
+    package = importlib.import_module("rexdeck.catalogue")
+    names = [module.name for module in pkgutil.iter_modules(package.__path__)]
+    missing = [name for name in _ORDER if name not in names]
+    if missing:
+        raise RuntimeError("Missing catalogue modules: " + ", ".join(missing))
+    ordered = [*_ORDER, *sorted(name for name in names if name not in _ORDER)]
+    catalogue: dict[str, Integration] = {}
+    for name in ordered:
+        integration = getattr(
+            importlib.import_module(f"rexdeck.catalogue.{name}"), "INTEGRATION", None
+        )
+        if not isinstance(integration, Integration):
+            raise RuntimeError(f"Catalogue module {name} must define INTEGRATION")
+        if integration.id != name:
+            raise RuntimeError(
+                f"Catalogue module {name} must describe integration id {name!r}"
+            )
+        catalogue[name] = integration
+    return catalogue
+
+
+INTEGRATIONS: dict[str, Integration] = _discover()
 PLUGINS = tuple(INTEGRATIONS)
 if len({integration.title for integration in INTEGRATIONS.values()}) != len(PLUGINS):
     raise RuntimeError("Integration titles must be unique; they delimit owned loaders")
