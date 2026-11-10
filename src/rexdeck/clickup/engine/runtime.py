@@ -14,7 +14,7 @@ import argparse
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from . import projections, registry
@@ -275,15 +275,17 @@ def task_id(value: str) -> str:
     return cleaned
 
 
-def epoch_ms(value: str, *, fix: str) -> int:
-    """Parse an ISO-8601 calendar date, naming the flag that carried it.
+def epoch_ms(value: str, *, fix: str, midday: bool = False) -> int:
+    """Parse a local ISO-8601 calendar date, naming the flag that carried it.
 
     The fix is passed in because the same parser now serves `--due-before`,
     `--due` and a date custom field, and a diagnostic that named the wrong flag
-    would send the caller to edit an argument they did not pass.
+    would send the caller to edit an argument they did not pass. Writes pass
+    `midday=True` so the stored instant stays on the same calendar day for
+    viewers up to twelve hours away; the `--due-before` filter keeps midnight.
     """
     try:
-        parsed = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=UTC)
+        parsed = datetime.strptime(value, "%Y-%m-%d").replace(hour=12 if midday else 0)
     except ValueError as error:
         raise EngineError(
             Diagnostic(

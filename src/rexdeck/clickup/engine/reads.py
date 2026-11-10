@@ -76,7 +76,7 @@ def verb_tasks(session: Session) -> Outcome:
         params["statuses[]"] = list(session.args.status)
     if session.args.due_before is not None:
         params["due_date_lt"] = runtime.epoch_ms(
-            session.args.due_before, fix="--due-before YYYY-MM-DD"
+            session.args.due_before, fix="--due-before YYYY-MM-DD", midday=False
         )
 
     payloads = paged_tasks(session.http(), f"/list/{list_id}/task", params)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from rexdeck.clickup.text import single_line
 
@@ -502,10 +502,10 @@ def _blocked(payload: Mapping[str, object]) -> bool:
 
 
 def epoch_date(value: object) -> str:
-    """Render a ClickUp millisecond epoch as a UTC date. Absent stays absent."""
+    """Render a ClickUp millisecond epoch as a local date. Absent stays absent."""
     if isinstance(value, bool) or not isinstance(value, (int, str)) or value == "":
         return ABSENT
-    return datetime.fromtimestamp(int(value) / 1000, tz=UTC).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(int(value) / 1000).strftime("%Y-%m-%d")
 
 
 def _text(payload: object, key: str) -> str:

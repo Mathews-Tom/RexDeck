@@ -78,7 +78,7 @@ Select a fresh task and explicitly sync metadata first. The action menu offers:
 
 - **Status**: choose an exact native status from the task's home list, not a generic workflow category.
 - **Assignee**: replace the task's assignee set using a member ID, username or `me`, matching the engine's touch contract.
-- **Due date**: enter `YYYY-MM-DD`.
+- **Due date**: enter `YYYY-MM-DD` as a local calendar day. Written due dates and date custom fields are anchored at local midday; date filters use local midnight. Displayed timestamps include the process-local zone abbreviation.
 - **Description**: edit replacement Markdown; the review includes the current Markdown it replaces.
 - **Sprint Points**: enter a finite number ≥ 0. The workspace must have the Sprint Points ClickApp, and ClickUp accepts only its configured point scale. Values outside that scale are refused (`REJECTED`, HTTP 400 `ITEM_223`) without applying a change.
 - **Custom field**: enter `NAME=VALUE`. The engine validates supported list-specific types/options and refuses unsupported types.

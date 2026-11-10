@@ -9,6 +9,7 @@ which is also how a test gets hold of the body that was actually sent.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -339,7 +340,9 @@ def test_the_due_date_is_sent_as_the_epoch_clickup_stores(
         == 0
     )
 
-    assert json.loads(sent[0].content) == {"due_date": 1790812800000}
+    assert json.loads(sent[0].content) == {
+        "due_date": int(datetime(2026, 10, 1, 12).timestamp() * 1000)
+    }
 
 
 def test_a_malformed_due_date_names_the_flag_that_carried_it(

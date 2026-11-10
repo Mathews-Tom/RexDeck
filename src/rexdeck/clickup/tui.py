@@ -9,7 +9,7 @@ import subprocess
 import threading
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 
 from rich.text import Text
 from textual import on
@@ -81,8 +81,10 @@ def date_label(raw: str) -> str:
     if not raw:
         return "Not set"
     try:
-        return datetime.fromtimestamp(int(raw) / 1000, UTC).strftime(
-            "%Y-%m-%d %H:%M UTC"
+        return (
+            datetime.fromtimestamp(int(raw) / 1000)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M %Z")
         )
     except (ValueError, OverflowError, OSError):
         return "Unknown date"
@@ -1459,9 +1461,7 @@ class ClickUpApp(App[int]):
         due = ""
         if task.due:
             try:
-                due = datetime.fromtimestamp(int(task.due) / 1000, UTC).strftime(
-                    "%Y-%m-%d"
-                )
+                due = datetime.fromtimestamp(int(task.due) / 1000).strftime("%Y-%m-%d")
             except (ValueError, OverflowError, OSError):
                 pass
         forms = {
