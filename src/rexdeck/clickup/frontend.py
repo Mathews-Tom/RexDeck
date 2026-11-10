@@ -1297,8 +1297,8 @@ class Controller:
                         )
                         self._set(
                             output=(
-                                f"Proposal refused before sending; nothing was sent: {clean(str(error))}. "
-                                "It was NOT retried. Refresh before any new proposal."
+                                f"Proposal not sent: {clean(str(error))}. Nothing was written; "
+                                "it was NOT retried. Refresh before any new proposal."
                                 if not dispatched
                                 else "ClickUp refused this write; it was not applied and was NOT retried. Refresh before any new proposal."
                                 if refused
@@ -1307,11 +1307,16 @@ class Controller:
                         )
                     except Exception as error:  # noqa: BLE001 - outcome is uncertain
                         # Any other failure after dispatch must still end `writing`.
-                        self._error(ClickUpError("write-uncertain", clean(repr(error))))
+                        self._error(
+                            ClickUpError(
+                                "write-uncertain" if dispatched else "write-not-sent",
+                                clean(repr(error)),
+                            )
+                        )
                         self._set(
                             output=(
-                                f"Proposal refused before sending; nothing was sent: {clean(str(error))}. "
-                                "It was NOT retried. Refresh before any new proposal."
+                                f"Proposal not sent: {clean(str(error))}. Nothing was written; "
+                                "it was NOT retried. Refresh before any new proposal."
                                 if not dispatched
                                 else "Write may have succeeded; it was NOT retried. Refresh before any new proposal."
                             )

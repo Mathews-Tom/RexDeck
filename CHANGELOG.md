@@ -4,8 +4,8 @@
 
 ### Fixes
 
-- Keep ClickUp due dates, date filters and date custom fields on the local calendar day, including displayed dates and due-edit pre-fills.
-- Report stale proposals refused before dispatch as nothing sent, rather than suggesting the write may have succeeded; writes are never retried automatically.
+- Keep ClickUp due dates, date filters and date custom fields on the local calendar day, including displayed dates and due-edit pre-fills. Anchor written dates at local midday while keeping date-filter boundaries at midnight.
+- Report any failure before dispatch as nothing written, rather than suggesting the write may have succeeded; writes are never retried automatically.
 
 ## 0.6.0 — 2026-11-10
 

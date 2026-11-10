@@ -689,7 +689,8 @@ def test_changed_remote_value_refuses_staged_digest(tmp_path: Path) -> None:
         assert controller.snapshot().pending is None
 
         snapshot = controller.snapshot()
-        assert "Proposal refused before sending; nothing was sent" in snapshot.output
+        assert "Proposal not sent:" in snapshot.output
+        assert "Nothing was written" in snapshot.output
         assert "status no longer holds what the dry run recorded" in snapshot.output
         assert "NOT retried" in snapshot.output
         assert "Refresh before any new proposal." in snapshot.output
@@ -733,8 +734,9 @@ class _UnexpectedRegistryError(Exception):
     """Stands in for registry/cache errors outside the handled error types."""
 
 
+@pytest.mark.parametrize("dispatched", [False, True])
 def test_unexpected_write_failure_ends_writing_without_retry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dispatched: bool
 ) -> None:
     with writable_controller(tmp_path) as (backend, controller):
         settled(controller.stage("status", "active"))
@@ -742,6 +744,10 @@ def test_unexpected_write_failure_ends_writing_without_retry(
         assert proposed is not None
 
         def broken(*args: object, **kwargs: object) -> object:
+            if dispatched:
+                writer = args[0]
+                assert isinstance(writer, cu.Service)
+                writer.client.put("/task/a", {"status": "active"})
             raise _UnexpectedRegistryError("corrupt registry")
 
         monkeypatch.setattr(cu.Service, "mutate", broken)
@@ -750,7 +756,14 @@ def test_unexpected_write_failure_ends_writing_without_retry(
         snapshot = controller.snapshot()
         assert snapshot.state != "writing"
         assert "NOT retried" in snapshot.output
-        assert backend.write_calls == []
+        assert snapshot.error_state == (
+            "write-uncertain" if dispatched else "write-not-sent"
+        )
+        assert (
+            "Write may have succeeded" if dispatched else "Proposal not sent:"
+        ) in snapshot.output
+        assert ("Nothing was written" in snapshot.output) is not dispatched
+        assert len(backend.write_calls) == int(dispatched)
         monkeypatch.undo()
         settled(controller.refresh())
         assert controller.snapshot().state == "ready"

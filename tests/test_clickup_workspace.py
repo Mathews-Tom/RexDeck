@@ -331,6 +331,7 @@ def test_workspace_dialog_filters_and_saved_default(tmp_path: Path) -> None:
                     assert isinstance(app.screen, tui.WorkspaceModal)
                     app.screen.query_one("#workspace-assignee", Input).value = "any"
                     app.screen.query_one("#workspace-lookback", Select).value = "7d"
+                    await pilot.pause()
                     await pilot.click("#load-workspace")
                     await pilot.pause()
                     await app.workers.wait_for_complete()

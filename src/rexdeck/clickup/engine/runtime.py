@@ -275,7 +275,7 @@ def task_id(value: str) -> str:
     return cleaned
 
 
-def epoch_ms(value: str, *, fix: str) -> int:
+def epoch_ms(value: str, *, fix: str, midday: bool = False) -> int:
     """Parse a local ISO-8601 calendar date, naming the flag that carried it.
 
     The fix is passed in because the same parser now serves `--due-before`,
@@ -283,7 +283,7 @@ def epoch_ms(value: str, *, fix: str) -> int:
     would send the caller to edit an argument they did not pass.
     """
     try:
-        parsed = datetime.strptime(value, "%Y-%m-%d")
+        parsed = datetime.strptime(value, "%Y-%m-%d").replace(hour=12 if midday else 0)
     except ValueError as error:
         raise EngineError(
             Diagnostic(

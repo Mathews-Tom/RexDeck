@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +114,21 @@ def test_the_walk_records_members_as_id_and_username_and_never_an_email(
 
 
 # --------------------------------------------------------------------------- tasks
+
+
+def test_due_before_uses_local_midnight(route: dict[str, Any], synced: Path) -> None:
+    del synced
+    sent: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json=fixture("list_tasks"))
+
+    route[TASKS] = answer
+    assert main(["tasks", "--due-before", "2026-11-17", "--quiet"]) == 0
+    assert sent[0].url.params["due_date_lt"] == str(
+        int(datetime(2026, 11, 17).timestamp() * 1000)
+    )
 
 
 def test_tasks_prints_one_line_per_task(

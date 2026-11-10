@@ -79,7 +79,7 @@ def verb_touch(session: Session) -> Outcome:
     due = (
         None
         if session.args.due is None
-        else runtime.epoch_ms(session.args.due, fix="--due YYYY-MM-DD")
+        else runtime.epoch_ms(session.args.due, fix="--due YYYY-MM-DD", midday=True)
     )
     points = None if session.args.points is None else _points(session.args.points)
     loaded = runtime.prepare(session)
@@ -473,7 +473,9 @@ def _field_value(definition: CustomField, raw: str) -> object:
             return False
         raise _bad_field_value(definition, raw, (*TRUE_WORDS, *FALSE_WORDS))
     if definition.type == "date":
-        return runtime.epoch_ms(raw, fix=f"--field {definition.name}=YYYY-MM-DD")
+        return runtime.epoch_ms(
+            raw, fix=f"--field {definition.name}=YYYY-MM-DD", midday=True
+        )
     if definition.type == "drop_down":
         for option in definition.options:
             if option.id == raw or option.name.casefold() == raw.strip().casefold():

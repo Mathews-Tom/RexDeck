@@ -35,7 +35,7 @@ def test_a_task_row_carries_the_five_columns_and_not_the_other_thirty_keys() -> 
         status="in progress",
         name="Task alpha",
         assignee="user_one",
-        due="2025-09-20",
+        due=datetime.fromtimestamp(1758326400).strftime("%Y-%m-%d"),
     )
 
 
@@ -55,9 +55,12 @@ def test_calendar_dates_stay_local(zone: str, monkeypatch: pytest.MonkeyPatch) -
         local.setenv("TZ", zone)
         time.tzset()
         try:
-            midnight = runtime.epoch_ms("2026-11-17", fix="--due")
+            midnight = runtime.epoch_ms("2026-11-17", fix="--due-before", midday=False)
             assert datetime.fromtimestamp(midnight / 1000) == datetime(2026, 11, 17)
             assert projections.epoch_date(midnight) == "2026-11-17"
+            midday = runtime.epoch_ms("2026-11-17", fix="--due", midday=True)
+            assert datetime.fromtimestamp(midday / 1000) == datetime(2026, 11, 17, 12)
+            assert projections.epoch_date(midday) == "2026-11-17"
             normalized = int(datetime(2026, 11, 17, 4).timestamp() * 1000)
             assert projections.epoch_date(normalized) == "2026-11-17"
             abbreviation = datetime(2026, 11, 17, 4).astimezone().tzname()
@@ -225,14 +228,16 @@ def test_a_users_field_names_the_people_not_their_ids() -> None:
     assert resolved == (("Reviewer", "user_two"),)
 
 
-def test_a_date_field_renders_as_a_utc_calendar_date() -> None:
+def test_a_date_field_renders_as_a_local_calendar_date() -> None:
     dates = (CustomField(id="cf-date", name="Kickoff", type="date", options=()),)
 
     resolved, _ = projections.resolve_fields(
         [{"id": "cf-date", "value": "1758326400000"}], dates
     )
 
-    assert resolved == (("Kickoff", "2025-09-20"),)
+    assert resolved == (
+        ("Kickoff", datetime.fromtimestamp(1758326400).strftime("%Y-%m-%d")),
+    )
 
 
 def test_an_empty_value_reads_as_absent_rather_than_as_the_string_none() -> None:

@@ -341,7 +341,7 @@ def test_the_due_date_is_sent_as_the_epoch_clickup_stores(
     )
 
     assert json.loads(sent[0].content) == {
-        "due_date": int(datetime(2026, 10, 1).timestamp() * 1000)
+        "due_date": int(datetime(2026, 10, 1, 12).timestamp() * 1000)
     }
 
 
