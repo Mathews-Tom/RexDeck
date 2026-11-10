@@ -681,6 +681,149 @@ def test_media_launch_passes_one_absolute_target_and_restores_origin(
     assert state["focused"] == "origin-a"
 
 
+@pytest.mark.parametrize("representation", ["absolute", "relative", "uri", "upper"])
+def test_selected_file_resolves_explicit_accepted_file(
+    tmp_path: Path, representation: str
+) -> None:
+    target = tmp_path / (
+        "雪 ; $(touch nope)" + (".JSON" if representation == "upper" else ".json")
+    )
+    target.write_text("{}", encoding="utf-8")
+    selected = (
+        target.name
+        if representation == "relative"
+        else target.as_uri()
+        if representation == "uri"
+        else str(target)
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(LAUNCHER),
+            "context",
+            "selected-file:.json",
+            str(tmp_path),
+            selected,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "cwd": str(tmp_path.resolve()),
+        "target": str(target.resolve()),
+    }
+    assert not (tmp_path / "nope").exists()
+
+
+@pytest.mark.parametrize(
+    ("selected", "message"),
+    [
+        (None, "Select an existing .json file with the file argument"),
+        ("", "Select an existing .json file with the file argument"),
+        ("missing.json", "does not exist"),
+        ("notes.txt", "Select an existing .json file, not"),
+        ("folder", "Select an existing .json file, not"),
+        ("misleading.json", "Select an existing .json file, not"),
+    ],
+)
+def test_selected_file_refuses_before_launch(
+    tmp_path: Path, selected: str | None, message: str
+) -> None:
+    (tmp_path / "notes.txt").write_text("{}", encoding="utf-8")
+    (tmp_path / "folder").mkdir()
+    (tmp_path / "misleading.json").symlink_to(tmp_path / "notes.txt")
+    argv = [
+        sys.executable,
+        str(LAUNCHER),
+        "context",
+        "selected-file:.json",
+        str(tmp_path),
+    ]
+    if selected is not None:
+        argv.append(selected)
+    result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert message in result.stderr
+
+
+def test_selected_file_refusal_escapes_terminal_control_characters(
+    tmp_path: Path,
+) -> None:
+    hostile = tmp_path / "evil\x1b]0;owned\x07.txt"
+    hostile.write_text("{}", encoding="utf-8")
+    for selected in (hostile.name, "gone\x1b[2J.json"):
+        with pytest.raises(ValueError) as refused:
+            launch.resolve("selected-file:.json", str(tmp_path), selected)
+        assert "\x1b" not in str(refused.value) and "\\x1b" in str(refused.value)
+
+
+def test_selected_file_accepts_directories_only_when_declared(tmp_path: Path) -> None:
+    folder = tmp_path / "logs"
+    folder.mkdir()
+    log = folder / "app.log"
+    log.write_text("line\n", encoding="utf-8")
+    assert launch.resolve("selected-file:.log,/", str(tmp_path), "logs") == str(
+        folder.resolve()
+    )
+    assert launch.resolve("selected-file:/", str(tmp_path), "logs") == str(
+        folder.resolve()
+    )
+    with pytest.raises(ValueError, match="Select an existing directory, not"):
+        launch.resolve("selected-file:/", str(tmp_path), str(log))
+    with pytest.raises(ValueError, match=r"Select an existing \.log file, not"):
+        launch.resolve("selected-file:.log", str(tmp_path), "logs")
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        "selected-file",
+        "selected-file:",
+        "selected-file:json",
+        "selected-file:.json,.json",
+        "selected-file:.JSON",
+        "media:.png",
+    ],
+)
+def test_selected_file_rejects_malformed_specification(
+    tmp_path: Path, context: str
+) -> None:
+    target = tmp_path / "data.json"
+    target.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError):
+        launch.resolve(context, str(tmp_path), str(target))
+
+
+def test_selected_file_launch_passes_args_then_target_and_restores_origin(
+    tmp_path: Path, tools: tuple[Path, Path, Path]
+) -> None:
+    tool, rex, state_path = tools
+    target = tmp_path / "雪 ; $(touch nope).json"
+    target.write_text("{}", encoding="utf-8")
+    assert (
+        launch.run(
+            "selected-file:.json",
+            "JSON",
+            "jless",
+            str(tool),
+            str(rex),
+            "unix:///private server.sock",
+            "session-exact",
+            "origin-a",
+            str(target),
+            ("--json",),
+        )
+        == 0
+    )
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["argv"] == ["--json", str(target.resolve())]
+    assert state["cwd"] == str(target.parent.resolve())
+    assert state["focused"] == "origin-a"
+
+
 @pytest.mark.parametrize("plugin", ["files", "git", "markdown", "usage", "viewer"])
 def test_tool_path_excludes_untrusted_entries_without_changing_launch_contract(
     tmp_path: Path,

@@ -211,3 +211,47 @@ end
 local accepted, error = pcall(action.run, context, {file = '/selected/image.png'})
 assert(not accepted and tostring(error):find('Invalid .png file signature', 1, true))
 assert(opened == 0 and focused == 'origin-b', 'corrupt rich file opened a pane')
+
+-- selected-file carries its accepted suffixes in the context argument only.
+options.plugin, options.title, options.context = 'json', 'JSON', 'selected-file'
+options.tool, options.tool_label, options.jless = 'jless', 'jless', '/jless'
+options.args = {'--json'}
+for _, invalid in ipairs({false, '', 'json;rm', '.json\0'}) do
+  options.selected_file = invalid
+  assert(not pcall(install, options), 'invalid selected-file spec accepted')
+end
+options.selected_file = '.json'
+install(options)
+assert(action.args.file == 'string?', 'selected-file action lacks file argument')
+for _, absent in ipairs({{}, {file = false}, {file = ''}}) do
+  reset()
+  local accepted, error = pcall(action.run, context, absent)
+  assert(not accepted and tostring(error):find('RexDeck JSON', 1, true))
+  if absent.file == nil then
+    assert(tostring(error):find('selected .json file', 1, true), tostring(error))
+  end
+  assert(effects == 0 and opened == 0, 'missing selected file changed focus or panes')
+end
+rex.exec = function(argv)
+  assert(argv[6] == 'selected-file:.json' and argv[8] == 'data/big.json',
+    'selected-file spec or selection lost before validation')
+  return {ok = true, stdout = 'validated'}
+end
+rex.json.decode = function() return {cwd = '/data', target = '/data/big.json'} end
+rex.session.new_split = function(request)
+  opened = opened + 1
+  local command = request.layout.block.options.command
+  assert(command[6] == 'selected-file:.json' and command[14] == '/data/big.json'
+    and command[15] == '--json' and #command == 15,
+    'selected-file launch lost its spec, target or args')
+  return {block_ids = {'json-1'}}
+end
+reset()
+action.run(context, {file = 'data/big.json'})
+assert(opened == 1)
+options.selected_file = '.log,.txt,/'
+install(options)
+reset()
+local accepted, error = pcall(action.run, context, {})
+assert(not accepted and tostring(error):find('selected .log, .txt file or a directory', 1, true),
+  tostring(error))

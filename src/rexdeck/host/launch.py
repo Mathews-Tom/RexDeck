@@ -120,6 +120,51 @@ def media(raw: str, selected: str | None = None) -> str:
     return str(path)
 
 
+SELECTED_FILE = "selected-file"
+
+
+def _accepted(spec: str) -> tuple[tuple[str, ...], bool]:
+    """Decode a descriptor's ``.suffix,...[,/]`` selection spec exactly."""
+    entries = spec.split(",")
+    suffixes = tuple(entry for entry in entries if entry != "/")
+    directories = "/" in entries
+    if (
+        not spec
+        or len(set(entries)) != len(entries)
+        or not all(re.fullmatch(r"\.[a-z0-9]+", suffix) for suffix in suffixes)
+    ):
+        raise ValueError(f"Invalid selected-file specification: {spec!r}")
+    return suffixes, directories
+
+
+def selected_file(spec: str, raw: str, selected: str | None = None) -> str:
+    """Require an explicit existing file with an accepted suffix, or an accepted
+    directory; a relative selection is joined to the invoking directory."""
+    suffixes, directories = _accepted(spec)
+    wanted = " or ".join(
+        part
+        for part in (
+            ", ".join(suffixes) + " file" if suffixes else "",
+            "directory" if directories else "",
+        )
+        if part
+    )
+    if selected is None or not selected or "\x00" in selected:
+        raise ValueError(f"Select an existing {wanted} with the file argument")
+    if not selected.startswith("/") and not selected.lower().startswith("file:"):
+        selected = str(Path(directory(raw)) / selected)
+    try:
+        path = _local(selected)
+    except FileNotFoundError:
+        # repr() keeps terminal control characters in names from reaching the pane.
+        raise ValueError(f"The selected path does not exist: {selected!r}") from None
+    if directories and path.is_dir():
+        return str(path)
+    if path.is_file() and path.suffix.lower() in suffixes:
+        return str(path)
+    raise ValueError(f"Select an existing {wanted}, not {str(path)!r}")
+
+
 def git_directory(raw: str) -> str:
     """Keep cwd-based Git discovery; reject inherited repository redirection."""
     overrides = {
@@ -393,6 +438,7 @@ def cleanup_signals() -> Iterator[None]:
 
 
 # Mirrors rexdeck.integrations.CONTEXTS; this file runs standalone under ``python -I``.
+# selected-file arrives as ``selected-file:SPEC`` and is resolved by ``resolve``.
 CONTEXTS = {
     "directory": directory,
     "git-worktree": git_directory,
@@ -439,7 +485,14 @@ def restore_focus(rex: str, server: str, session: str, origin: str) -> None:
 
 
 def resolve(context: str, raw: str, selected: str | None = None) -> str:
-    """Resolve one declared context; arbitrary cwd never selects a file or account."""
+    """Resolve one declared context; arbitrary cwd never selects a file or account.
+
+    ``selected-file:SPEC`` carries the descriptor's accepted suffixes, because this
+    launcher runs standalone and cannot read the catalogue.
+    """
+    name, separator, spec = context.partition(":")
+    if name == SELECTED_FILE and separator:
+        return selected_file(spec, raw, selected)
     if context not in CONTEXTS:
         raise ValueError(f"Unknown integration context: {context!r}")
     if context in ("document", "media"):
@@ -479,7 +532,9 @@ def run(
         if not Path(tool).is_absolute() or not Path(rex).is_absolute():
             raise ValueError("Absolute tool and Rex executable paths are required")
         # File targets are rechecked as explicit selections at launch time.
-        file_context = context in ("document", "media")
+        file_context = context in ("document", "media") or context.startswith(
+            SELECTED_FILE + ":"
+        )
         checked = resolve(context, cwd, cwd if file_context else None)
         if context == "github-worktree":
             if len(args) != 1:

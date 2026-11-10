@@ -24,13 +24,24 @@ from dataclasses import dataclass
 # an explicit PDF/JPG/PNG/SVG file and never falls back to directory browsing.
 # "github-worktree" reuses Git discovery and captures an explicit repository/host
 # and account choice, verified against existing gh authentication before launch.
-CONTEXTS = ("directory", "git-worktree", "document", "github-worktree", "media")
+# "selected-file" requires an explicit existing file with one of the descriptor's
+# ``file_suffixes`` (or a directory when ``file_directories``), never a cwd
+# fallback, and passes the validated path as the tool's final argument.
+CONTEXTS = (
+    "directory",
+    "git-worktree",
+    "document",
+    "github-worktree",
+    "media",
+    "selected-file",
+)
 PLACEMENTS = ("right", "left", "below", "above")
 MIN_SIZE = 20
 MAX_SIZE = 80
 _ID = re.compile(r"[a-z][a-z0-9]*\Z")
 _TITLE = re.compile(r"[A-Z][A-Za-z0-9 ]*\Z")
 _TOOL = re.compile(r"[a-z][a-z0-9._-]*\Z")
+_SUFFIX = re.compile(r"\.[a-z0-9]+\Z")
 # Generated-module option names; a tool executable name keys its path beside them.
 _RESERVED = frozenset(
     (
@@ -48,6 +59,7 @@ _RESERVED = frozenset(
         "context",
         "args",
         "layout",
+        "selected_file",
     )
 )
 
@@ -124,6 +136,9 @@ class Integration:
     prerequisites: tuple[tuple[str, str], ...] = ()
     # Owned frontends run from this distribution's interpreter, not a PATH tool.
     owned_module: str | None = None
+    # selected-file only: accepted lowercase suffixes and whether a directory is.
+    file_suffixes: tuple[str, ...] = ()
+    file_directories: bool = False
 
     def __post_init__(self) -> None:
         if not _ID.match(self.id):
@@ -153,6 +168,22 @@ class Integration:
             raise ValueError(
                 "Owned frontends must use isolated in-package module launch"
             )
+        if self.context == "selected-file":
+            if not self.file_suffixes and not self.file_directories:
+                raise ValueError(f"{self.id} must accept a file suffix or directories")
+            if len(set(self.file_suffixes)) != len(self.file_suffixes) or not all(
+                _SUFFIX.match(suffix) for suffix in self.file_suffixes
+            ):
+                raise ValueError(f"{self.id} has invalid or repeated file suffixes")
+        elif self.file_suffixes or self.file_directories:
+            raise ValueError(f"{self.id} declares file selection without selected-file")
+
+    @property
+    def selected_file(self) -> str:
+        """The launcher's accepted-selection spec: suffixes, then ``/`` for dirs."""
+        return ",".join(
+            (*self.file_suffixes, *(("/",) if self.file_directories else ()))
+        )
 
     @property
     def loader_markers(self) -> tuple[bytes, bytes]:
@@ -167,7 +198,7 @@ class Integration:
 
     def describe(self) -> dict[str, object]:
         """Public identity, dependency and disclosure summary for listings."""
-        return {
+        summary: dict[str, object] = {
             "title": f"RexDeck {self.title}",
             "tool": self.tool,
             "versions": list(self.versions),
@@ -177,6 +208,12 @@ class Integration:
             "default_layout": self.default_layout.document(),
             "owned_module": self.owned_module,
         }
+        if self.context == "selected-file":
+            summary["selected_file"] = {
+                "suffixes": list(self.file_suffixes),
+                "directories": self.file_directories,
+            }
+        return summary
 
 
 # The original plugins keep their published order; later catalogue modules
