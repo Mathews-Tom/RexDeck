@@ -36,9 +36,15 @@ Native observations live under the setup-owned workspace at `<saved workspace>/a
 
 The native observation commands read status messages (which may contain sensitive task names), IDs, report owner PID/name, block host and terminal exit codes; they do not capture terminal screens, read transcripts or inspect unrelated OS processes. Only `jump` changes focus. No paid calls, network provider requests, hook installation, watcher, autostart or upstream tool configuration changes are made. Disabling a hosted integration does not erase attention observations; uninstalling RexDeck leaves this explicitly retained local evidence in place.
 
-## Optional provider hooks (D11: implement and hold for owner)
+## Optional provider hooks (D11)
 
-**Script-qualified, not provider-event-qualified.** Piped documented-shape payloads exercise the installed receiver and native navigation in an isolated Rex. No live provider hook installation, model call or real subagent event is claimed. The owner must install/review these entries and run one real subagent per provider before live qualification.
+**Qualified with real provider subagent events (2026-11-10, Claude Code 2.1.322 and Codex CLI 0.159.2).** In an isolated Rex, each provider ran one real subagent from a lab terminal. Each child produced exactly one row with these properties:
+
+- It was bound to that exact terminal block (`binding_reason: verified`).
+- Its `parent_session_id` equalled the provider's own session: Claude's `session_id`, or Codex's thread ID.
+- Start and stop shared one `agent_id`: one row, receipt order 2.
+
+`attention jump` then focused that block. The hooks lived only in disposable configuration: a Claude `--settings` file with `--setting-sources ""`, and a Codex project-layer `.codex/hooks.json`. The live `~/.claude` and `~/.codex` configs were byte-identical afterwards. Installing the entries below into your own configuration remains your decision. RexDeck never installs hooks.
 
 Install a RexDeck build containing `attention hook` and complete `rexdeck setup` first. Resolve its stable absolute executable path with `command -v rexdeck`. In the JSON below, replace `/absolute/path/to/rexdeck` with that path (keep the escaped quotes). Merge only these entries into existing `hooks` arrays; do not replace unrelated settings/hooks. Hook processes must inherit the same `XDG_CONFIG_HOME` as setup, or its default, to find the approved RexDeck target. Start the parent provider inside the intended Rex terminal: the qualified private Rex supplied `REX_SESSION` and `REX_BLOCK`, but **not `REX_SERVER`**. No manual endpoint export is required: RexDeck verifies those exact IDs on the setup-saved endpoint before binding; a supplied, different `REX_SERVER` vetoes binding. With no inherited IDs, the row is explicitly unbound.
 
@@ -81,7 +87,7 @@ Owner-only change: add these two groups under `hooks` in `~/.claude/settings.jso
 
 Review the commands in Claude Code's `/hooks` UI and restart the parent session if needed to load the settings. For an isolated owner trial, use `CLAUDE_CONFIG_DIR` pointing to a fresh directory, or a dedicated `--settings` file; RexDeck never changes either. Start also fires on resume. **SubagentStop also fires for internal agents, including prompt suggestions and `/btw`**, not just explicit user-created subagents. The shown `.+` matcher excludes empty `agent_type` values, but internal events can still have a nonempty type (for example a parent session's `--agent` name) and therefore still match. Omit that matcher only if empty-type events are intentionally wanted; the receiver preserves them without inferring identity. An unmatched/absent start is not invented. These are reported events, not proof of an independent process or permanent termination.
 
-**First real-run owner check:** confirm that Claude's emitted `session_id` is the intended parent conversation and that start/stop `agent_id` formats and values match for the same real child. The documentation examples use differing-looking IDs, so piped samples do not establish that cross-event correlation. Until this live check is recorded, provider-event parentage remains held for owner, even though the receiver preserves the supplied identifiers exactly.
+**Real-run check (recorded 2026-11-10):** a real Claude Code child's start and stop events carried the same `agent_id`, and their `session_id` was the parent `claude -p` session. The receiver keeps the supplied identifiers exactly. Internal agents can still produce stop rows, as described above.
 
 The [official hook reference](https://code.claude.com/docs/en/hooks.md#subagentstart) documents stdin JSON and exit/output controls. Silent exit 0 makes no decision or context injection; async execution prevents waiting on telemetry. RexDeck never emits a block/continuation decision.
 
@@ -131,7 +137,9 @@ The [official hook reference](https://developers.openai.com/codex/hooks.md) curr
 hooks = true
 ```
 
-Open **`/hooks` and review/trust the exact definitions**; changed hashes require fresh trust and untrusted hooks are skipped. Project-local config must also be trusted. Do not bypass hook trust. Managed policy can disable hooks and must not be overridden. For an isolated owner trial use a fresh `CODEX_HOME`; no live config or credentials are copied by RexDeck.
+Open **`/hooks` and review/trust the exact definitions**; changed hashes require fresh trust and untrusted hooks are skipped. Project-local config must also be trusted. Do not bypass hook trust for normal use. Managed policy can disable hooks and must not be overridden. For an isolated owner trial use a fresh `CODEX_HOME`; no live config or credentials are copied by RexDeck.
+
+The 2026-11-10 qualification ran `codex exec` with Codex's documented one-off `--dangerously-bypass-hook-trust`, which runs every enabled hook for that invocation, including your existing ones. It also trusted the disposable project through `-c 'projects."<dir>".trust_level="trusted"'`. Codex **writes that `-c` trust override into `~/.codex/config.toml`** as a `[projects."<dir>"]` table, so remove exactly that table after such a trial.
 
 Codex explicitly defines `session_id` on these events as the **parent** session ID; `agent_id`/`agent_type` identify the reported child. Nullable `last_assistant_message`/transcript paths become presence booleans only. `turn_id`, model, permission mode and all other fields are discarded. The reference's common-output section defines exit 0 with no output as success (despite the event section requiring JSON when returning output). Async execution continues without waiting, and RexDeck returns no informational output or continuation control.
 
