@@ -41,6 +41,10 @@ Upgrading: the shared host and launcher changed, including the new `github-accou
 - Quote version-probe command parts in install guidance so paths with spaces remain usable.
 - Isolate Go metadata probes from checkout `go.mod`/`go.work` files by running from `/` with `GOTOOLCHAIN=local`, without downloading another toolchain.
 
+### Publication
+
+- Published the owner-approved main-CI wheel/sdist (commit `caa7051`, artifact `13750019260`) to GitHub and PyPI from annotated tag `v0.6.0` through [protected publish 42819128536](https://github.com/Mathews-Tom/RexDeck/actions/runs/42819128536); public hashes match. No-cache public-index installation lists all 25 plugins, and both the candidate and public wheels passed native private Rex smoke (enable, interaction, narrow resize, exact-origin quit, disable).
+
 ## 0.5.2 — 2026-11-10
 
 - Identify ClickUp's RexDeck-authored interface with a `[RexDeck UI]` badge instead of a `(built-in)` suffix in terminal plugin/status reports; leave other tool labels and JSON output unchanged.
