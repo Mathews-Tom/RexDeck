@@ -1,11 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 — 2026-11-10
+
+Upgrading: the shared host and launcher are unchanged, so integrations enabled under 0.6.0 keep working without `rexdeck enable`.
+
+ClickUp dates now follow this machine's local calendar day. Earlier versions wrote dues at UTC midnight, and ClickUp interprets a date-only due in the setter's timezone. So a date shown by 0.6.1 can differ by one day from ClickUp's own view, for example when your ClickUp profile timezone differs from this machine's, or for a due an earlier version wrote from a timezone west of UTC. Compare with ClickUp before re-setting a due, and keep your machine and ClickUp profile timezones aligned.
 
 ### Fixes
 
 - Keep ClickUp due dates, date filters and date custom fields on the local calendar day, including displayed dates and due-edit pre-fills. Anchor written dates at local midday while keeping date-filter boundaries at midnight.
 - Report any failure before dispatch as nothing written, rather than suggesting the write may have succeeded; writes are never retried automatically.
+- Correct the System integration's config-path disclosure in `rexdeck plugins`. On macOS, bottom uses `~/.config/bottom/bottom.toml` when it exists. Otherwise it uses an existing `~/Library/Application Support/bottom/bottom.toml`, then `$XDG_CONFIG_HOME/bottom/bottom.toml` when that variable is set, and otherwise the Application Support path.
 
 ### Documentation
 

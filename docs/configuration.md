@@ -51,7 +51,7 @@ Each guide's **Configuration** section names the exact files, the environment va
 | [Tables](../plugins/tables/README.md#configuration) | VisiData: `~/Library/Preferences/visidata/config.py` or `~/.visidatarc`, or the Options sheet |
 | [Dependencies](../plugins/deps/README.md#configuration) | Chosen in the pane; nothing persisted, no credentials |
 | [Images](../plugins/images/README.md#configuration) | Chosen in the pane; nothing persisted; Docker configuration and credentials are not read |
-| [System](../plugins/system/README.md#configuration) | bottom: `~/.config/bottom/bottom.toml` if it exists, otherwise `$XDG_CONFIG_HOME/bottom/bottom.toml` when set, otherwise `~/Library/Application Support/bottom/bottom.toml` |
+| [System](../plugins/system/README.md#configuration) | bottom on macOS: `~/.config/bottom/bottom.toml` if it exists. Otherwise an existing `~/Library/Application Support/bottom/bottom.toml`, then `$XDG_CONFIG_HOME/bottom/bottom.toml` when set, otherwise the Application Support path |
 | [Disk](../plugins/disk/README.md#configuration) | dua: `~/Library/Application Support/dua-cli/config.toml` |
 | [Containers](../plugins/containers/README.md#configuration) | lazydocker: `~/Library/Application Support/lazydocker/config.yml` (or `CONFIG_DIR`); the current Docker context |
 | [Redis](../plugins/redis/README.md#configuration) | redis-tui: `~/.config/redis-tui/config.json` (connections, TLS, preferences, keybindings) |
