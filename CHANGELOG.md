@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Upgrading: the shared host changed, so `rexdeck plugins` reports every enabled integration as `outdated` with one `rexdeck enable …` command that refreshes them all.
+
+### Fixes
+
+- Report integrations enabled before an upgrade or a tool path change as `outdated` instead of `fault`, keep their pane layout in the listing, and collapse the shared cause into one line with a single combined `Fix:` command.
+- Make opening an integration without a required argument say how to fix it: GitHub views name the exact `rex do rexdeck_<id> account=LOGIN` command and how to find LOGIN, and file views name the `file=PATH` command.
+- After `rexdeck enable`, print the open command for integrations that need `account=` or `file=`, and the outside setup Music, Redis, Containers and HTTP need first.
+
+### Documentation
+
+- List every available plugin with a one-line description in the README.
+
 ## 0.6.1 — 2026-11-10
 
 Upgrading: the shared host and launcher are unchanged, so integrations enabled under 0.6.0 keep working without `rexdeck enable`.

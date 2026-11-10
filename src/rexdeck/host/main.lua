@@ -89,11 +89,12 @@ return function(opts)
         error(title .. ' does not accept a selected file', 0)
       end
       if document and type(action_args) == 'table' then selected = action_args.file end
+      local usage = 'From a Rex terminal, run: rex do rexdeck_' .. opts.plugin
       if opts.context == 'media' and selected == nil then
-        error(title .. ' requires an explicitly selected PDF, JPG, PNG or SVG file', 0)
+        error(title .. ' needs a PDF, JPG, PNG or SVG file. ' .. usage .. ' file=PATH', 0)
       end
       if wanted and selected == nil then
-        error(title .. ' requires an explicitly selected ' .. wanted .. ' (file=PATH)', 0)
+        error(title .. ' needs a selected ' .. wanted .. '. ' .. usage .. ' file=PATH', 0)
       end
       if selected ~= nil and not nonempty(selected) then
         error(title .. ' requires a nonempty selected file path', 0)
@@ -108,7 +109,9 @@ return function(opts)
           end
         end
         if not nonempty(choice.account) then
-          error(title .. ' requires account=LOGIN matching existing gh authentication', 0)
+          error(title .. ' needs your GitHub login. From a Rex terminal inside the repository, run: '
+            .. 'rex do rexdeck_' .. opts.plugin .. ' account=LOGIN, where LOGIN is the output of '
+            .. 'gh api user --jq .login', 0)
         end
         selected = rex.json.encode(choice)
       end
@@ -131,7 +134,8 @@ return function(opts)
           choice.host = choice.host:lower()
         end
         if not nonempty(choice.account) then
-          error(title .. ' requires account=LOGIN matching existing gh authentication', 0)
+          error(title .. ' needs your GitHub login. ' .. usage .. ' account=LOGIN, where LOGIN is '
+            .. 'the output of gh api user --jq .login', 0)
         end
         selected = rex.json.encode(choice)
       end

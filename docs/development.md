@@ -21,7 +21,7 @@ Plugin-specific syntax checks and real interaction verification belong in each p
 
 | Content | Where |
 | --- | --- |
-| What RexDeck is, quick start, links | `README.md`, generic only: it names no individual integration, so adding one never changes it |
+| What RexDeck is, quick start, available plugins, links | `README.md`: one **Available plugins** row per integration (name linked to its guide, id, one-line description); other material stays generic |
 | Catalogue of integrations | `docs/integrations.md`: add one row in the matching category |
 | Settings locations | `docs/configuration.md`: add one row linking to the guide's `#configuration` section |
 | Commands, states, dependencies, releases | `docs/usage.md`, `docs/dependencies.md`, `docs/releasing.md` |
@@ -87,7 +87,8 @@ To host another installed interactive terminal tool, add two files, and do not c
 - **Argv:** fixed arguments appended after the executable. The launch is shell-less; nothing is interpolated.
 - **Layout:** a default placement and size, overridable per integration with `enable --placement/--size`.
 - **Capabilities:** honest disclosure of writes, filesystem or transcript access, network, authentication and external process execution. Descriptive metadata is not a sandbox.
+- **Enable notice (optional):** one line of setup outside RexDeck that the tool needs before it is useful, such as an account, a running service or a collection file. `rexdeck enable` prints it after success, together with the open command that contexts requiring `file=` or `account=` derive automatically.
 
 The host suits programs that own an interactive TTY until the user quits. A one-shot command that prints and exits closes its pane immediately on success (nonzero exits stay visible for acknowledgement), so it first needs an explicit pager or presentation route. Data-backed views need a supported structured backend and real provider evidence. GUI applications are not terminal panes. Adding a descriptor does not make every CLI an integration.
 
-After adding an integration, add its row to [Integrations](integrations.md) and [Configuration](configuration.md). The README and media need no change.
+After adding an integration, add its row to [Integrations](integrations.md), [Configuration](configuration.md) and the README's **Available plugins** table. The media need no change.

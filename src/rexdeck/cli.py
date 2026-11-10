@@ -13,7 +13,7 @@ from typing import Never, cast
 
 from rexdeck import attention, dependencies, integrations, lifecycle, report, settings
 
-_FAILURES = {"conflict", "failed", "fault", "missing-dependency"}
+_FAILURES = {"conflict", "failed", "fault", "missing-dependency", "outdated"}
 
 
 class _Parser(argparse.ArgumentParser):
@@ -248,8 +248,12 @@ def _enable(
     )
     if result.get("state") == "applied":
         started = lifecycle.start(setup, expected_tool=qualified_tool)
-        if plugin == "clickup" and started.get("state") == "ready":
-            notice = _clickup_credential_notice()
+        if started.get("state") == "ready":
+            integration = integrations.get(plugin)
+            notices = [integration.open_hint, integration.enable_notice]
+            if plugin == "clickup":
+                notices.append(_clickup_credential_notice())
+            notice = " ".join(item for item in notices if item)
             if notice:
                 started["notice"] = notice
         return started
@@ -284,10 +288,12 @@ def _plugins(target: settings.SavedTarget | None) -> dict[str, object]:
                 "error": f"Cannot inspect {plugin}: {error}",
             }
         plugins[plugin]["integration"] = integrations.get(plugin).describe()
-    failed = any(row.get("state") in _FAILURES for row in plugins.values())
+    states = {str(row.get("state")) for row in plugins.values()}
     return {
         "state": "fault"
-        if failed
+        if states & (_FAILURES - {"outdated"})
+        else "outdated"
+        if "outdated" in states
         else "ready"
         if any(row.get("enabled") for row in plugins.values())
         else "disabled",

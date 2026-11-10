@@ -44,4 +44,8 @@ INTEGRATION = Integration(
         "controls remain available, with no sandbox or read-only guarantee",
     ),
     default_layout=Layout("right", 50),
+    enable_notice=(
+        "Redis needs a server you are allowed to access: add the connection with "
+        "`a` in redis-tui's connection manager on first open."
+    ),
 )

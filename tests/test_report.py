@@ -39,6 +39,24 @@ def test_a_shared_cause_is_listed_once_for_every_affected_plugin() -> None:
     )
 
 
+def test_outdated_plugins_share_one_copyable_fix_command() -> None:
+    reason = "Enabled before a RexDeck upgrade or a tool path change"
+    rows = {
+        name: _row("outdated", reason) | {"fix": f"rexdeck enable {name}"}
+        for name in ("files", "git", "clickup")
+    }
+    rows["viewer"] = _row("fault", "Viewer receipt is malformed")
+    text = report.render(
+        "RexDeck plugins", {"state": "fault", "plugins": rows}, width=40
+    )
+
+    problems = text.split("Needs attention:", 1)[1]
+    assert problems.count("Enabled before") == 1
+    assert "  files, git, clickup:" in problems
+    fixes = [line.strip() for line in problems.splitlines() if "Fix:" in line]
+    assert fixes == ["Fix: rexdeck enable files git clickup"]
+
+
 def test_remote_or_receipt_text_cannot_inject_terminal_controls() -> None:
     text = report.render(
         "RexDeck status",

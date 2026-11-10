@@ -149,6 +149,8 @@ class Integration:
     # Version report argv when `<tool> --version` is unavailable. Its first element
     # is a declared prerequisite and "{tool}" stands for the qualified executable.
     version_probe: tuple[str, ...] = ()
+    # Setup outside RexDeck the tool needs before it is useful, shown after enable.
+    enable_notice: str = ""
 
     def __post_init__(self) -> None:
         if not _ID.match(self.id):
@@ -204,6 +206,53 @@ class Integration:
                 f"{self.id} version probe must start with a declared prerequisite "
                 "and name {tool} exactly once"
             )
+        if "\x00" in self.enable_notice or "\n" in self.enable_notice:
+            raise ValueError(f"{self.id} has a multiline enable notice")
+
+    @property
+    def open_hint(self) -> str | None:
+        """How to open an action that cannot run without explicit arguments."""
+        action = f"rex do rexdeck_{self.id}"
+        if self.context in {"github-worktree", "github-account"}:
+            where = (
+                "a Rex terminal inside the GitHub repository"
+                if self.context == "github-worktree"
+                else "a Rex terminal"
+            )
+            hint = (
+                f"Open it from {where} with `{action} account=LOGIN`, where LOGIN is "
+                "your GitHub login from `gh api user --jq .login` (sign in first with "
+                "`gh auth login`)."
+            )
+            if self.context == "github-worktree":
+                hint += (
+                    " Add remote=NAME or repo=HOST/OWNER/REPO when the repository has "
+                    "more than one GitHub remote."
+                )
+            return hint
+        if self.context == "selected-file":
+            kinds = " or ".join(
+                part
+                for part in (
+                    f"{', '.join(self.file_suffixes)} file"
+                    if self.file_suffixes
+                    else "",
+                    "directory" if self.file_directories else "",
+                )
+                if part
+            )
+            return f"Open it from a Rex terminal with `{action} file=PATH` ({kinds})."
+        if self.context == "media":
+            return (
+                f"Open it from a Rex terminal with `{action} file=PATH` "
+                "(PDF, JPG, PNG or SVG file)."
+            )
+        if self.context == "dekit-config":
+            return (
+                f"Open it from a Rex terminal with `{action} file=PATH/dekit.yaml` "
+                "for a project you trust."
+            )
+        return None
 
     @property
     def selected_file(self) -> str:

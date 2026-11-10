@@ -38,5 +38,9 @@ INTEGRATION = Integration(
         "context/config and project compose files, which can reference .env files",
     ),
     default_layout=Layout("right", 50),
+    enable_notice=(
+        "Containers needs a running Docker daemon, with docker on the Rex server's "
+        "PATH, before you open it."
+    ),
     prerequisites=(("docker", "https://docs.docker.com/get-docker/"),),
 )
