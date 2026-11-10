@@ -158,6 +158,12 @@ def selected_file(spec: str, raw: str, selected: str | None = None) -> str:
     except FileNotFoundError:
         # repr() keeps terminal control characters in names from reaching the pane.
         raise ValueError(f"The selected path does not exist: {selected!r}") from None
+    # Tools such as lnav glob their arguments (*, ?, [ and \ escapes) before opening
+    # a path by name, so a selected path containing them could open other files.
+    if any(char in str(path) for char in "*?[\\"):
+        raise ValueError(
+            f"Selected paths cannot contain *, ?, [ or \\ characters: {str(path)!r}"
+        )
     if directories and path.is_dir():
         return str(path)
     if path.is_file() and path.suffix.lower() in suffixes:
