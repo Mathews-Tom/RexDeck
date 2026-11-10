@@ -1,0 +1,10 @@
+{
+  "total_count": 1,
+  "workflow_runs": [
+    {
+      "id": 123,
+      "check_suite_id": 99,
+      "html_url": "https://github.com/fixture/project/actions/runs/123"
+    }
+  ]
+}

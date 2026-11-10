@@ -1,0 +1,54 @@
+[
+  {
+    "id": "1",
+    "repository": {
+      "full_name": "fixture/project"
+    },
+    "subject": {
+      "title": "Review synthetic change",
+      "type": "PullRequest",
+      "url": "https://api.github.com/repos/fixture/project/pulls/42"
+    },
+    "reason": "review_requested",
+    "updated_at": "2026-11-10T12:00:00Z"
+  },
+  {
+    "id": "2",
+    "repository": {
+      "full_name": "fixture/project"
+    },
+    "subject": {
+      "title": "A synthetic mention",
+      "type": "Issue",
+      "url": "https://api.github.com/repos/fixture/project/issues/7"
+    },
+    "reason": "mention",
+    "updated_at": "2026-11-10T12:00:00Z"
+  },
+  {
+    "id": "3",
+    "repository": {
+      "full_name": "fixture/project"
+    },
+    "subject": {
+      "title": "Synthetic CI run",
+      "type": "CheckSuite",
+      "url": null
+    },
+    "reason": "ci_activity",
+    "updated_at": "2026-11-10T12:00:00Z"
+  },
+  {
+    "id": "4",
+    "repository": {
+      "full_name": "fixture/project"
+    },
+    "subject": {
+      "title": "Other synthetic update",
+      "type": "Commit",
+      "url": "https://api.github.com/repos/fixture/project/commits/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "reason": "subscribed",
+    "updated_at": "2026-11-10T12:00:00Z"
+  }
+]
