@@ -715,6 +715,8 @@ def _module(
         "args": list(integration.args),
         "layout": layout.split(),
     }
+    if integration.context == "selected-file":
+        opts["selected_file"] = integration.selected_file
     return (
         b"-- Generated from canonical host/main.lua by RexDeck.\n"
         b"local install = (function()\n"

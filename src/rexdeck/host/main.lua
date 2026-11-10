@@ -2,7 +2,7 @@
 -- Every integration shares this action: frozen origin identity, validated context,
 -- shell-less argv, configured split layout and exact-origin return by the launcher.
 local contexts = {directory = true, ['git-worktree'] = true, document = true,
-  ['github-worktree'] = true, media = true}
+  ['github-worktree'] = true, media = true, ['selected-file'] = true}
 local function nonempty(value)
   return type(value) == 'string' and value ~= '' and not value:find('%z')
 end
@@ -51,7 +51,24 @@ return function(opts)
   if not nonempty(launcher) then error(title .. ' requires its applied Python launcher', 0) end
   if not nonempty(opts.server) then error(title .. ' requires an explicit Rex server', 0) end
 
-  local document = opts.context == 'document' or opts.context == 'media'
+  -- selected-file passes its accepted suffixes (and `/` for directories) to the
+  -- launcher inside the context argument, so existing context argv stays unchanged.
+  local launch_context = opts.context
+  local wanted = nil
+  if opts.context == 'selected-file' then
+    local spec = opts.selected_file
+    if not nonempty(spec) or not spec:match('^[%.%w/,]+$') then
+      error(title .. ' requires its accepted file selection', 0)
+    end
+    launch_context = 'selected-file:' .. spec
+    local names, directories = {}, false
+    for entry in spec:gmatch('[^,]+') do
+      if entry == '/' then directories = true else names[#names + 1] = entry end
+    end
+    wanted = #names > 0 and (table.concat(names, ', ') .. ' file') or ''
+    if directories then wanted = wanted .. (#names > 0 and ' or a directory' or 'directory') end
+  end
+  local document = opts.context == 'document' or opts.context == 'media' or wanted ~= nil
   local github = opts.context == 'github-worktree'
 
   rex.action{
@@ -67,6 +84,9 @@ return function(opts)
       if document and type(action_args) == 'table' then selected = action_args.file end
       if opts.context == 'media' and selected == nil then
         error(title .. ' requires an explicitly selected PDF, JPG, PNG or SVG file', 0)
+      end
+      if wanted and selected == nil then
+        error(title .. ' requires an explicitly selected ' .. wanted .. ' (file=PATH)', 0)
       end
       if selected ~= nil and not nonempty(selected) then
         error(title .. ' requires a nonempty selected file path', 0)
@@ -104,7 +124,7 @@ return function(opts)
       if type(reported.pwd) ~= 'string' or reported.pwd == '' then
         error(title .. ': the invoking terminal has not reported a cwd', 0)
       end
-      local validation = {paths.python, '-I', '-c', launcher, 'context', opts.context,
+      local validation = {paths.python, '-I', '-c', launcher, 'context', launch_context,
         reported.pwd}
       if selected then validation[#validation + 1] = selected end
       local checked, exec_error = rex.exec(validation, {timeout = 15})
@@ -122,7 +142,7 @@ return function(opts)
         error(title .. ' received an invalid context validation result: ' .. tostring(json_error), 0)
       end
       local cwd = decoded.cwd
-      local command = {paths.python, '-I', '-c', launcher, 'run', opts.context, opts.title,
+      local command = {paths.python, '-I', '-c', launcher, 'run', launch_context, opts.title,
         opts.tool_label, paths[opts.tool], paths.rex, opts.server, session, origin,
         decoded.target}
       for index = 1, #args do command[#command + 1] = args[index] end
