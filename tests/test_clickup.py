@@ -688,6 +688,13 @@ def test_changed_remote_value_refuses_staged_digest(tmp_path: Path) -> None:
         assert not backend.write_calls
         assert controller.snapshot().pending is None
 
+        snapshot = controller.snapshot()
+        assert "Proposal refused before sending; nothing was sent" in snapshot.output
+        assert "status no longer holds what the dry run recorded" in snapshot.output
+        assert "NOT retried" in snapshot.output
+        assert "Refresh before any new proposal." in snapshot.output
+        assert "may have succeeded" not in snapshot.output
+
 
 @pytest.mark.parametrize(
     ("failure", "outcome"),

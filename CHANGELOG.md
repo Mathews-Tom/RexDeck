@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Keep ClickUp due dates, date filters and date custom fields on the local calendar day, including displayed dates and due-edit pre-fills.
+- Report stale proposals refused before dispatch as nothing sent, rather than suggesting the write may have succeeded; writes are never retried automatically.
+
 ## 0.6.0 — 2026-11-10
 
 Upgrading: the shared host and launcher changed, including the new `github-account` context, so run `rexdeck enable <id>` for every enabled integration after installing 0.6.0.

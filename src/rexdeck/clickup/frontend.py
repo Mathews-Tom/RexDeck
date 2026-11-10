@@ -1206,8 +1206,10 @@ class Controller:
                 error="",
                 error_state="",
             )
+            dispatched = False
 
             def guard(path: str) -> None:
+                nonlocal dispatched
                 with self.lock:
                     selected = self.view.detail
                     field_path = path.removeprefix(f"/task/{task.id}/field/")
@@ -1228,6 +1230,7 @@ class Controller:
                         raise ClickUpError(
                             "unconfirmed", "Selected-task approval is no longer current"
                         )
+                    dispatched = True
 
             def apply() -> tuple[Listing, Detail, str]:
                 writer = Service(
@@ -1293,15 +1296,25 @@ class Controller:
                             in {"PUT", "POST"}
                         )
                         self._set(
-                            output="ClickUp refused this write; it was not applied and was NOT retried. Refresh before any new proposal."
-                            if refused
-                            else "Write may have succeeded; it was NOT retried. Refresh before any new proposal."
+                            output=(
+                                f"Proposal refused before sending; nothing was sent: {clean(str(error))}. "
+                                "It was NOT retried. Refresh before any new proposal."
+                                if not dispatched
+                                else "ClickUp refused this write; it was not applied and was NOT retried. Refresh before any new proposal."
+                                if refused
+                                else "Write may have succeeded; it was NOT retried. Refresh before any new proposal."
+                            )
                         )
                     except Exception as error:  # noqa: BLE001 - outcome is uncertain
                         # Any other failure after dispatch must still end `writing`.
                         self._error(ClickUpError("write-uncertain", clean(repr(error))))
                         self._set(
-                            output="Write may have succeeded; it was NOT retried. Refresh before any new proposal."
+                            output=(
+                                f"Proposal refused before sending; nothing was sent: {clean(str(error))}. "
+                                "It was NOT retried. Refresh before any new proposal."
+                                if not dispatched
+                                else "Write may have succeeded; it was NOT retried. Refresh before any new proposal."
+                            )
                         )
 
             future.add_done_callback(complete)

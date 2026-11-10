@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,7 @@ CASES = (
         ("touch", TASK_ID, "--due", "2026-10-01"),
         "PUT",
         TASK,
-        {"due_date": 1790812800000},
+        {"due_date": int(datetime(2026, 10, 1).timestamp() * 1000)},
     ),
     WriteCase(
         "description",
@@ -202,7 +203,7 @@ def test_each_write_failure_is_not_retried_and_does_not_emit_secret_bodies(
         ("checkbox", "no", False),
         ("currency", "14.50", 14.5),
         ("number", "12", 12),
-        ("date", "2026-10-01", 1790812800000),
+        ("date", "2026-10-01", int(datetime(2026, 10, 1).timestamp() * 1000)),
         ("drop_down", "Sample option", "20000000-0000-4000-8000-000000000010"),
         ("email", "sample@example.invalid", "sample@example.invalid"),
         ("phone", "+1 202 555 0100", "+1 202 555 0100"),
@@ -290,6 +291,6 @@ def test_combined_touch_writes_core_fields_then_each_custom_field_once(
     assert json.loads(sent[0].content) == {
         "status": "in review",
         "assignees": {"add": [710000002], "rem": [710000001]},
-        "due_date": 1790812800000,
+        "due_date": int(datetime(2026, 10, 1).timestamp() * 1000),
     }
     assert json.loads(sent[2].content) == {"value": False}

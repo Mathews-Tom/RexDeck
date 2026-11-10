@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import time
+from datetime import datetime
 from typing import Any
 
 import pytest
 
-from rexdeck.clickup.engine import projections
+from rexdeck.clickup import tui
+from rexdeck.clickup.engine import projections, runtime
 from rexdeck.clickup.engine.diagnostics import EngineError
 from rexdeck.clickup.engine.records import CustomField, FieldOption
 
@@ -44,6 +47,24 @@ def test_a_task_with_no_assignee_reads_as_absent_rather_than_as_an_empty_column(
 
 def test_a_task_with_no_due_date_reads_as_absent() -> None:
     assert projections.task_row(_tasks()[1]).due == projections.ABSENT
+
+
+@pytest.mark.parametrize("zone", ["Asia/Kolkata", "America/Los_Angeles"])
+def test_calendar_dates_stay_local(zone: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    with monkeypatch.context() as local:
+        local.setenv("TZ", zone)
+        time.tzset()
+        try:
+            midnight = runtime.epoch_ms("2026-11-17", fix="--due")
+            assert datetime.fromtimestamp(midnight / 1000) == datetime(2026, 11, 17)
+            assert projections.epoch_date(midnight) == "2026-11-17"
+            normalized = int(datetime(2026, 11, 17, 4).timestamp() * 1000)
+            assert projections.epoch_date(normalized) == "2026-11-17"
+            abbreviation = datetime(2026, 11, 17, 4).astimezone().tzname()
+            assert tui.date_label(str(normalized)) == f"2026-11-17 04:00 {abbreviation}"
+        finally:
+            local.undo()
+            time.tzset()
 
 
 # ------------------------------------------------------------------- custom fields
