@@ -46,7 +46,7 @@ rex do rexdeck_<id>                      # integrations that use the invoking di
 rex do rexdeck_<id> file="path/to/file"  # integrations that need a selected file
 ```
 
-Each guide in [Integrations](integrations.md) lists that integration's arguments. After a successful `enable`, a **Next steps** section shows the exact open command for integrations that need `file=` or `account=`, and any setup outside RexDeck the tool needs first, such as a GitHub login, a running Docker daemon or a ClickUp token. Opening an integration without a required argument fails with that same command. The pane opens split from the invoking terminal. Quitting the tool or view returns focus to that exact terminal.
+Each guide in [Integrations](integrations.md) lists that integration's arguments. After a successful `enable`, a **Next steps** section shows the exact open command for integrations that need `file=` or `account=`, and any setup outside RexDeck the tool needs first, such as a GitHub login, a running Docker daemon or a ClickUp token. Opening an integration without a required argument fails with a message naming the `rex do rexdeck_<id> file=PATH` or `account=LOGIN` command. The pane opens split from the invoking terminal. Quitting the tool or view returns focus to that exact terminal.
 
 With several names, `enable` and `disable` change each integration independently, in the order given. A failure is reported in that integration's row while the others still change, and the command exits nonzero if any failed. An unknown name refuses the whole command before anything changes. `--placement` and `--size` apply to every named integration; put them before or after the list of names, not between names. See [Pane placement and size](configuration.md#pane-placement-and-size).
 
@@ -73,7 +73,7 @@ Inspection faults stay visible alongside healthy sibling rows and return a nonze
 | `missing-dependency` | An applied integration's tool is not on the current `PATH`; `enabled` shows whether it is turned on. Make the tool available (reinstall it yourself if it was removed), then rerun `status`, or `rexdeck enable <id>` if its path changed |
 | `conflict` | The Rex configuration, the RexDeck loader or the registered action no longer matches RexDeck's ownership record (for example, an unowned or edited loader). The mismatches are listed in `conflicts`. Changed or unowned artifacts are kept for your judgment; unchanged owned state may still be removed |
 | `outdated` | Enabled before a RexDeck upgrade changed the bundled host, or before a tool moved on `PATH`. Run the `fix` command (`rexdeck enable <id>`) to refresh it |
-| `fault` | An ownership, refresh or registration problem, with an `error` |
+| `fault` | An ownership or registration problem, with an `error` |
 | `not-configured` | Shown by `plugins` before setup |
 | `failed` | A command-level error, such as no saved target or an unknown or old receipt for `status <id>` |
 

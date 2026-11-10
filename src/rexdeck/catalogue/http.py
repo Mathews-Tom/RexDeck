@@ -40,6 +40,7 @@ INTEGRATION = Integration(
     default_layout=Layout("right", 50),
     enable_notice=(
         "HTTP needs a Slumber collection: open it from a directory that contains "
-        "slumber.yml, or from one of its subdirectories."
+        "slumber.yml (or slumber.yaml, .slumber.yml, .slumber.yaml), or from one "
+        "of its subdirectories."
     ),
 )

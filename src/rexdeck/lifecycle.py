@@ -230,7 +230,10 @@ class Outdated(RuntimeError):
 
     def __init__(self, plugin: str) -> None:
         self.fix = f"rexdeck enable {plugin}"
-        super().__init__(f"{self.REASON}; run {self.fix} to refresh {plugin}")
+        super().__init__(
+            f"Owned {plugin} source, launcher or tool paths no longer match the "
+            f"installed RexDeck; run {self.fix} to refresh them"
+        )
 
 
 def _executable(name: str) -> str:
@@ -1306,11 +1309,21 @@ def status(setup: Setup) -> dict[str, object]:
             "error": str(missing),
         }
     except Outdated as stale:
+        enabled = bool(receipt and receipt["enabled"])
+        try:
+            # Staleness must not hide a registration fault behind it either.
+            _expect_action(setup, enabled)
+        except RuntimeError as exc:
+            return {
+                "state": "fault",
+                "server": setup.server,
+                "error": f"{exc}; also {stale}",
+            }
         return {
             "state": "outdated",
             "server": setup.server,
             "applied": True,
-            "enabled": bool(receipt and receipt["enabled"]),
+            "enabled": enabled,
             "layout": _layout(setup, receipt).document(),
             "conflicts": receipt["conflicts"] if receipt else [],
             "error": Outdated.REASON,
