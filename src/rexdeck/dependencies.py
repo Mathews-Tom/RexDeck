@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -67,7 +68,7 @@ def _manual(integration: integrations.Integration) -> str:
     # A probe reads the executable by path, so the shown check resolves it first.
     check = (
         " ".join(
-            f'"$(command -v {tool})"' if part == "{tool}" else part
+            f'"$(command -v {tool})"' if part == "{tool}" else shlex.quote(part)
             for part in integration.version_probe
         )
         if integration.version_probe
