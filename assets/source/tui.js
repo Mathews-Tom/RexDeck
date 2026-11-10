@@ -1,137 +1,88 @@
-// Stylized recreations of the hosted tools' layouts, for promotional media.
-// They are illustrations, not screen recordings.
+// Generic, tool-agnostic pane archetypes for RexDeck promotional media.
+// They depict kinds of panes (a navigator, a table, a dashboard, a purpose-built
+// view) with skeleton content, so new integrations never require new artwork.
+// They are illustrations, not screen recordings, and name no specific tool.
 const TUI = {
-  hostedTools: ["Yazi", "lazygit", "gh-dash", "markdown-reader", "tokscale"],
-  shell() {
-    return `<div class="pad"><span class="t">~/projects/rexdeck</span> <span class="a">❯</span> git status -sb
-<span class="m">## main...origin/main</span>
-<span class="t">~/projects/rexdeck</span> <span class="a">❯</span> </div>`;
+  // Stable categories rather than a tool list; every future integration fits one.
+  categories: ["Files & code", "Data & logs", "Systems & services", "Work & APIs"],
+
+  bar(width, cls = "") {
+    return `<i class="sk ${cls}" style="width:${width}%"></i>`;
   },
 
-  yazi(compact = false) {
-    const parent = `<div class="col"><span class="s b">projects/</span>
-  <span class="m">archive</span>
-  <span class="sel"> rexdeck</span>
-  <span class="m">notes</span>
-  <span class="m">sandbox</span></div>`;
-    return `<div class="cols" style="grid-template-columns: ${compact ? "1fr 1.2fr" : "1fr 1.3fr 1.7fr"}">
-${compact ? "" : parent}
-<div class="col"><span class="s"> .github</span>
-<span class="s"> plugins</span>
-<span class="sel"> src</span>
-<span class="s"> tests</span>
- CHANGELOG.md
- LICENSE
- README.md
- pyproject.toml
- uv.lock</div>
-<div class="col"><span class="s b">src/rexdeck/</span>
-<span class="s"> clickup</span>
-<span class="s"> host</span>
-<span class="s"> plugins</span>
- attention.py
- cli.py
- integrations.py
- lifecycle.py
- report.py
- settings.py</div>
-</div>
-<div class="bar"><span class="mode">NOR</span><span>drwxr-xr-x</span><span>3/9</span><span style="margin-left:auto">~/projects/rexdeck/src</span></div>`;
+  shell(lines = []) {
+    const prompt = `<span class="t">~/work</span> <span class="a">❯</span>`;
+    const body = lines.map(([cmd, out]) => `${prompt} ${cmd}${out ? `\n<span class="m">${out}</span>` : ""}`).join("\n");
+    return `<div class="pad">${body}${body ? "\n" : ""}${prompt} </div>`;
   },
 
-  lazygit() {
-    return `<div class="cols" style="grid-template-columns: 0.95fr 1.25fr; gap: 8px; padding: 8px">
-<div style="display:grid; grid-template-rows: auto 1fr 0.8fr 1.4fr; gap: 6px; overflow:hidden">
-<div class="box"><h6>[1] Status</h6>rexdeck → <span class="t">main</span> <span class="m">✓</span></div>
-<div class="box on"><h6>[2] Files</h6><span class="c">M</span>  README.md
-<span class="sel"><span class="c">M</span>  src/rexdeck/cli.py</span>
-<span class="t">A</span>  tests/test_report.py</div>
-<div class="box"><h6>[3] Branches</h6><span class="t">* main</span>
-  feat/deck-banner</div>
-<div class="box"><h6>[4] Commits</h6><span class="a">d3e4f5a</span> docs: refresh project intro
-<span class="a">c2d3e4f</span> feat: add task reader
-<span class="a">b1c2d3e</span> feat: choose pane layout
-<span class="a">a0b1c2d</span> fix: preserve focus</div>
-</div>
-<div class="box" style="overflow:hidden"><h6>Diff — src/rexdeck/cli.py</h6><span class="s">@@ -411,6 +411,23 @@</span>
-<span class="c">-            if args.command == "enable":</span>
-<span class="t">+            if args.command in {"enable", "disable"}:</span>
-<span class="t">+                names = list(dict.fromkeys(args.plugin))</span>
-<span class="t">+</span>
-<span class="t">+                def change(name: str):</span>
-<span class="t">+                    if args.command == "enable":</span>
-<span class="t">+                        return _enable(path, target, name)</span>
-<span class="t">+                    return lifecycle.disable(target.setup(name))</span>
-                 ...
-</div>
-</div>
-<div class="bar"><span>Commit: <span class="a">c</span></span><span>Push: <span class="a">P</span></span><span>Stage: <span class="a">space</span></span><span>Diff: <span class="a">enter</span></span><span style="margin-left:auto">Keybindings: <span class="a">?</span></span></div>`;
+  // A hosted terminal tool: columns of entries with a preview.
+  navigator(compact = false) {
+    const col = (rows, sel) =>
+      `<div class="col sk-col">${rows.map((w, i) => `<div class="sk-row ${i === sel ? "on" : ""}">${this.bar(w, i === sel ? "hi" : "")}</div>`).join("")}</div>`;
+    const preview = `<div class="col sk-col"><div class="sk-row">${this.bar(46, "a")}</div>${[92, 84, 88, 60, 0, 90, 76, 82, 40]
+      .map((w) => `<div class="sk-row">${w ? this.bar(w, "dim") : ""}</div>`)
+      .join("")}</div>`;
+    return `<div class="cols" style="grid-template-columns: ${compact ? "1fr 1.5fr" : "0.9fr 1.1fr 1.6fr"}">
+${compact ? "" : col([62, 48, 70, 54, 40], 2)}${col([58, 72, 44, 66, 50, 38, 61, 47], 1)}${preview}</div>
+<div class="bar"><span class="mode">NOR</span><span>↑↓ move</span><span>enter open</span><span>/ search</span><span style="margin-left:auto">q quit</span></div>`;
   },
 
-  ghdash() {
-    return `<div class="pad"><span class="b">  My Pull Requests</span>   <span class="m">Needs Review   Involved</span>
-<span class="m">────────────────────────────────────────────────────</span>
-<span class="m">  #   Title                              Checks  Rev</span>
-<span class="sel">  42  Add pane layout presets             <span class="t">✓</span>      <span class="t">✓</span> </span>
-  41  Readable plugin report              <span class="t">✓</span>      <span class="a">…</span>
-  39  Guided workspace selection          <span class="t">✓</span>      <span class="t">✓</span>
-  37  Viewer: PDF page navigation         <span class="c">✗</span>      <span class="m">–</span>
-  35  Attention: exact jump               <span class="t">✓</span>      <span class="t">✓</span>
-</div>
-<div class="bar"><span>repo:rexdeck</span><span style="margin-left:auto">? help</span></div>`;
+  // Rows and columns: logs, tables, query results.
+  table() {
+    const widths = [18, 34, 22, 14];
+    const head = `<div class="sk-tr head">${widths.map((w) => `<span style="flex:${w}">${this.bar(70, "a")}</span>`).join("")}</div>`;
+    const rows = [0, 1, 2, 3, 4, 5, 6, 7]
+      .map((r) => `<div class="sk-tr ${r === 2 ? "on" : ""}">${widths
+        .map((w, c) => `<span style="flex:${w}">${this.bar(40 + ((r * 17 + c * 23) % 55), r === 2 ? "hi" : c === 3 ? "t" : "dim")}</span>`)
+        .join("")}</div>`)
+      .join("");
+    return `<div class="sk-table">${head}${rows}</div>
+<div class="bar"><span>/ filter</span><span>s sort</span><span>; query</span><span style="margin-left:auto">q quit</span></div>`;
   },
 
-  mdreader() {
-    return `<div class="pad"><span class="a b"># Release flow</span>
-
-<span class="m">Every candidate is built once and approved.</span>
-
-    ┌──────────┐     ┌──────────┐     ┌──────────┐
-    │  <span class="t">Merge</span>   │────▶│  <span class="s">Build</span>   │────▶│ <span class="a">Publish</span>  │
-    └──────────┘     └──────────┘     └──────────┘
-<span class="m">  [mermaid — text mode]</span></div>`;
+  // Live numbers: system, services, usage.
+  dashboard() {
+    const gauge = (label, pct, cls) =>
+      `<div class="sk-gauge"><span class="m">${label}</span><div class="track"><div class="fill ${cls}" style="width:${pct}%"></div></div></div>`;
+    const spark = (cls, seed) => {
+      const pts = Array.from({ length: 24 }, (_, i) => `${(i * 100) / 23},${40 - (18 + 14 * Math.sin(i / 2.3 + seed) + 6 * Math.sin(i * 1.7 + seed))}`).join(" ");
+      return `<svg class="spark ${cls}" viewBox="0 0 100 40" preserveAspectRatio="none"><polyline points="${pts}"/></svg>`;
+    };
+    return `<div class="sk-dash">
+<div class="sk-panel">${gauge("load", 64, "a")}${gauge("memory", 42, "t")}${gauge("network", 27, "s")}</div>
+<div class="sk-panel">${spark("a", 0.4)}</div>
+<div class="sk-panel">${spark("t", 2.1)}</div>
+<div class="sk-panel sk-list">${[70, 54, 62, 45].map((w, i) => `<div class="sk-row ${i === 0 ? "on" : ""}">${this.bar(w, i === 0 ? "hi" : "dim")}</div>`).join("")}</div>
+</div>
+<div class="bar"><span>tab focus</span><span>r refresh</span><span style="margin-left:auto">q quit</span></div>`;
   },
 
-  tokscale() {
-    const row = (name, w, cls, n) =>
-      `${name.padEnd(16)}<span class="${cls}">${"█".repeat(w)}</span><span class="m">${"░".repeat(24 - w)}</span> ${n}`;
-    return `<div class="pad"><span class="b">  Tokscale · Models</span>     <span class="m">Overview  Usage  Daily  Sessions</span>
-<span class="m">────────────────────────────────────────────────────</span>
-${row("claude-opus", 21, "a", "61%")}
-${row("claude-sonnet", 9, "t", "24%")}
-${row("gpt-5", 4, "s", " 11%")}
-${row("other", 1, "l", "  4%")}
-
-<span class="m">  r refresh   Shift+R auto-refresh   q quit</span></div>`;
-  },
-
-  clickup() {
-    return `<div class="desk">
-<div class="desk-scope">ClickUp · Demo workspace › Launch</div>
-<div class="desk-fresh">Fresh current-list data</div>
-<div class="desk-toolbar">Refresh   Lists   Actions   Help</div>
-<div class="desk-columns">
-<div class="desk-queue">
-<div class="desk-filter">Filter this list  (/)</div>
-<div class="desk-controls">□ Mine   □ Closed</div>
-<div class="desk-task sel"><b>Ship launch banner</b><span class="a">in progress</span></div>
-<div class="desk-task"><b>Draft release notes</b><span class="s">review</span></div>
-<div class="desk-task"><b>Record walkthrough</b><span class="m">open</span></div>
-</div>
-<div class="desk-reader"><h5>Ship launch banner</h5><span class="a">in progress</span>
-<div class="desk-meta">Home list 10001 · Points: 3</div>
-<p><b>Description</b><br>Show familiar tools and purpose-built views in Rex.</p>
-<p><b>Comments</b></p><div class="desk-comment"><span class="m">Demo user</span><br>Keep the artwork version-free.</div>
-</div>
+  // A purpose-built RexDeck view over CLI output or an API: queue + reader.
+  view() {
+    const item = (w, pill, on) =>
+      `<div class="sk-item ${on ? "on" : ""}">${this.bar(w, on ? "hi" : "dim")}<span class="pill ${pill}"></span></div>`;
+    return `<div class="sk-view">
+<div class="sk-scope">${this.bar(38, "a")}<span class="fresh">fresh</span></div>
+<div class="sk-columns">
+<div class="sk-queue"><div class="sk-filter">/ filter</div>${item(74, "a", true)}${item(58, "s")}${item(66, "t")}${item(49, "m")}${item(61, "s")}</div>
+<div class="sk-reader"><div class="sk-row">${this.bar(64, "fg")}</div><div class="sk-row"><span class="pill a"></span> ${this.bar(28, "dim")}</div>
+${[94, 88, 91, 52].map((w) => `<div class="sk-row">${this.bar(w, "dim")}</div>`).join("")}
+<div class="sk-note">${this.bar(70, "dim")}${this.bar(45, "dim")}</div></div>
 </div></div>
-<div class="bar"><span>Enter read</span><span>/ filter</span><span>l lists</span><span>a actions</span><span style="margin-left:auto">q quit</span></div>`;
+<div class="bar"><span>enter read</span><span>r refresh</span><span>a review change</span><span style="margin-left:auto">q quit</span></div>`;
   },
 
   palette(query, sel) {
-    const items = ["RexDeck Files", "RexDeck Git", "RexDeck GitHub", "RexDeck Markdown", "RexDeck Usage", "RexDeck Viewer", "RexDeck ClickUp"];
-    const shown = items.filter((x) => x.toLowerCase().includes(query.toLowerCase().replace("rexdeck", "").trim()));
-    const rows = (query ? shown : items)
-      .map((x, i) => `<div class="prow ${i === sel ? "on" : ""}"><span>${x}</span><span class="m">RexDeck</span></div>`)
+    const items = [
+      ["Terminal tool", 46],
+      ["Data view", 38],
+      ["API view", 52],
+      ["Terminal tool", 30],
+      ["CLI output view", 42],
+    ];
+    const rows = items
+      .map(([kind, w], i) => `<div class="prow ${i === sel ? "on" : ""}"><span>RexDeck <i class="sk inline ${i === sel ? "hi" : "dim"}" style="width:${w * 3}px"></i></span><span class="m">${kind}</span></div>`)
       .join("");
     return `<div class="pin"><span class="a">›</span> ${query}<span class="caret"></span></div>${rows}`;
   },

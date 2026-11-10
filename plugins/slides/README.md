@@ -2,14 +2,17 @@
 
 Present one explicitly selected **`.md` deck** in a native Rex pane with unmodified [presenterm 0.16.1](https://github.com/mfontanini/presenterm/releases/tag/v0.16.1). Quitting returns focus to the exact invoking terminal.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64 and the qualified Rex server.
 - Preinstalled presenterm **0.16.1** on PATH. Install it yourself from the upstream release, or inspect `brew info presenterm` and use `brew install presenterm` only if it selects this qualified version. Verify with `presenterm --version`. RexDeck never installs, upgrades or removes it. Missing or different versions produce actionable guidance and register nothing.
 
+## Enable and open
+
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable slides
 rexdeck status slides
 # From a terminal inside Rex:
@@ -18,7 +21,9 @@ rex do rexdeck_slides file="talk/deck.md"
 
 `file` is required: an existing `.md` file, case-insensitive. Missing files, directories, `.markdown` and other suffixes are refused visibly before opening a pane. Absolute paths, local `file://` URIs and paths relative to the invoking terminal work. Symlinks are judged by their resolved target's suffix. The resolved absolute file is the final argv element, with no static flags; the pane starts in its parent directory. This is presentation, not an editor or a PDF/HTML export action.
 
-## Controls
+Open **RexDeck Slides** from Rex’s command palette with the selected deck argument, or use the native action above.
+
+## Use
 
 These are presenterm's default controls; user configuration can change them:
 
@@ -31,6 +36,18 @@ These are presenterm's default controls; user configuration can change them:
 Qualification navigated forward/back through a four-slide deck, displayed a Python code block, visited a local PNG image slide, resized to 40 columns, continued navigating and quit to the exact origin. A sibling Files pane and an open Slides pane both remained alive after disabling Slides.
 
 **Images:** in the isolated Rex server, auto-detection selected **Kitty local**: the recorded terminal stream contained Kitty capability probes followed by a `t=f,a=T` image transmission for the 120×80 PNG. There was no ASCII-block fallback. Text/VT capture showed the slide heading/footer but omitted the raster; no graphical client was attached, so this does **not** qualify visual fidelity in the Rex app. Upstream also supports iTerm2, Sixel and ASCII blocks; RexDeck does not force a protocol. User config can override auto-detection.
+
+## Configuration
+
+### Pane layout
+
+`rexdeck enable slides --placement below --size 35` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
+
+### presenterm settings
+
+Edit YAML with `$EDITOR "${XDG_CONFIG_HOME:-$HOME/Library/Application Support}/presenterm/config.yaml"`, or edit the file selected by `PRESENTERM_CONFIG_FILE`. Use the [0.16.1 configuration documentation](https://github.com/mfontanini/presenterm/blob/v0.16.1/docs/src/configuration/introduction.md) and sample configuration as references. Image protocol, key bindings, themes, snippet execution/validation and speaker-note publishing are upstream settings; inspect the security implications below before enabling execution.
+
+RexDeck passes only the absolute selected deck, with its parent as cwd. It supplies no static flags, config overlay, protocol override or tool-specific environment overrides, and never edits upstream config. The launcher inherits upstream configuration/authentication environment, but removes relative and empty `PATH` entries so helpers are not found in the invoking directory.
 
 ## Capabilities and limits
 

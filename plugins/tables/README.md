@@ -2,14 +2,19 @@
 
 Explore one explicitly selected **CSV, TSV, JSON or JSONL file** in a native Rex pane using unmodified [VisiData 3.5](https://github.com/saulpw/visidata/releases/tag/v3.5). Sort, select rows and open frequency tables, then quit back to the exact invoking terminal. This is an editable, code-capable application, **not a read-only viewer or sandbox**.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64 and the qualified Rex server.
 - Preinstalled `vd` **3.5** on PATH. The Homebrew formula is **visidata**, not `vd`: inspect `brew info visidata` and run `brew install visidata` yourself only if it selects 3.5 and you accept its dependency/build effects. Otherwise use the pinned upstream release. `vd --version` must report `saul.pw/VisiData v3.5`. RexDeck never installs, upgrades or removes VisiData. Missing or unqualified versions print installation/version-check guidance and register nothing.
 
+## Enable and open
+
+Open **RexDeck Tables** from Rex's command palette, or invoke the native action with an explicit `file=` selection:
+
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable tables
 rexdeck status tables
 # From the invoking Rex terminal, explicitly select a file:
@@ -18,7 +23,7 @@ rex do rexdeck_tables file="data/report.csv"
 
 `file` is required. Missing paths, directories and suffixes other than `.csv`, `.tsv`, `.json`, `.jsonl` fail before launch. Suffix matching is case-insensitive; a symlink is judged by its resolved target. Absolute paths, local `file://` URIs and paths relative to the invoking terminal are accepted. The resolved absolute file is the final argument after `--motd-url=`; cwd is its parent. JSON/JSONL shape determines the upstream sheet representation; no conversion is done by RexDeck.
 
-## Controls
+## Use
 
 | Key | VisiData action |
 | --- | --- |
@@ -36,9 +41,23 @@ rex do rexdeck_tables file="data/report.csv"
 
 Sorting/selecting/frequency analysis does not itself save the source. Quit without issuing save commands to discard changes; VisiData does not automatically save on quit. Its default `quitguard` is false, so do not expect a confirmation. Qualification uses a 360-row categorical CSV, sorts and selects rows, opens its frequency table, resizes to 40 columns, quits and compares the file bytes unchanged.
 
-A harmless `FileExistsError` can appear on first launch if startup threads race to create the absent VisiData data directory (`stored_list.py:16–19`); the qualified interaction remained usable and subsequent launch was clean.
+## Configuration
 
-## Capabilities, trust and state
+### Pane layout
+
+`rexdeck enable tables --placement below --size 35` sets placement and size; default: right, 50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
+
+### VisiData settings
+
+Use `Shift+O` for the Options Sheet, then `z Ctrl+S` to append changed options to your config, or edit the Python file yourself. On macOS 3.5, edit `$EDITOR "$HOME/Library/Preferences/visidata/config.py"` if that file exists; otherwise edit `$EDITOR ~/.visidatarc`. With `XDG_CONFIG_HOME`, the config-directory candidate is `$XDG_CONFIG_HOME/visidata/config.py`. `VD_CONFIG` selects another config file; `VD_DIR` changes the plugin/macro directory. Settings such as `options.quitguard`, clipboard commands, key bindings and plugins affect this pane. Config is executable Python: use only trusted code. See [upstream customization](https://www.visidata.org/docs/customize/) and the [pinned configuration loader](https://github.com/saulpw/visidata/blob/v3.5/visidata/settings.py).
+
+RexDeck passes `--motd-url=` followed by the selected absolute file, disabling the default startup MOTD fetch. It does not isolate config/plugins or make the application read-only.
+
+RexDeck preserves the inherited environment, except that PATH contains only absolute entries (or the system default if none remain). It adds no tool-specific environment variables or configuration overlay and never edits upstream configuration.
+
+## Capabilities and limits
+
+A harmless `FileExistsError` can appear on first launch if startup threads race to create the absent VisiData data directory (`stored_list.py:16–19`); the qualified interaction remained usable and subsequent launch was clean.
 
 - **Writes:** VisiData can edit cells/rows, save/export with `Ctrl+S`, overwrite with `save-source`/`save-sheet-really`, and run shell commands. Open only trusted data from directories you control. RexDeck rechecks the selected path before launch but the tool opens it by name; another writer could replace it in that interval.
 - **System clipboard:** `Y` / `gY` copy current/selected rows through the configurable `clipboard_copy_cmd` (`pbcopy` by default on macOS), exposing copied data to the system clipboard.
@@ -56,3 +75,5 @@ rexdeck disable tables
 ```
 
 Only Tables' owned loader/module/receipt change. Sibling integrations and already open VisiData panes remain alive. VisiData is **GPL-3.0-only** (the pinned tag's `setup.py` declares this SPDX identifier), owner-managed and executed separately; no upstream code is vendored or bundled.
+
+The upstream tool and its configuration remain untouched.

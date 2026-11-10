@@ -1,20 +1,26 @@
 # Processes
 
-Run unmodified [dekit 0.10.3](https://github.com/pvolok/dekit/releases/tag/v0.10.3), the MIT-licensed mprocs successor, in a native Rex pane. Select a **trusted `dekit.yaml` explicitly**. Tasks run arbitrary commands with your permissions: this is not a sandbox.
+Run unmodified [dekit 0.10.3](https://github.com/pvolok/dekit/releases/tag/v0.10.3), the MIT-licensed mprocs successor, in a native Rex pane. Select a **trusted `dekit.yaml` explicitly**. Tasks run arbitrary commands with your permissions: this is not a sandbox. Quitting and acknowledging the runner report returns focus to the exact invoking terminal.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64 and the qualified Rex server.
 - Owner-installed **dekit 0.10.3** on PATH. Check `brew info dekit` before using `brew install dekit`, or use the pinned upstream release. Verify `dekit --version` prints `dekit 0.10.3`. RexDeck never installs or upgrades tools. Missing and unqualified versions are refused with manual guidance and register nothing.
 
+## Enable and open
+
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable procs
+rexdeck status procs
 rexdeck plugins
 # In the invoking Rex terminal:
 rex do rexdeck_procs file="project/dekit.yaml"
 ```
+
+Open **RexDeck Processes** from Rex’s command palette, or `rex do rexdeck_procs file="project/dekit.yaml"`.
 
 Absolute paths, local file URIs and paths relative to that terminal's reported cwd are supported. No selection, a missing file, a directory, a wrong suffix, or a resolved basename other than exactly `dekit.yaml` is refused before the pane opens. A symlink is judged by its resolved target. Non-file integration contexts refuse a `file` argument rather than ignoring it.
 
@@ -26,7 +32,9 @@ Upstream does **not** take a YAML filename as its positional argument (those are
 
 Project/user kernel overrides selecting a different executable and existing runners with a different binary/version are refused. Stop an old runner explicitly before relaunching; RexDeck never upgrades it. Existing runner tasks and saved task state can differ from the current config; review upstream's reload/write-back indications.
 
-## Controls and lifetime
+## Use
+
+Select the trusted config, start or inspect tasks, then choose explicitly whether to detach or stop and acknowledge the runner report.
 
 These are upstream defaults; your dekit user keymap can change them:
 
@@ -56,7 +64,21 @@ Press Enter to acknowledge the report, then focus returns to the exact invoking 
 
 In isolated 0.10.3 qualification, one detach after a narrow resize returned upstream's `Broken pipe` error even though tasks remained running. The launcher still reports those tasks and preserves the nonzero exit message before a single acknowledgement; an upstream error never means the tasks stopped.
 
-## Trust, state and capabilities
+## Configuration
+
+### Pane layout
+
+Use `rexdeck enable procs --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 60%.
+
+### dekit settings
+
+Edit the explicitly selected project YAML with `$EDITOR /absolute/project/dekit.yaml`; review task commands, dependencies, autostart, included JavaScript and hooks before opening it. The upstream console also edits tasks and can write them back. Edit user-wide UI/keymap YAML with `$EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/dekit/config.yaml"`. See the [upstream user configuration guide](https://dekit.run/docs/config/user) and [pinned project example](https://github.com/pvolok/dekit/blob/v0.10.3/README.md#quick-start).
+
+RexDeck passes `-C /absolute/project` rather than the YAML filename, adds no config overlay and never redirects upstream homes. It removes `REX_SESSION`, `REX_BLOCK`, `REX_CLIENT` and all `DEKIT_*` variables for the TUI, version check and runner probes, while preserving upstream XDG/runtime settings.
+
+RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
+
+## Capabilities and limits
 
 - Task commands, JavaScript config fragments/scripts and hooks execute arbitrary code. Tasks may read/write files, use the network, and inherit the pane environment. Console actions can edit/add/delete tasks; write-back changes `dekit.yaml`. Trust included files and saved task state too.
 - User config/keymaps: `$XDG_CONFIG_HOME/dekit/config.yaml`, default `~/.config/dekit/config.yaml`. The conventional host config is `host/dekit.yaml` there. With dekit 0.10.3, explicitly selecting that file makes RexDeck pass `-C ~/.config/dekit/host`, which reports runner kind `project`, not the named host runner. Selecting that directory's config manages the tasks defined there.

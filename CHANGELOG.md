@@ -10,6 +10,9 @@
 ### Documentation
 
 - Record real Claude Code and Codex subagent-event qualification for the optional attention provider hooks, and document that Codex persists `-c` project-trust overrides into `~/.codex/config.toml`.
+- Keep the README generic and move integration-specific material into `docs/`: the integrations catalogue, usage, configuration (including where every tool's own settings live), dependencies, development and releasing.
+- Give every integration guide the same sections (requirements, enable and open, use, configuration, capabilities and limits, disable). Each guide now says how to edit the tool's own configuration and what RexDeck passes at launch.
+- Replace the banner and launch animation with generic, tool-agnostic artwork that shows categories and pane archetypes, so new integrations need no new media.
 
 ## 0.6.0 — 2026-11-10
 

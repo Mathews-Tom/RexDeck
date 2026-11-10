@@ -23,9 +23,10 @@ INTEGRATION = Integration(
         "processes when the command toggle is on, which can contain secrets",
         "launched with --read_only: stopping or signalling processes is disabled; "
         "keyboard and mouse navigation, sorting, search and quit stay available",
-        "reads its config (bottom.toml under the XDG config home or "
-        "~/.config/bottom) and writes a default one there on first run if none "
-        "exists; no network access",
+        "reads its config (~/.config/bottom/bottom.toml when that file exists, "
+        "otherwise bottom.toml under $XDG_CONFIG_HOME when set, otherwise "
+        "~/Library/Application Support/bottom on macOS) and writes a default one "
+        "on first run if none exists; no network access",
     ),
     default_layout=Layout("right", 50),
     args=("--read_only",),

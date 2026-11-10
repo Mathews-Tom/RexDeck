@@ -2,9 +2,9 @@
 
 Open an explicitly selected **trusted `.json` board** with unmodified [Dashbrew 1.2.0](https://github.com/rasjonell/dashbrew/releases/tag/v1.2.0) in a native Rex pane. Dashbrew renders script and API data; quitting returns focus to the exact invoking terminal.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64 and the qualified Rex server.
 - Preinstalled [Go](https://go.dev/dl/) on PATH, including during enable: Dashbrew has no `--version` flag, so Go inspects its embedded module metadata without running Dashbrew. RexDeck runs this probe from `/` with `GOTOOLCHAIN=local`, preventing checkout `go.mod`/`go.work` files from selecting or downloading another Go toolchain.
@@ -14,19 +14,29 @@ Open an explicitly selected **trusted `.json` board** with unmodified [Dashbrew 
 go install github.com/rasjonell/dashbrew/cmd/dashbrew@v1.2.0
 GOTOOLCHAIN=local go version -m "$(command -v dashbrew)"
 # Require: mod github.com/rasjonell/dashbrew v1.2.0 h1:...
-rexdeck enable dashboard
-rexdeck status dashboard
-# Inside Rex; deliberately select a trusted board:
-rex do rexdeck_dashboard file="boards/trusted.json"
 ```
 
 Missing Go, missing Dashbrew or an unqualified module version refuses enable and registers nothing. Keep the executable and Go in trusted absolute PATH directories. `rexdeck plugins --json` lists the integration's capabilities.
+
+## Enable and open
+
+```sh
+rexdeck setup   # once, if not already done
+rexdeck enable dashboard
+rexdeck status dashboard
+```
+
+Open **RexDeck Dashboard** from Rex’s command palette, or `rex do rexdeck_dashboard file="boards/trusted.json"`.
 
 The `file` argument is mandatory. Missing paths, directories and non-JSON suffixes are refused before a pane opens. Absolute paths, local `file://` URIs and paths relative to the invoking terminal are accepted; the resolved target must end in `.json` (case-insensitive), including for symlinks. The pane opens in the selected file's directory and runs `dashbrew -c /absolute/selected.json`, with the path as one argument after `-c`.
 
 **RexDeck never auto-loads a checkout's `dashboard.json`.** Running upstream Dashbrew yourself without `-c` does load `dashboard.json` from its current directory. An omitted Rex action selection is an error, not that upstream default. RexDeck checks the path, not the JSON schema or its safety; upstream parses and validates the board. A directory writer can swap the file after the path checks, so use directories you control.
 
-## A small trusted board
+## Use
+
+Review the selected board, inspect components, refresh if enabled, then exit with Ctrl + C.
+
+### A small trusted board
 
 This example executes a local shell command and sends an unauthenticated public GET. Read it before opening it; do not put secrets in URLs or JSON.
 
@@ -59,7 +69,7 @@ This example executes a local shell command and sends an unauthenticated public 
 }
 ```
 
-## Controls
+### Controls
 
 | Key | Upstream action |
 | --- | --- |
@@ -72,7 +82,21 @@ Positive `refresh_interval` values in a component's data enable both manual refr
 
 Native-lab qualification rendered a local clock and public GitHub GET, refreshed the clock, remained usable at 40 columns, and restored the invoking block on Ctrl + C. A separate loopback GET probe recorded no Authorization or Cookie header and timed out at about five seconds. Disabling Dashboard preserved its open pane and a sibling Files pane.
 
-## Capabilities and trust boundary
+## Configuration
+
+### Pane layout
+
+Use `rexdeck enable dashboard --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 50%.
+
+### Dashbrew settings
+
+Edit your selected JSON board with `$EDITOR /absolute/boards/trusted.json`, then reopen it with the same `file=` selection. Layout, components, script/API sources, refresh intervals, theme and action bindings belong to that board; the example above is a starting point, not a RexDeck-generated file. See the [pinned upstream guide](https://github.com/rasjonell/dashbrew/blob/v1.2.0/README.md) and [CLI implementation](https://github.com/rasjonell/dashbrew/blob/v1.2.0/cmd/dashbrew/main.go).
+
+For custom themes, edit JSON files in `DASHBREW_THEMES_DIR` or `${XDG_CONFIG_HOME:-$HOME/.config}/dashbrew/themes`; create the directory yourself if needed. See [theme loading](https://github.com/rasjonell/dashbrew/blob/v1.2.0/internal/config/themes.go). RexDeck passes only `-c /absolute/selected.json`, with cwd set to that file’s parent, no theme flag, environment override or configuration overlay.
+
+RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
+
+## Capabilities and limits
 
 - **A board is code, not passive JSON. Only open trusted boards.** Script sources run immediately through `sh -c`, with the pane's permissions, inherited environment and selected-file directory. Script refreshes have no execution timeout. Action bindings also use `sh -c`; their configurable timeout defaults to 30 seconds. Scripts/actions can read or write files, launch programs and use the network. RexDeck does not sandbox them or filter their commands.
 - API sources use Go's HTTP GET client with a **5-second timeout** covering the request, redirects and body read. The client configures no authentication headers or cookie jar. It still sends standard HTTP headers, follows redirects and uses Go's default transport (including proxy environment settings). URL credentials can cause Basic authentication, and scripts can send arbitrary headers: keep credentials, tokens and private URLs out of boards. Public endpoint availability and rate limits are external dependencies.

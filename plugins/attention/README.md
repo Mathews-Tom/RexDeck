@@ -1,8 +1,14 @@
 # Native attention and provider subagents
 
-[Back to RexDeck](../../README.md)
+An on-demand **native Rex extension**, not an upstream TUI integration. After `rexdeck setup`, use the installed CLI from any terminal. Native observations need no `enable attention` command, descriptor, palette pane, dependency installation, hooks or background service. Optional, owner-installed hooks below add provider-reported subagent metadata. This CLI extension does not open a pane or change focus except through an explicit `jump` to its verified terminal binding.
 
-An on-demand **native Rex extension**, not an upstream TUI integration. After `rexdeck setup`, use the installed CLI from any terminal. Native observations need no `enable attention` command, descriptor, palette pane, dependency installation, hooks or background service. Optional, owner-installed hooks below add provider-reported subagent metadata.
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
+
+## Requirements
+
+A running Rex server, Python 3.12+ and the installed RexDeck CLI with completed `rexdeck setup` are required. No upstream frontend or pinned tool version applies; RexDeck never installs provider tools. Provider hooks are optional and have the separate qualifications below.
+
+## Commands
 
 ```sh
 rex -S unix:///your/rex.sock ls --json
@@ -16,7 +22,9 @@ rexdeck attention jump OBSERVATION-ID
 
 `observe` reads only the explicitly selected session/block on the setup-saved endpoint. Session labels, titles, executable names, cwd and similar text are never used to choose a target. `--project` is an explicit operator label, not discovered repository identity; omit it to carry the label from the newest successful earlier observation of that exact endpoint/session/block, even across server incarnations. Filters are exact matches. The opaque observation ID comes from `observe` or `list`, not a worker name or OSC record ID. Use **list → observe ID → jump ID** to inspect retained evidence, refresh it on demand and then navigate. Always jump with the ID that `observe` returns: if the server restarted and restored the same session/block, the refresh creates a new ID and the old one is reported as `replaced`. An ID cannot be combined with `--session`/`--block`. Refresh never searches for another block if the captured one is absent.
 
-## Evidence and distinctions
+## Use
+
+### Evidence and distinctions
 
 - `records` retains bounded fields from the native `com.superlogical.terminal.program_status` result: OSC 7501 `id`, `app`, `state`, `kind`, plain-text message/title, owner and server-clock `updated_at` when present. These are **program reports**, not verified provider session identities. Unknown/native future states remain visible (subject to the limits below). An empty record list means no reported state, not idle or completed.
 - `last_exit` comes from `com.superlogical.terminal.process`: null does not establish an agent is running, and an exit code describes the terminal's own program, not every worker it launched. A reported `done` and an actual terminal exit remain separate evidence.
@@ -24,19 +32,15 @@ rexdeck attention jump OBSERVATION-ID
 - `binding` is the last observed placement: `bound` for a placed block, `unbound` for a detached one. Closure/disconnection/replacement does not rewrite that placement evidence. `target_state: present` records that existence observation. A subsequently absent block/session becomes `connection: closed` and `target_state: closed` on explicit re-observation, retaining the last records, placement, exit result and successful timestamp. Failed reads are `unknown`, not inferred closure. Server connection failures are `disconnected` but preserve the last `target_state`, so known closure is not lost. Observing any new server incarnation marks **every** retained row on that endpoint from older incarnations `replaced` and clears obsolete errors, even when the requested block is absent; it never adopts them.
 - `jump` checks the saved endpoint, captured server instance, exact session/block presence, placement and captured block host before calling `session.focus_block`. Closed, detached, disconnected and replaced targets fail without another-pane fallback. Stale local evidence does not prevent a jump if the live exact binding revalidates. Focus changes that session's active window/block; it does not switch a desktop application's selected server/session, inject input or resume an agent.
 
-## Identity boundary
+## Configuration
 
-Native rows keep `agent_identity: unknown`: an OSC record ID is scoped to a terminal's current reports and is reusable. Rex exposes no durable provider conversation/session identifier or provider lifecycle history through these APIs. Native rows identify **observed terminal bindings**, not Claude/Codex/omp conversations. The optional provider hooks below retain separately sourced parent/child identifiers, never infer them from native records, process trees, names, cwd or titles. No transcript indexing, cancellation, messaging or input injection is included. Tokscale is usage data, not an identity source; abtop is excluded.
-
-The native API supplies real reported state and exact binding directly. [LazyRex](https://github.com/lazy-rex/LazyRex#platform-services-for-plugins) offers agent identity through provider hooks and an always-running hub, plus worker control and messaging; that broader service is unnecessary for this bounded native view and is not installed.
-
-## Storage and capabilities
+### Attention storage
 
 Native observations live under the setup-owned workspace at `<saved workspace>/attention/attention.json` (normally `$XDG_STATE_HOME/rexdeck/files/attention/attention.json`), with lock and temporary files in that same `attention/` directory. The native schema stays **version 1**, with its original independent limits of **256 terminal bindings / 2 MiB / 16 KiB per row**. Provider receipts use a separate `providers.json` and `providers.lock`, independently bounded to **64 provider rows / 256 KiB / 16 KiB per row**; they never occupy native row or byte capacity. Both stores validate workspace identity even for local `list`, require regular non-symlink files with nonblocking/no-follow opens, and use mode 0600, locks, atomic replacement and file/directory fsync. Native report strings remain capped (`msg` 1024, title/record ID 256, app/owner names 128, kind/timestamp 64, state 32, error 1024 characters), and excess records are omitted with `truncated: true`; unknown native fields are omitted with that marker. Only the latest explicit native snapshot per endpoint instance/session/block is retained. To deliberately reset native evidence, remove only `attention.json` when no native attention writer is running; this does not remove provider evidence or integration receipts.
 
-The native observation commands read status messages (which may contain sensitive task names), IDs, report owner PID/name, block host and terminal exit codes; they do not capture terminal screens, read transcripts or inspect unrelated OS processes. Only `jump` changes focus. No paid calls, network provider requests, hook installation, watcher, autostart or upstream tool configuration changes are made. Disabling a hosted integration does not erase attention observations; uninstalling RexDeck leaves this explicitly retained local evidence in place.
+Use `rexdeck setup` to select the approved endpoint/workspace, not manual edits of retained evidence. Setup settings live at `$XDG_CONFIG_HOME/rexdeck/config.json` (default `~/.config/rexdeck/config.json`). Use the observe/list commands above to retain and inspect native data; use `rexdeck attention clear --provider claude-code` or `--provider codex` to remove provider rows only after stopping the corresponding hooks. There is no pane layout setting. RexDeck does not edit upstream configuration; optional hook settings are owner-managed as described below.
 
-## Optional provider hooks (D11)
+### Optional provider hooks (D11)
 
 **Qualified with real provider subagent events (2026-11-10, Claude Code 2.1.322 and Codex CLI 0.159.2).** In an isolated Rex, each provider ran one real subagent from a lab terminal. Each child produced exactly one row with these properties:
 
@@ -48,7 +52,7 @@ The native observation commands read status messages (which may contain sensitiv
 
 Install a RexDeck build containing `attention hook` and complete `rexdeck setup` first. Resolve its stable absolute executable path with `command -v rexdeck`. In the JSON below, replace `/absolute/path/to/rexdeck` with that path (keep the escaped quotes). Merge only these entries into existing `hooks` arrays; do not replace unrelated settings/hooks. Hook processes must inherit the same `XDG_CONFIG_HOME` as setup, or its default, to find the approved RexDeck target. Start the parent provider inside the intended Rex terminal: the qualified private Rex supplied `REX_SESSION` and `REX_BLOCK`, but **not `REX_SERVER`**. No manual endpoint export is required: RexDeck verifies those exact IDs on the setup-saved endpoint before binding; a supplied, different `REX_SERVER` vetoes binding. With no inherited IDs, the row is explicitly unbound.
 
-### Claude Code
+#### Claude Code
 
 Owner-only change: add these two groups under `hooks` in `~/.claude/settings.json` for user-wide scope, or `.claude/settings.local.json` for local-project scope. Use one scope, not both.
 
@@ -95,7 +99,7 @@ Claude does **not** enforce `timeout` for async hooks. Its two-second setting is
 
 Rollback: remove only the two handlers whose command ends in `attention hook claude-code` (and any now-empty groups), reload/restart the provider, allow in-flight hooks to finish, then run `rexdeck attention clear --provider claude-code`. This deletes only Claude rows, preserving native observations and Codex rows. Do not delete unrelated settings or transcripts.
 
-### Codex CLI
+#### Codex CLI
 
 Owner-only change: merge this into `~/.codex/hooks.json` for user-wide scope, or `<repo>/.codex/hooks.json` for a trusted project layer. Prefer one representation per layer; do not duplicate it in inline `config.toml` hooks.
 
@@ -145,7 +149,7 @@ Codex explicitly defines `session_id` on these events as the **parent** session 
 
 Rollback: remove only the two `attention hook codex` handlers, reload/restart and review `/hooks`, let in-flight hooks finish, then run `rexdeck attention clear --provider codex`. Restore the prior `features.hooks` value only if this change introduced it and no other hooks require it. Preserve other hook definitions/trust and native/Claude rows.
 
-### Retained parentage, filters and navigation
+#### Retained parentage, filters and navigation
 
 ```sh
 rexdeck attention list --provider claude-code
@@ -165,7 +169,7 @@ The hook records inherited `rex_server` (null when absent), Rex `session_id`/`bl
 
 An **explicitly empty `REX_SERVER` intentionally records `endpoint-mismatch`** and stays unbound: presence is a veto unless it matches the approved endpoint. This differs from an absent variable, which permits exact session/block verification on the saved endpoint. Empty `REX_SESSION` or `REX_BLOCK` records `missing-identifiers`.
 
-### Privacy, bounded failures and schema
+#### Privacy, bounded failures and schema
 
 Provider rows retain only provider/event, parent/child IDs, agent type, cwd, local receipt time, three presence flags (`last_message_present`, `transcript_present`, `agent_transcript_present`), inherited Rex IDs and verified endpoint/incarnation/host binding with a bounded reason code, plus derived state/outcome and the operational `receipt_order` counter. The provider document retains its matching `receipt_sequence` counter. Presence means a string was supplied, including an empty string; null/missing is false. **No message content or transcript path is retained and no transcript is opened.** No session-directory scan, process discovery, provider request, credential copying or live provider-config modification occurs. IDs and cwd can still be sensitive; both stores remain mode 0600.
 
@@ -177,7 +181,7 @@ Native `attention.json` stays on its original **schema 1** with no migration, ex
 
 For a `hook:` jump, the row is read into a private in-memory snapshot under `providers.lock`, then that lock is released **before all Rex revalidation/focus calls**. Hook receipts can therefore update while navigation is in progress. The captured binding is still checked against the live endpoint, incarnation, exact session/block and host before focus.
 
-### Provider-store faults and explicit recovery
+#### Provider-store faults and explicit recovery
 
 If `providers.json` or its lock is malformed, oversized, redirected or unreadable, `attention list` still returns healthy native rows and reports `state: fault`, `provider_state: fault` and a bounded `provider_error`; the CLI exits nonzero rather than hiding the problem. `attention clear --provider …` reports the same structured provider fault and does not silently reset or claim rows were removed. Native-store faults still fail normally.
 
@@ -185,6 +189,20 @@ Provider-store reads by list/jump/clear wait at most **100 ms** for `providers.l
 
 To deliberately recover, stop all provider hooks and wait for in-flight hooks and attention commands to finish, then remove **only `<saved workspace>/attention/providers.json`**. The next hook/clear recreates the separate store. This discards evidence for **all providers**, not just the one requested by a failed clear, but preserves native `attention.json` and integration receipts. If the fault is specifically a redirected/invalid `providers.lock`, inspect that exact entry and remove it only after **all attention readers/writers are stopped**; removing a lock while another process holds it is unsafe. Remove a symlink entry itself, never its target. Do not delete `attention.json`, the shared attention directory or unrelated files.
 
-### omp: missing interface
+#### omp: missing interface
 
 No omp hook entry or fabricated provider row is installed. A public, stable CLI hook carrying subagent parent/child IDs and start/stop events is missing; RPC-mode `subagent_lifecycle` is not an equivalent interface for normal interactive sessions. omp remains eligible only for the native, provider-identity-unknown view until that interface is available and separately qualified.
+
+## Capabilities and limits
+
+### Identity boundary
+
+Native rows keep `agent_identity: unknown`: an OSC record ID is scoped to a terminal's current reports and is reusable. Rex exposes no durable provider conversation/session identifier or provider lifecycle history through these APIs. Native rows identify **observed terminal bindings**, not Claude/Codex/omp conversations. The optional provider hooks below retain separately sourced parent/child identifiers, never infer them from native records, process trees, names, cwd or titles. No transcript indexing, cancellation, messaging or input injection is included. Tokscale is usage data, not an identity source; abtop is excluded.
+
+The native API supplies real reported state and exact binding directly. [LazyRex](https://github.com/lazy-rex/LazyRex#platform-services-for-plugins) offers agent identity through provider hooks and an always-running hub, plus worker control and messaging; that broader service is unnecessary for this bounded native view and is not installed.
+
+The native observation commands read status messages (which may contain sensitive task names), IDs, report owner PID/name, block host and terminal exit codes; they do not capture terminal screens, read transcripts or inspect unrelated OS processes. Only `jump` changes focus. No paid calls, network provider requests, hook installation, watcher, autostart or upstream tool configuration changes are made. Disabling a hosted integration does not erase attention observations; uninstalling RexDeck leaves this explicitly retained local evidence in place.
+
+## Remove
+
+There is no `rexdeck disable attention`: attention is a built-in CLI extension. Remove optional handlers and clear provider rows using each provider’s rollback instructions above. Uninstalling RexDeck leaves retained attention data in place; there is no automatic native-evidence removal. Stop all attention readers/writers and provider hooks before deliberately removing retained files, preserve unrelated workspace data, and follow the exact provider-store recovery rules above for faulty entries.

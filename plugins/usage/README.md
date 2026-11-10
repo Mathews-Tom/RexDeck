@@ -1,22 +1,25 @@
 # Usage
 
-Watch AI token usage, models, sessions and projects in a native Rex pane with unmodified [tokscale](https://github.com/junhoyeo/tokscale). The pane runs tokscale's normal online TUI for local omp sessions, and you refresh it with tokscale's own controls. Quitting returns focus to the exact terminal you invoked it from.
+Watch AI token usage, models, sessions and projects in a native Rex pane with unmodified [tokscale 4.21.0](https://github.com/junhoyeo/tokscale/releases/tag/v4.21.0). The pane runs tokscale's normal online TUI for local omp sessions, and you refresh it with tokscale's own controls. Quitting returns focus to the exact terminal you invoked it from.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
 ## Requirements
 
 - macOS arm64, a running Rex server, and RexDeck set up as described in the [root README](../../README.md#getting-started).
 - tokscale **4.21.0** on a trusted absolute `PATH` entry. Install it yourself, for example with `npm install -g tokscale@4.21.0`, and check `tokscale --version`. RexDeck never installs, upgrades or removes it. Other versions are refused with manual guidance until they are qualified. The npm launcher starts with `#!/usr/bin/env node`, so `rexdeck enable usage` also records the `node` it finds on your `PATH` and puts that directory first in the pane's `PATH`; a Rex server started by the app otherwise has no nvm/Homebrew `node`. Rerun `rexdeck enable usage` after switching Node versions.
 
-## Enable
+## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable usage
 rexdeck status usage
 ```
 
-Usage is independent of the other integrations. Pane placement and size follow the shared convention, for example `rexdeck enable usage --placement below --size 60`; see [pane placement and size](../../README.md#pane-placement-and-size).
+Usage is independent of the other integrations. Pane placement and size follow the shared convention, for example `rexdeck enable usage --placement below --size 60`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
+
+Open **RexDeck Usage** from Rex’s command palette, or `rex do rexdeck_usage`. No file or account argument is required. The invoking directory is only the pane cwd; missing, remote or invalid directory context is refused.
 
 ## Use
 
@@ -38,7 +41,19 @@ Usage is collected **machine-wide** from local session logs. Opening it from a p
 
 The pane always runs online. Offline mode is available only by running `tokscale --offline tui` outside RexDeck. Costs are estimates from public pricing data, not an invoice.
 
-## Network, credentials and accounts
+## Configuration
+
+### Pane layout
+
+`rexdeck enable usage --placement below --size 35`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+
+### tokscale settings
+
+Use `Shift+R` in the TUI to change and persist automatic refresh, or edit JSON with `$EDITOR ~/.config/tokscale/settings.json` after quitting. On macOS this is the default; `TOKSCALE_CONFIG_DIR` overrides the directory. Linux also honours `XDG_CONFIG_HOME`, Windows uses `%APPDATA%`, and an unresolved config root falls back to `./.tokscale/settings.json`. See [upstream Configuration](https://github.com/junhoyeo/tokscale/blob/v4.21.0/README.md#configuration). Preserve unrelated settings; `autoRefreshEnabled` controls the refresh preference.
+
+RexDeck passes exactly `tui --client omp`, preserves upstream settings and credentials, and adds no config overlay or refresh flag. Enable records Node’s directory and prepends it to the pane PATH; general helper lookup excludes relative PATH entries. It adds no other tool-specific environment overrides and never edits upstream config. Local omp logs are under `~/.omp/agent/sessions/`; upstream settings, pricing/derived caches and imported credentials are normally under `~/.config/tokscale`.
+
+## Capabilities and limits
 
 RexDeck launches tokscale's normal online mode and does not read, copy or isolate credentials. Behaviour qualified for 4.21.0:
 

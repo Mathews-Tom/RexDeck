@@ -2,22 +2,36 @@
 
 Browse Redis keys, TTLs, values and server metrics in a native Rex pane with unmodified [redis-tui 1.0.48](https://github.com/davidbudnick/redis-tui/releases/tag/v1.0.48). Quitting returns focus to the exact invoking terminal.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64, a running Rex server, and RexDeck [set up](../../README.md#getting-started).
 - Owner-installed **redis-tui 1.0.48** on a trusted absolute `PATH` entry. Download the matching binary from the [qualified release](https://github.com/davidbudnick/redis-tui/releases/tag/v1.0.48), verify its checksum and check `redis-tui --version`. RexDeck never installs, updates or removes it. Missing or other versions are refused with manual guidance before registration.
 - A Redis server you are authorized to access. RexDeck does not install or start Redis.
 
+## Enable and open
+
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable redis
 rexdeck status redis
 ```
 
-Placement follows the shared convention, for example `rexdeck enable redis --placement below --size 60`.
+Open **RexDeck Redis** from Rex’s command palette, or `rex do rexdeck_redis`.
 
-## Select a connection and use
+## Use
+
+Select an authorized connection, browse keys and TTLs, inspect a value, then return to connections and quit.
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` | Select connection or key |
+| `Enter` / `Esc` | Connect/open detail / return |
+| `a` / `e` (connections) | Add / edit connection |
+| `i` / `m` | Server info / metrics |
+| `r` (detail) | Refresh value |
+| `q` | Return to connections, then quit |
 
 Choose **RexDeck Redis** in the palette. RexDeck runs `redis-tui` without arguments in the invoking directory. The directory is only the pane's cwd: it does **not** select a Redis server, database or project-local configuration. The upstream connection manager opens first; nothing automatically connects to localhost.
 
@@ -32,13 +46,27 @@ Controls exercised against a disposable, password-free loopback Redis server:
 - `q` from the keys screen returns to connections; `q` from connections exits to the exact Rex origin block.
 - At **40 columns**, upstream shows `Terminal too small. Resize to at least 50x15.` rather than a usable browser. Resizing back restores the interface. Keep at least 50 columns and 15 rows; a wider pane is needed for the side preview and dashboard.
 
-## Authority, storage and limitations
+## Configuration
+
+### Pane layout
+
+Use `rexdeck enable redis --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 50%.
+
+### redis-tui settings
+
+Use `a` / `e` in the connection manager to add/edit connections first. For settings unavailable in that form, quit the tool and edit its JSON with `$EDITOR "$HOME/.config/redis-tui/config.json"`, then reopen it. TLS uses `use_tls` and `tls_config`; key bindings, templates and recent-key preferences share this file. See the [pinned configuration implementation](https://github.com/davidbudnick/redis-tui/blob/v1.0.48/internal/db/config.go) and [upstream guide](https://github.com/davidbudnick/redis-tui/blob/v1.0.48/README.md). Do not add plaintext credentials to the JSON.
+
+RexDeck passes no arguments, connection flags, passwords, environment overrides or config overlay; upstream uses the inherited `HOME` and Vault settings.
+
+RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
+
+Connections and settings live at **`~/.config/redis-tui/config.json`**, using `HOME` rather than `XDG_CONFIG_HOME`. The same file can hold favorites, recent key names, templates and key bindings. Version 1.0.48's [config implementation](https://github.com/davidbudnick/redis-tui/blob/v1.0.48/internal/db/config.go) writes JSON with mode 0600 and **strips Redis passwords, SSH passwords and SSH passphrases when saving**; form passwords remain in process memory, not a persistent password/keychain store. A password you manually put in the JSON is plaintext and can be read on load; do not assume saving sanitizes an existing file immediately. Existing file permissions are not necessarily tightened by a write. Value history is in-memory, while recent/favorite key names can persist. RexDeck does not read, copy, sanitize or isolate this configuration or credentials.
+
+## Capabilities and limits
 
 This is **not read-only** and RexDeck adds no sandbox or server allowlist. Upstream can create/edit/rename/delete keys, change TTLs, bulk-delete, flush a database, import/export JSON files, execute **server-side Lua**, edit Redis runtime **CONFIG**, publish/subscribe and subscribe to keyspace events. Qualification inspected delete confirmation, Lua entry, Pub/Sub and runtime CONFIG controls without executing destructive actions. Redis ACLs, not RexDeck, constrain server authority. File and clipboard controls run with your OS account's authority.
 
 **Automatic update check:** on every launch redis-tui sends an HTTPS GET to `https://api.github.com/repos/davidbudnick/redis-tui/releases/latest` for an update notice, with no opt-out. It may suggest `redis-tui --update`; running that command would move the installation off the qualified **1.0.48** pin. RexDeck never runs `--update`.
-
-Connections and settings live at **`~/.config/redis-tui/config.json`**, using `HOME` rather than `XDG_CONFIG_HOME`. The same file can hold favorites, recent key names, templates and key bindings. Version 1.0.48's [config implementation](https://github.com/davidbudnick/redis-tui/blob/v1.0.48/internal/db/config.go) writes JSON with mode 0600 and **strips Redis passwords, SSH passwords and SSH passphrases when saving**; form passwords remain in process memory, not a persistent password/keychain store. A password you manually put in the JSON is plaintext and can be read on load; do not assume saving sanitizes an existing file immediately. Existing file permissions are not necessarily tightened by a write. Value history is in-memory, while recent/favorite key names can persist. RexDeck does not read, copy, sanitize or isolate this configuration or credentials.
 
 **Legacy migration is not a sanitized save:** upstream copies `~/.redis/config.json` as-is to `~/.config/redis-tui/config.json`, including any plaintext `password` and `ssh_config.passphrase` fields. Treat both files as credential-bearing.
 

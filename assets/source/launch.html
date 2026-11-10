@@ -45,9 +45,9 @@
   #end .tag { position: absolute; left: 166px; top: 410px; width: 950px; font: 600 34px/1.35 var(--display); color: var(--fg); }
   #end .tools { position: absolute; left: 160px; top: 580px; width: 980px; }
   #end .tools .chip { font-size: 20px; padding: 7px 14px; }
-  #end .code { position: absolute; left: 160px; top: 700px; padding: 22px 30px; border-radius: 12px; background: #15181e;
+  #end .code { position: absolute; left: 160px; top: 660px; padding: 22px 30px; border-radius: 12px; background: #15181e;
     border: 1px solid var(--line); font: 28px/1.6 var(--mono); color: var(--fg); white-space: pre; }
-  #end .url { position: absolute; left: 166px; top: 900px; font: 600 26px var(--display); color: var(--muted); }
+  #end .url { position: absolute; left: 166px; top: 940px; font: 600 26px var(--display); color: var(--muted); }
   #end .mini { left: 1190px; top: 190px; width: 640px; height: 700px; }
   #end .mini .pane { left: 0; right: 0; font-size: 14px; }
   #end .mini .pane + .pane { border-left: 0; border-top: 1px solid var(--line); }
@@ -66,7 +66,7 @@
 
   <div class="rex layer" id="rex">
     <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-      <span class="tab"><b>Rex</b> — ~/projects/rexdeck</span></div>
+      <span class="tab"><b>Rex</b> — ~/work</span></div>
     <div class="body">
       <div class="pane" id="shell"></div>
       <div class="pane" id="right"></div>
@@ -84,17 +84,18 @@
     <div class="word">Rex<span>Deck</span></div>
     <div class="tag">Discover and enable familiar terminal tools and purpose-built interfaces for CLI output and APIs—all in native Rex panes.</div>
     <div class="tools">
-      <div class="tool-group"><div class="tool-label">Tools &amp; views</div><div class="tool-row" id="tools"></div></div>
+      <div class="tool-group"><div class="tool-label">Enable only what you need</div><div class="tool-row" id="tools"></div></div>
     </div>
     <div class="code"><span class="a">$</span> uv tool install rexdeck
 <span class="a">$</span> rexdeck setup
-<span class="a">$</span> rexdeck enable files git clickup</div>
+<span class="a">$</span> rexdeck plugins
+<span class="a">$</span> rexdeck enable &lt;id&gt;</div>
     <div class="url">github.com/Mathews-Tom/RexDeck</div>
     <div class="rex mini"><div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-      <span class="tab"><b>Rex</b> — ~/projects/rexdeck</span></div>
+      <span class="tab"><b>Rex</b> — ~/work</span></div>
       <div class="body"><div class="pane focus" id="endTop" style="top:0; bottom:50%"></div><div class="pane" id="endBottom" style="top:50%; bottom:0"></div></div></div>
   </div>
-  <div class="disclosure">Illustrated previews · sample data</div>
+  <div class="disclosure">Illustration · not a screen recording</div>
 </div>
 <script src="tui.js"></script>
 <script>
@@ -111,12 +112,12 @@ const show = (el, o, dy = 0, s = 1) => {
 };
 
 // Static content
-document.querySelector("#end #tools").innerHTML = [...TUI.hostedTools, "ClickUp · API-backed pane"].map((x) => `<span class="chip"><i></i>${x}</span>`).join("");
+document.querySelector("#end #tools").innerHTML = TUI.categories.map((x) => `<span class="chip"><i></i>${x}</span>`).join("");
 const cards = [
-  ["gh-dash", "pull requests & issues", TUI.ghdash(), 0, 0],
-  ["markdown-reader", "docs with in-pane Mermaid", TUI.mdreader(), 860, 0],
-  ["tokscale", "token usage, live", TUI.tokscale(), 0, 400],
-  ["ClickUp", "API-backed task desk", TUI.clickup(), 860, 400],
+  [TUI.categories[0], "familiar terminal tools", TUI.navigator(), 0, 0],
+  [TUI.categories[1], "tables, logs and queries", TUI.table(), 860, 0],
+  [TUI.categories[2], "live dashboards", TUI.dashboard(), 0, 400],
+  [TUI.categories[3], "purpose-built API views", TUI.view(), 860, 400],
 ];
 $("grid").innerHTML = cards.map(([name, what, body, x, y], i) => `
   <div class="card" id="card${i}" style="left:${x}px; top:${y}px">
@@ -124,14 +125,14 @@ $("grid").innerHTML = cards.map(([name, what, body, x, y], i) => `
       <span class="tab"><b>Rex</b> — ${name}</span></div><div class="body"><div class="pane" style="left:0;right:0">${body}</div></div></div>
     <div class="label"><span class="chip"><i></i>${name} <span class="m" style="font-weight:500">· ${what}</span></span></div>
   </div>`).join("");
-$("right").innerHTML = TUI.yazi();
-$("right2").innerHTML = TUI.lazygit();
-$("endTop").innerHTML = TUI.lazygit();
-$("endBottom").innerHTML = TUI.tokscale();
+$("right").innerHTML = TUI.navigator();
+$("right2").innerHTML = TUI.view();
+$("endTop").innerHTML = TUI.navigator(true);
+$("endBottom").innerHTML = TUI.dashboard();
 
 const captions = [
-  [5.9, 8.3, "<b>Yazi</b> — browse files without leaving Rex"],
-  [8.9, 11.3, "<b>lazygit</b> — stage, commit and diff in place"],
+  [5.9, 8.3, "Open an enabled <b>terminal tool</b> in a native pane"],
+  [8.9, 11.3, "…or a <b>purpose-built view</b> over CLI output and APIs"],
   [15.3, 17.0, "Press <b>q</b> — focus returns exactly where you were"],
 ];
 
@@ -162,20 +163,20 @@ function setTime(t) {
   const shellW = 100 - 50 * split;
   $("shell").style.left = "0"; $("shell").style.width = shellW + "%";
   for (const id of ["right", "right2"]) { $(id).style.left = shellW + "%"; $(id).style.width = 50 * split + "%"; }
-  const lazy = t < 13 ? ramp(t, 8.45, 8.75) : 1;
-  $("right").style.opacity = (1 - lazy).toFixed(3);
-  $("right2").style.opacity = lazy.toFixed(3);
+  const toView = t < 13 ? ramp(t, 8.45, 8.75) : 1;
+  $("right").style.opacity = (1 - toView).toFixed(3);
+  $("right2").style.opacity = toView.toFixed(3);
   const rightFocused = split > 0.5;
   $("shell").classList.toggle("focus", !rightFocused);
-  $("right").classList.toggle("focus", rightFocused && lazy < 0.5);
-  $("right2").classList.toggle("focus", rightFocused && lazy >= 0.5);
-  $("shell").innerHTML = TUI.shell();
+  $("right").classList.toggle("focus", rightFocused && toView < 0.5);
+  $("right2").classList.toggle("focus", rightFocused && toView >= 0.5);
+  $("shell").innerHTML = TUI.shell([["rexdeck enable &lt;id&gt;", "ready"]]);
 
-  // Palette: launch Files, then Git
+  // Palette: open a terminal tool, then a purpose-built view
   const p1 = win(t, 3.8, 4.0, 5.1, 5.35), p2 = win(t, 7.85, 8.0, 8.35, 8.5);
   const pal = $("palette");
-  if (p1 > 0.001) pal.innerHTML = TUI.palette(typed("files", t, 4.05, 4.7), 0);
-  else if (p2 > 0.001) pal.innerHTML = TUI.palette(typed("git", t, 8.0, 8.25), 0);
+  if (p1 > 0.001) pal.innerHTML = TUI.palette(typed("rexdeck", t, 4.05, 4.7), 0);
+  else if (p2 > 0.001) pal.innerHTML = TUI.palette(typed("rexdeck", t, 8.0, 8.25), 2);
   pal.querySelectorAll(".caret").forEach((c) => (c.style.opacity = Math.floor(t * 3) % 2 ? 0.2 : 1));
   show(pal, Math.max(p1, p2), -12 * (1 - Math.max(p1, p2)));
 
