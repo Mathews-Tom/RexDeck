@@ -27,6 +27,7 @@ def _probe(executable: str, integration: integrations.Integration) -> str:
     """Require an explicitly qualified upstream version before registration."""
     name = integration.tool
     argv = [executable, "--version"]
+    env = dict(os.environ)
     if integration.version_probe:
         reporter = _resolve(integration.version_probe[0])
         if reporter is None:
@@ -41,7 +42,11 @@ def _probe(executable: str, integration: integrations.Integration) -> str:
                 for part in integration.version_probe[1:]
             ),
         ]
-    result = lifecycle._run(argv, dict(os.environ))
+        # Metadata reporters must not select or download a checkout's Go toolchain.
+        env["GOTOOLCHAIN"] = "local"
+        result = lifecycle._run(argv, env, cwd="/")
+    else:
+        result = lifecycle._run(argv, env)
     text = result.output.decode(errors="replace").strip()
     version = re.search(integration.version_pattern, text, re.MULTILINE)
     if result.code != 0 or version is None:

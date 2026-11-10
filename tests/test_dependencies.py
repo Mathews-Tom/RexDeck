@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import tempfile
@@ -274,6 +275,50 @@ class DependencyTests(unittest.TestCase):
                     ):
                         dependencies.ensure("silent")
         self.assertFalse(self.manager_marker.exists())
+
+    def test_version_reporter_uses_local_toolchain_and_neutral_cwd(self) -> None:
+        """A checkout cannot influence reporter toolchain selection or installation."""
+        silent = self.script("silent", "raise SystemExit(2)\n")
+        recorded = self.root / "reporter-context.json"
+        self.script(
+            "reporter",
+            "import json, os\n"
+            "from pathlib import Path\n"
+            f"Path({str(recorded)!r}).write_text(json.dumps("
+            "{'toolchain': os.environ.get('GOTOOLCHAIN'), 'cwd': os.getcwd()}))\n"
+            "print('\\tmod\\texample.com/silent\\tv1.2.0\\th1:x=')\n",
+        )
+        (self.root / "go.mod").write_text("module example.com/checkout\n\ngo 1.99\n")
+        with (
+            patch.object(integrations, "get", return_value=self._probed()),
+            patch.dict(os.environ, {"GOTOOLCHAIN": "auto"}),
+            chdir(self.root),
+        ):
+            self.assertEqual(dependencies.ensure("silent").path, str(silent))
+            self.assertEqual(os.environ["GOTOOLCHAIN"], "auto")
+        self.assertEqual(
+            json.loads(recorded.read_text()), {"toolchain": "local", "cwd": "/"}
+        )
+        self.assertFalse(self.manager_marker.exists())
+
+    def test_default_version_probe_preserves_environment_and_cwd(self) -> None:
+        """Ordinary --version checks retain their existing subprocess context."""
+        recorded = self.root / "version-context.json"
+        self.script(
+            "yazi",
+            "import json, os, sys\n"
+            "from pathlib import Path\n"
+            "if sys.argv[1:] != ['--version']: raise SystemExit(97)\n"
+            f"Path({str(recorded)!r}).write_text(json.dumps("
+            "{'toolchain': os.environ.get('GOTOOLCHAIN'), 'cwd': os.getcwd()}))\n"
+            "print('Yazi 26.9.1')\n",
+        )
+        with patch.dict(os.environ, {"GOTOOLCHAIN": "auto"}), chdir(self.root):
+            dependencies.ensure("files")
+        self.assertEqual(
+            json.loads(recorded.read_text()),
+            {"toolchain": "auto", "cwd": str(self.root.resolve())},
+        )
 
     def test_guidance_names_the_homebrew_formula_and_probe(self) -> None:
         """Manual guidance names the real formula and the declared version check."""
