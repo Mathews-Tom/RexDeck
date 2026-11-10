@@ -342,6 +342,38 @@ def test_pilot_navigation_filters_logs_browser_and_quit() -> None:
     asyncio.run(exercise())
 
 
+def test_author_controlled_run_name_stays_on_one_header_line() -> None:
+    forged = Run(
+        RUN.id,
+        "deploy\nFAKE STATUS: all green",
+        RUN.status,
+        RUN.conclusion,
+        "main\nspoof",
+        RUN.sha,
+        RUN.url,
+    )
+
+    class ForgedClient(FakeClient):
+        def runs(self, selected: RunFilter, page: int = 1) -> RunsPage:
+            self.calls.append(("runs", selected, page))
+            return RunsPage((forged,), page, 1, False)
+
+    async def exercise() -> None:
+        app = ActionsApp(ForgedClient(), SELECTED)
+        async with app.run_test(size=(110, 32)) as pilot:
+            await app.workers.wait_for_complete()
+            table = app.query_one(DataTable)
+            assert "\n" not in str(table.get_row_at(0)[1])
+            assert "\n" not in str(table.get_row_at(0)[3])
+            await pilot.press("enter")
+            await app.workers.wait_for_complete()
+            location = str(app.query_one("#location", Static).render())
+            assert "\n" not in location
+            assert "deploy FAKE STATUS: all green" in location
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("failure", ["permission", "auth", "network", "error"])
 def test_pilot_error_retry_stale_and_empty(failure: str) -> None:
     async def exercise() -> None:
