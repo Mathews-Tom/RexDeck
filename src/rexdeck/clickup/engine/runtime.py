@@ -280,7 +280,9 @@ def epoch_ms(value: str, *, fix: str, midday: bool = False) -> int:
 
     The fix is passed in because the same parser now serves `--due-before`,
     `--due` and a date custom field, and a diagnostic that named the wrong flag
-    would send the caller to edit an argument they did not pass.
+    would send the caller to edit an argument they did not pass. Writes pass
+    `midday=True` so the stored instant stays on the same calendar day for
+    viewers up to twelve hours away; the `--due-before` filter keeps midnight.
     """
     try:
         parsed = datetime.strptime(value, "%Y-%m-%d").replace(hour=12 if midday else 0)

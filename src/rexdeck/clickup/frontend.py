@@ -1306,7 +1306,7 @@ class Controller:
                             )
                         )
                     except Exception as error:  # noqa: BLE001 - outcome is uncertain
-                        # Any other failure after dispatch must still end `writing`.
+                        # Any other failure must still end `writing`; label it by `dispatched`.
                         self._error(
                             ClickUpError(
                                 "write-uncertain" if dispatched else "write-not-sent",
