@@ -290,6 +290,16 @@ class DependencyTests(unittest.TestCase):
         )
         self.assertNotIn("silent --version", message)
 
+    def test_guidance_quotes_probe_parts_as_a_shell_command(self) -> None:
+        """A probe part with spaces or shell characters stays one argument."""
+        probed = replace(
+            self._probed(), version_probe=("reporter", "show $(x) y", "{tool}")
+        )
+        message = dependencies._manual(probed)
+        self.assertIn(
+            "Verify with reporter 'show $(x) y' \"$(command -v silent)\",", message
+        )
+
     def test_invalid_version_probe_or_formula_fails_loudly(self) -> None:
         for changes in (
             {"version_probe": ("go", "version", "{tool}")},
