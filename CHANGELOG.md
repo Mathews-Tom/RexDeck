@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.6.1 — 2026-11-10
+
+Upgrading: the shared host and launcher are unchanged, so integrations enabled under 0.6.0 keep working without `rexdeck enable`.
 
 ### Fixes
 
