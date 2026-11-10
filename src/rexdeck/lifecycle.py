@@ -317,6 +317,7 @@ def _run(
     env: dict[str, str],
     *,
     timeout: float = _COMMAND_WAIT,
+    cwd: str | None = None,
 ) -> _Result:
     """Bound merged diagnostic output and child lifetime."""
     child: subprocess.Popen[bytes] | None = None
@@ -325,6 +326,7 @@ def _run(
             child = subprocess.Popen(
                 argv,
                 env=env,
+                cwd=cwd,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
