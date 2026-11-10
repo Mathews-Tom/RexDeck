@@ -361,6 +361,68 @@ def github_selection(cwd: str, raw: str | None) -> dict[str, str]:
     return {"repo": repo, "account": account}
 
 
+def github_account_selection(raw: str | None) -> dict[str, str]:
+    """An account is deliberate, never inferred from a repository or cwd."""
+    value = json.loads(raw or "{}")
+    if not isinstance(value, dict) or set(value) - {"account", "host"}:
+        raise ValueError("GitHub account selection accepts only account and host")
+    account = value.get("account", "")
+    host = value.get("host", "github.com")
+    if not isinstance(account, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9-]*", account
+    ):
+        raise ValueError(
+            "Explicit account=LOGIN is required; existing gh auth must match"
+        )
+    if not isinstance(host, str) or host.lower() != "github.com":
+        raise ValueError(
+            "GitHub account context supports only host=github.com; Enterprise is not qualified"
+        )
+    host = host.lower()
+    return {"account": account, "host": host}
+
+
+def github_verify_account(account: str, cwd: str, environment: dict[str, str]) -> None:
+    """Verify the active login without changing accounts or reading credentials."""
+    host = environment["GH_HOST"]
+    result = subprocess.run(
+        [environment["GH_PATH"], "api", "--hostname", host, "user", "--jq", ".login"],
+        cwd=cwd,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError(
+            f"GitHub authentication/API failed for {host} as "
+            f"{account}: {result.stderr.strip() or result.stdout.strip()}"
+        )
+    actual = result.stdout.strip()
+    if actual.casefold() != account.casefold():
+        raise ValueError(
+            f"GitHub account mismatch: requested {account}, authenticated "
+            f"as {actual}. Use an already configured matching gh authentication "
+            "environment; RexDeck never switches global accounts."
+        )
+
+
+def github_account_environment(selection: dict[str, str], cwd: str) -> dict[str, str]:
+    """Account-only owned views never inherit a repository or forced ANSI output."""
+    environment = execution_environment()
+    for name in ("GH_REPO", "GH_FORCE_TTY", "CLICOLOR_FORCE"):
+        environment.pop(name, None)
+    environment.update(
+        GH_HOST=selection["host"],
+        GH_PATH=executable("gh"),
+        GH_PROMPT_DISABLED="1",
+        REXDECK_GITHUB_ACCOUNT=selection["account"],
+    )
+    github_verify_account(selection["account"], cwd, environment)
+    return environment
+
+
 def github_environment(selection: dict[str, str], cwd: str) -> dict[str, str]:
     """Verify supported existing authentication; never read or persist a token."""
     if "FF_MOCK_DATA" in os.environ:
@@ -391,13 +453,7 @@ def github_environment(selection: dict[str, str], cwd: str) -> dict[str, str]:
             )
         return result.stdout.strip()
 
-    actual = api("user", ".login")
-    if actual.casefold() != selection["account"].casefold():
-        raise ValueError(
-            f"GitHub account mismatch: requested {selection['account']}, authenticated "
-            f"as {actual}. Use an already configured matching gh authentication "
-            "environment; RexDeck never switches global accounts."
-        )
+    github_verify_account(selection["account"], cwd, environment)
     actual_repo = api(f"repos/{owner}/{repo}", ".full_name")
     if actual_repo.casefold() != f"{owner}/{repo}".casefold():
         raise ValueError(
@@ -463,6 +519,7 @@ CONTEXTS = {
     "git-worktree": git_directory,
     "document": document,
     "github-worktree": git_directory,
+    "github-account": directory,
     "media": media,
     "dekit-config": dekit_config,
 }
@@ -703,7 +760,24 @@ def run(
             "dekit-config",
         ) or context.startswith(SELECTED_FILE + ":")
         checked = resolve(context, cwd, cwd if file_context else None)
-        if context == "github-worktree":
+        if context == "github-account":
+            if (
+                len(args) != 4
+                or args[:2] != ("-I", "-m")
+                or not re.fullmatch(
+                    r"rexdeck\.[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*", args[2]
+                )
+            ):
+                raise ValueError(
+                    "GitHub account context launches only isolated owned modules"
+                )
+            selection = github_account_selection(args[3])
+            environment = github_account_environment(selection, checked)
+            with cleanup_signals():
+                exit_code = subprocess.run(
+                    [tool, *args[:3]], cwd=checked, env=environment, check=False
+                ).returncode
+        elif context == "github-worktree":
             # The captured selection is always last; anything before it is an owned
             # view's own argv. Without one, the tool is gh-dash with its overlay.
             if not args:
@@ -799,7 +873,21 @@ def main() -> int:
     args = sys.argv[1:]
     if len(args) in (3, 4) and args[0] == "context":
         try:
-            if args[1] == "github-worktree":
+            if args[1] == "github-account":
+                target = directory(args[2])
+                selection = github_account_selection(
+                    args[3] if len(args) == 4 else None
+                )
+                print(
+                    json.dumps(
+                        {
+                            "cwd": target,
+                            "target": target,
+                            "selection": json.dumps(selection),
+                        }
+                    )
+                )
+            elif args[1] == "github-worktree":
                 target = git_directory(args[2])
                 selection = github_selection(
                     target, args[3] if len(args) == 4 else None

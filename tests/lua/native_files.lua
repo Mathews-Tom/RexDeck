@@ -198,6 +198,51 @@ rex.json.decode = function() return {cwd = '/exact origin', target = '/exact ori
 assert(not pcall(action.run, context, {repo = 'github.com/owner/project', account = 'reader'}))
 assert(opened == 0, 'missing validated identity opened a pane')
 
+-- Account-only views have no repository/worktree selection and keep owned argv.
+options.plugin, options.title, options.context = 'inbox', 'Inbox', 'github-account'
+options.tool, options.tool_label, options['rexdeck-inbox'] = 'rexdeck-inbox', 'Inbox view', '/python'
+options.args = {'-I', '-m', 'rexdeck.inbox'}
+install(options)
+assert(action.args.account == 'string?' and action.args.host == 'string?'
+  and action.args.repo == nil and action.args.remote == nil,
+  'account action exposes repository arguments')
+for _, invalid in ipairs({{}, {account = ''}, {account = 'reader', repo = 'github.com/a/b'},
+    {account = 'reader', remote = 'origin'}, {account = 'reader', host = 'github.example.com'},
+    {account = 'reader', host = ''}}) do
+  reset()
+  local accepted, error = pcall(action.run, context, invalid)
+  assert(not accepted and tostring(error):find('RexDeck Inbox', 1, true))
+  assert(effects == 0 and opened == 0, 'invalid account selection caused effects')
+end
+for _, host in ipairs({false, 'github.com', 'GITHUB.COM'}) do
+  reset()
+  rex.json.encode = function(value)
+    assert(value.account == 'reader' and value.repo == nil and value.remote == nil)
+    assert(value.host == (host and 'github.com' or nil), 'account host was lost or not normalized')
+    return captured
+  end
+  rex.exec = function(argv)
+    assert(argv[6] == 'github-account' and argv[8] == captured,
+      'account choice lost before validation')
+    return {ok = true, stdout = 'validated'}
+  end
+  rex.json.decode = function()
+    return {cwd = '/exact origin', target = '/exact origin', selection = captured}
+  end
+  rex.session.new_split = function(request)
+    opened = opened + 1
+    assert(request.anchor_id == 'origin-a', 'account launch lost frozen origin')
+    local command = request.layout.block.options.command
+    assert(command[6] == 'github-account' and command[14] == '/exact origin')
+    assert(command[15] == '-I' and command[16] == '-m'
+      and command[17] == 'rexdeck.inbox' and command[18] == captured,
+      'account owned argv or selection lost between validation and launch')
+    return {block_ids = {'inbox-1'}}
+  end
+  action.run(context, {account = 'reader', host = host or nil})
+  assert(opened == 1, 'valid account view did not launch')
+end
+
 options.plugin, options.title, options.context = 'viewer', 'Viewer', 'media'
 options.tool, options.tool_label = 'yazi', 'Yazi'
 options.args = {}

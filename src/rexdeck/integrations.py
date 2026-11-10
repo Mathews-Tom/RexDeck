@@ -29,6 +29,7 @@ from dataclasses import dataclass
 # fallback, and passes the validated path as the tool's final argument.
 # "dekit-config" requires an explicit trusted dekit.yaml and launches dekit with
 # its parent as an explicit project root, reporting surviving tasks on TUI exit.
+# "github-account" verifies an explicit existing gh account without a worktree.
 CONTEXTS = (
     "directory",
     "git-worktree",
@@ -37,6 +38,7 @@ CONTEXTS = (
     "media",
     "selected-file",
     "dekit-config",
+    "github-account",
 )
 PLACEMENTS = ("right", "left", "below", "above")
 MIN_SIZE = 20
@@ -176,6 +178,8 @@ class Integration:
             raise ValueError(
                 "Owned frontends must use isolated in-package module launch"
             )
+        if self.context == "github-account" and self.owned_module is None:
+            raise ValueError("GitHub account context requires an owned frontend")
         if self.context == "selected-file":
             if not self.file_suffixes and not self.file_directories:
                 raise ValueError(f"{self.id} must accept a file suffix or directories")
