@@ -88,6 +88,7 @@ class Selection:
     team: str
     list: str
     credential_env: str = "CLICKUP_API_TOKEN"
+    space: str = ""
 
     def __post_init__(self) -> None:
         if not all(
@@ -95,6 +96,8 @@ class Selection:
         ):
             raise ValueError("Account, team and list must be explicit numeric IDs")
         credentials.validate_env_name(self.credential_env)
+        if self.space and not (self.space.isascii() and self.space.isdecimal()):
+            raise ValueError("Space must be an explicit numeric ID")
 
 
 def selection_path() -> Path:
@@ -109,7 +112,14 @@ def save_selection(selection: Selection) -> None:
     fd, name = tempfile.mkstemp(prefix=".clickup-", dir=path.parent)
     try:
         with os.fdopen(fd, "w") as stream:
-            json.dump(asdict(selection), stream)
+            json.dump(
+                {
+                    key: value
+                    for key, value in asdict(selection).items()
+                    if key != "space" or value
+                },
+                stream,
+            )
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -125,10 +135,15 @@ def load_selection() -> Selection:
     if path.stat().st_size > 16384:
         raise ValueError("ClickUp selection is too large")
     document = obj(json.loads(path.read_text()))
-    if set(document) != {"account", "team", "list", "credential_env"}:
+    required = {"account", "team", "list", "credential_env"}
+    if not required <= set(document) or set(document) - required - {"space"}:
         raise ValueError("Invalid ClickUp selection fields")
     return Selection(
-        *(text(document[k]) for k in ("account", "team", "list", "credential_env"))
+        account=text(document["account"]),
+        team=text(document["team"]),
+        list=text(document["list"]),
+        credential_env=text(document["credential_env"]),
+        space=text(document.get("space", "")),
     )
 
 
@@ -233,6 +248,7 @@ class Task:
     assignees: tuple[Assignee, ...] = ()
     due: str = ""
     priority: str = ""
+    list_name: str = ""
 
     @classmethod
     def parse(cls, data: Mapping[str, object]) -> Task:
@@ -243,12 +259,15 @@ class Task:
         if custom_id and not _ID.fullmatch(custom_id):
             raise ClickUpError("malformed", "Invalid custom task identifier")
         status = Status.parse(obj(data.get("status")))
+        list_id = text(obj(data.get("list")).get("id"))
+        if not (list_id.isascii() and list_id.isdecimal()):
+            raise ClickUpError("malformed", "Invalid task list identifier")
         return cls(
             identifier,
             custom_id,
             text(data.get("name")),
             status.name,
-            text(obj(data.get("list")).get("id")),
+            list_id,
             text(
                 data.get("markdown_description") or data.get("description") or "",
                 multiline=True,
@@ -269,6 +288,7 @@ class Task:
             text(obj(data["priority"]).get("priority") or "")
             if data.get("priority")
             else "",
+            text(obj(data.get("list")).get("name") or ""),
         )
 
 
@@ -333,6 +353,7 @@ class Listing:
     pages: int
     workspace_name: str = ""
     space_name: str = ""
+    filter_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -359,26 +380,56 @@ class Change:
     value: str
     mutation: receipts.Mutation
     text: str
+    task_list: str = ""
     nonce: str = dataclass_field(default_factory=lambda: secrets.token_hex(16))
 
     @property
     def approval(self) -> str:
         return receipts.digest_json(
             {
-                "selection": asdict(self.selection),
+                "selection": {
+                    key: value
+                    for key, value in asdict(self.selection).items()
+                    if key != "space" or self.task_list
+                },
                 "task": self.task,
                 "action": self.action,
                 "value": self.value,
                 "diff": self.mutation.diff,
                 "field_digest": self.mutation.field_digest,
                 "nonce": self.nonce,
+                **({"task_list": self.task_list} if self.task_list else {}),
             }
         )
 
 
+@dataclass(frozen=True)
+class WorkspaceFilters:
+    assignee: str = "me"
+    lookback: str = "14d"
+
+    def __post_init__(self) -> None:
+        if self.assignee not in {"me", "any"} and not (
+            self.assignee.isascii() and self.assignee.isdecimal()
+        ):
+            raise ValueError("Assignee must be me, any or a numeric member ID")
+        if self.lookback not in {"1d", "7d", "14d", "30d", "any"}:
+            raise ValueError("Lookback must be 1d, 7d, 14d, 30d or any")
+
+
 class Service:
-    def __init__(self, selection: Selection) -> None:
+    def __init__(
+        self,
+        selection: Selection,
+        *,
+        workspace: bool | None = None,
+        filters: WorkspaceFilters | None = None,
+    ) -> None:
         self.selection = selection
+        self.workspace = bool(selection.space) if workspace is None else workspace
+        if self.workspace and not selection.space:
+            raise ValueError("Select a space before entering workspace mode")
+        self.filters = filters or WorkspaceFilters()
         self.client = Client(selection)
 
     def workspaces(self) -> tuple[Workspace, ...]:
@@ -440,11 +491,14 @@ class Service:
 
     def task_statuses(self, task: Task) -> tuple[Status, ...]:
         """Read exact native statuses from this task's home list."""
-        self.authorize()
-        metadata = self.client.get(f"/list/{task.list_id}")
+        if self.workspace:
+            metadata = self.authorize(task)
+        else:
+            self.authorize()
+            metadata = self.client.get(f"/list/{task.list_id}")
         return tuple(Status.parse(item) for item in rows(metadata.get("statuses")))
 
-    def authorize(self) -> Mapping[str, object]:
+    def authorize(self, task: Task | None = None) -> Mapping[str, object]:
         selected = self.selection
         if (
             text(obj(self.client.get("/user").get("user")).get("id"))
@@ -458,7 +512,9 @@ class Service:
             raise ClickUpError(
                 "permission", "Selected workspace is not accessible to this account"
             )
-        metadata = self.client.get(f"/list/{selected.list}")
+        metadata = self.client.get(f"/list/{task.list_id if task else selected.list}")
+        if self.workspace and task is not None:
+            self._check_task_space(metadata)
         space = text(obj(metadata.get("space")).get("id"))
         spaces = rows(
             self.client.get(f"/team/{selected.team}/space", {"archived": "false"}).get(
@@ -469,7 +525,18 @@ class Service:
             raise ClickUpError(
                 "permission", "Selected list does not belong to the selected workspace"
             )
+        if self.workspace and selected.space not in {
+            text(item.get("id")) for item in spaces
+        }:
+            raise ClickUpError("permission", "Selected space is outside the workspace")
         return metadata
+
+    def _check_task_space(self, metadata: Mapping[str, object]) -> None:
+        if text(obj(metadata.get("space")).get("id")) != self.selection.space:
+            raise ClickUpError(
+                "task-scope",
+                "Task list is outside the selected space; refresh the queue",
+            )
 
     def listing(self) -> Listing:
         metadata = self.authorize()
@@ -487,20 +554,53 @@ class Service:
             nonlocal page_count
             page_count += 1
 
+        path = f"/list/{self.selection.list}/task"
+        params: backend.Params = {
+            "include_closed": "true",
+            "subtasks": "true",
+            "include_timl": "true",
+        }
+        if self.workspace:
+            path = f"/team/{self.selection.team}/task"
+            params = {
+                "include_closed": "true",
+                "subtasks": "true",
+                "space_ids[]": [self.selection.space],
+            }
+            if self.filters.assignee != "any":
+                params["assignees[]"] = [
+                    self.selection.account
+                    if self.filters.assignee == "me"
+                    else self.filters.assignee
+                ]
+            if self.filters.lookback != "any":
+                days = int(self.filters.lookback.removesuffix("d"))
+                params["date_updated_gt"] = str(
+                    int((time.time() - days * 86400) * 1000)
+                )
         payloads = reads.paged_tasks(
             self.client,
-            f"/list/{self.selection.list}/task",
-            {"include_closed": "true", "subtasks": "true", "include_timl": "true"},
+            path,
+            params,
             on_page=observed_page,
         )
         tasks = {task.id: task for task in map(Task.parse, payloads)}
         return Listing(
-            text(metadata.get("name")),
-            tuple(Status.parse(item) for item in rows(metadata.get("statuses"))),
+            f"Space {self.selection.space}"
+            if self.workspace
+            else text(metadata.get("name")),
+            ()
+            if self.workspace
+            else tuple(Status.parse(item) for item in rows(metadata.get("statuses"))),
             tuple(tasks.values()),
             page_count,
             workspace_name,
-            text(obj(metadata.get("space")).get("name") or ""),
+            ""
+            if self.workspace
+            else text(obj(metadata.get("space")).get("name") or ""),
+            f"Space {self.selection.space} · assignee {self.filters.assignee} · updated {self.filters.lookback}"
+            if self.workspace
+            else "",
         )
 
     def detail(self, task: Task, identity: str) -> Detail:
@@ -515,6 +615,8 @@ class Service:
             raise ClickUpError(
                 "account-mismatch", "Task response differs from selected list member"
             )
+        if self.workspace:
+            self._check_task_space(self.client.get(f"/list/{result.list_id}"))
         comments = tuple(
             Comment(
                 text(item.get("id")),
@@ -644,9 +746,32 @@ class Service:
     def mutate(
         self, task: Task, action: str, value: str, digest: str | None = None
     ) -> runtime.Outcome:
-        self.authorize()
+        metadata = self.authorize(task if self.workspace else None)
+        if self.workspace:
+            current = Task.parse(self.client.get(f"/task/{task.id}"))
+            if current.list_id != task.list_id:
+                raise ClickUpError(
+                    "task-scope", "Task moved lists; refresh before proposing again"
+                )
+            scoped = Service(
+                replace(self.selection, list=task.list_id), workspace=False
+            )
+            scoped.client.close()
+            scoped.client = self.client
+            return scoped._mutate(task, action, value, digest, metadata)
+        return self._mutate(task, action, value, digest, metadata)
+
+    def _mutate(
+        self,
+        task: Task,
+        action: str,
+        value: str,
+        digest: str | None,
+        metadata: Mapping[str, object],
+    ) -> runtime.Outcome:
         if action == "status":
-            metadata = self.client.get(f"/list/{task.list_id}")
+            if task.list_id != self.selection.list:
+                metadata = self.client.get(f"/list/{task.list_id}")
             statuses = tuple(
                 Status.parse(item) for item in rows(metadata.get("statuses"))
             )
@@ -775,10 +900,19 @@ class Controller:
     def switch(
         self, selection: Selection
     ) -> concurrent.futures.Future[tuple[Listing, Detail | None]]:
+        return self.switch_workspace(selection)
+
+    def switch_workspace(
+        self,
+        selection: Selection,
+        *,
+        workspace: bool | None = None,
+        filters: WorkspaceFilters | None = None,
+    ) -> concurrent.futures.Future[tuple[Listing, Detail | None]]:
         with self.lock:
             self.generation += 1
             self.request += 1
-            self.service = Service(selection)
+            self.service = Service(selection, workspace=workspace, filters=filters)
             self.view = View(selection, revision=self.view.revision + 1)
             return self.refresh()
 
@@ -934,6 +1068,13 @@ class Controller:
             tag = self.generation, self.request
             service = self.service
             task_id = self.view.detail.task.id if self.view.detail else ""
+            if service.workspace and self.view.detail is not None:
+                service = Service(
+                    replace(service.selection, list=self.view.detail.task.list_id),
+                    workspace=False,
+                )
+                service.client.close()
+                service.client = self.service.client
             self._set(
                 state="loading", pending=None, output="", error="", error_state=""
             )
@@ -1004,6 +1145,7 @@ class Controller:
                                 value,
                                 mutation,
                                 clean(outcome.text),
+                                task_list=task.list_id if service.workspace else "",
                             ),
                         )
                     except (
@@ -1048,6 +1190,7 @@ class Controller:
                 or change.selection != self.view.selection
                 or change.task != detail.task.id
                 or identity != change.task
+                or (change.task_list and change.task_list != detail.task.list_id)
                 or approval != change.approval
             ):
                 raise ValueError(
@@ -1087,7 +1230,11 @@ class Controller:
                         )
 
             def apply() -> tuple[Listing, Detail, str]:
-                writer = Service(change.selection)
+                writer = Service(
+                    change.selection,
+                    workspace=service.workspace,
+                    filters=service.filters,
+                )
                 writer.client.write_guard = guard
                 try:
                     outcome = writer.mutate(
@@ -1100,6 +1247,14 @@ class Controller:
                     (item for item in listing.tasks if item.id == task.id), None
                 )
                 if member is None:
+                    if service.workspace:
+                        refreshed = service.detail(task, task.id)
+                        return (
+                            listing,
+                            refreshed,
+                            "Applied; task no longer matches the current filters.\n"
+                            + clean(outcome.text),
+                        )
                     raise ClickUpError(
                         "not-found", "Write sent; task is absent from refreshed list"
                     )
@@ -1168,13 +1323,14 @@ def configure(argv: list[str]) -> int:
     for field in ("account", "team", "list"):
         select.add_argument("--" + field)
     select.add_argument("--credential-env", default="CLICKUP_API_TOKEN")
+    select.add_argument("--space")
     commands.add_parser("status")
     args = parser.parse_args(argv)
     if args.command == "select":
         given = [args.account, args.team, args.list]
-        if not any(given):
+        if not any(given) and args.space is None:
             return _guided_select(args.credential_env)
-        if not all(given):
+        if any(given) and not all(given):
             print(
                 json.dumps(
                     {
@@ -1188,7 +1344,17 @@ def configure(argv: list[str]) -> int:
             return 1
     try:
         selected = (
-            Selection(args.account, args.team, args.list, args.credential_env)
+            (
+                Selection(
+                    args.account,
+                    args.team,
+                    args.list,
+                    args.credential_env,
+                    args.space or "",
+                )
+                if args.account
+                else replace(load_selection(), space=args.space)
+            )
             if args.command == "select"
             else load_selection()
         )
