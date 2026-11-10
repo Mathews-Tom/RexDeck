@@ -139,6 +139,11 @@ class Integration:
     # selected-file only: accepted lowercase suffixes and whether a directory is.
     file_suffixes: tuple[str, ...] = ()
     file_directories: bool = False
+    # Homebrew formula when it differs from the executable (bottom ships btm).
+    homebrew: str | None = None
+    # Version report argv when `<tool> --version` is unavailable. Its first element
+    # is a declared prerequisite and "{tool}" stands for the qualified executable.
+    version_probe: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not _ID.match(self.id):
@@ -177,6 +182,21 @@ class Integration:
                 raise ValueError(f"{self.id} has invalid or repeated file suffixes")
         elif self.file_suffixes or self.file_directories:
             raise ValueError(f"{self.id} declares file selection without selected-file")
+        if self.homebrew is not None and not _TOOL.match(self.homebrew):
+            raise ValueError(f"{self.id} has an invalid Homebrew formula name")
+        if self.version_probe and (
+            self.owned_module is not None
+            or self.version_probe[0] not in {name for name, _ in self.prerequisites}
+            or self.version_probe.count("{tool}") != 1
+            or not all(
+                part and "\x00" not in part and "\n" not in part
+                for part in self.version_probe
+            )
+        ):
+            raise ValueError(
+                f"{self.id} version probe must start with a declared prerequisite "
+                "and name {tool} exactly once"
+            )
 
     @property
     def selected_file(self) -> str:

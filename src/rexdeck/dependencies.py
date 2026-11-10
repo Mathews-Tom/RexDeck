@@ -26,7 +26,22 @@ def _resolve(name: str) -> str | None:
 def _probe(executable: str, integration: integrations.Integration) -> str:
     """Require an explicitly qualified upstream version before registration."""
     name = integration.tool
-    result = lifecycle._run([executable, "--version"], dict(os.environ))
+    argv = [executable, "--version"]
+    if integration.version_probe:
+        reporter = _resolve(integration.version_probe[0])
+        if reporter is None:
+            raise RuntimeError(
+                f"Cannot identify {name} version: {integration.version_probe[0]} "
+                "is not on PATH"
+            )
+        argv = [
+            reporter,
+            *(
+                executable if part == "{tool}" else part
+                for part in integration.version_probe[1:]
+            ),
+        ]
+    result = lifecycle._run(argv, dict(os.environ))
     text = result.output.decode(errors="replace").strip()
     version = re.search(integration.version_pattern, text, re.MULTILINE)
     if result.code != 0 or version is None:
@@ -43,13 +58,23 @@ def _probe(executable: str, integration: integrations.Integration) -> str:
 def _manual(integration: integrations.Integration) -> str:
     """Give owner-run, version-qualified installation and exact rerun instructions."""
     tool = integration.tool
+    formula = integration.homebrew or tool
+    # A probe reads the executable by path, so the shown check resolves it first.
+    check = (
+        " ".join(
+            f'"$(command -v {tool})"' if part == "{tool}" else part
+            for part in integration.version_probe
+        )
+        if integration.version_probe
+        else f"{tool} --version"
+    )
     return (
         f"Manually install {tool} {' or '.join(integration.versions)} from "
         f"{integration.release}. "
-        f"On macOS with existing Homebrew, inspect brew info {tool}; run brew install "
-        f"{tool} only if it selects a qualified version and you accept its dependency, "
-        "build and upgrade effects. Otherwise skip Homebrew and use the qualified "
-        f"upstream release. Verify with {tool} --version, put the executable in a "
+        f"On macOS with existing Homebrew, inspect brew info {formula}; run brew "
+        f"install {formula} only if it selects a qualified version and you accept its "
+        "dependency, build and upgrade effects. Otherwise skip Homebrew and use the "
+        f"qualified upstream release. Verify with {check}, put the executable in a "
         f"trusted absolute PATH directory, then rerun: rexdeck enable {integration.id}. "
         "RexDeck never installs, upgrades or removes upstream tools."
     )
