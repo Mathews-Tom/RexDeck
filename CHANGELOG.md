@@ -7,6 +7,10 @@
 - Keep ClickUp due dates, date filters and date custom fields on the local calendar day, including displayed dates and due-edit pre-fills. Anchor written dates at local midday while keeping date-filter boundaries at midnight.
 - Report any failure before dispatch as nothing written, rather than suggesting the write may have succeeded; writes are never retried automatically.
 
+### Documentation
+
+- Record real Claude Code and Codex subagent-event qualification for the optional attention provider hooks, and document that Codex persists `-c` project-trust overrides into `~/.codex/config.toml`.
+
 ## 0.6.0 — 2026-11-10
 
 Upgrading: the shared host and launcher changed, including the new `github-account` context, so run `rexdeck enable <id>` for every enabled integration after installing 0.6.0.
