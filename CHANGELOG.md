@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.0 — 2026-11-10
+
+Upgrading: the shared host and launcher changed, including the new `github-account` context, so run `rexdeck enable <id>` for every enabled integration after installing 0.6.0.
+
+### New plugins
+
+- JSON: open an explicitly selected JSON file in jless 0.9.0 with collapsible nodes and search.
+- System: monitor the machine with bottom 0.15.0 (`btm`), launched read-only.
+- Logs: explore selected local logs or a directory with lnav 0.14.1, filters, SQL and time navigation.
+- HTTP: send requests and inspect responses with Slumber 5.4.4 using the invoking directory's collection discovery.
+- Containers: inspect Docker containers, logs and stats with lazydocker 0.25.2 and the existing Docker context.
+- Redis: browse keys, values, TTLs and metrics with redis-tui 1.0.48 and its upstream connection manager.
+- SQL: query an explicitly selected SQLite file with Harlequin 2.17.0 opened `--read-only`; typed SQL can still write other local SQLite files.
+- Tables: explore selected CSV, TSV, JSON or JSONL data with VisiData 3.5; upstream editing and code execution remain available.
+- Disk: explore directory usage with dua 3.0.1 (`dua interactive`); upstream deletion remains available.
+- Dashboard: open a selected trusted JSON board with Dashbrew 1.2.0; board scripts and API calls run with the user's permissions.
+- Focus: start a pomo 1.2.1 work timer, disclosing trusted-directory configuration and its upstream command execution.
+- Slides: present an explicitly selected Markdown deck with presenterm 0.16.1.
+- Processes: run tasks from an explicitly selected trusted `dekit.yaml` with dekit 0.10.3; tasks execute arbitrary commands.
+- Actions: read workflow runs, jobs and bounded job-log tails in a packaged RexDeck Textual view using GitHub CLI 2.97+; author-controlled run and job names stay on one line; no separate TUI or write actions.
+- Music: browse Spotify playlists and control playback with spotify_player 0.25.2, using upstream OAuth and device selection. Sign-in on 0.25.2 needs a documented two-stage workaround for an upstream redirect bug, and local audio was silent in qualification (upstream `audio key error`).
+- Inbox: read unread GitHub notifications in a packaged RexDeck Textual view qualified with an existing `GITHUB_TOKEN` environment route (the stored gh keyring route is not yet qualified), with an explicit account, reason filters, pagination and manual refresh; no repository or separate TUI is required.
+- Dependencies: browse package dependencies, licenses and known advisories in a packaged RexDeck Textual view backed by public deps.dev and OSV metadata; no separate tool, account, repository scan or installation.
+- Images: browse anonymous public OCI image tags, digests and platforms in a packaged RexDeck Textual view; no separate tool, Docker credentials, blob downloads or image operations.
+
+### Existing plugins
+
+- ClickUp: add a selected Space workspace queue with assignee/lookback filters, guarded cross-list writes and `rexdeck clickup select --space SPACE_ID`; preserve the list desk and require explicit proposal review for writes.
+
+### Host and launcher
+
+- Discover descriptors from individual catalogue modules, preserving existing plugin ordering and sorting new plugins by id.
+- Add `selected-file` context with descriptor-declared suffix and directory acceptance; require an explicit existing target, and refuse `file=` on non-file actions.
+- Refuse glob metacharacters in selected-file paths before opening a pane.
+- Extend `github-worktree` to launch owned views after the same explicit repository/account verification, without a gh-dash overlay.
+- Add `dekit-config` context, constrain the selected trusted config and report tasks that survive the upstream pane's exit.
+- Add `github-account` for isolated owned views: verify the explicit GitHub login without requiring a worktree, refuse repository/file selections and unqualified hosts, and keep account environment changes process-local.
+- Let descriptors declare their Homebrew formula and version probe independently of the executable name; installation stays manual.
+- Quote version-probe command parts in install guidance so paths with spaces remain usable.
+- Isolate Go metadata probes from checkout `go.mod`/`go.work` files by running from `/` with `GOTOOLCHAIN=local`, without downloading another toolchain.
+
 ## 0.5.2 — 2026-11-10
 
 - Identify ClickUp's RexDeck-authored interface with a `[RexDeck UI]` badge instead of a `(built-in)` suffix in terminal plugin/status reports; leave other tool labels and JSON output unchanged.
