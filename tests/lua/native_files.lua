@@ -74,6 +74,11 @@ install(options)
 assert(action.args == nil, 'non-document action declares arguments')
 assert(action.name == 'rexdeck_files' and type(action.run) == 'function')
 
+reset()
+local accepted_file, file_error = pcall(action.run, context, {file = 'dekit.yaml'})
+assert(not accepted_file and tostring(file_error):find('does not accept a selected file', 1, true))
+assert(effects == 0 and opened == 0, 'non-file selection caused effects')
+
 for _, invalid in ipairs({{}, {session_id = 'session-a'}, {block_id = 'origin-a'},
     {session_id = '', block_id = 'origin-a'}, {session_id = 1, block_id = 'origin-a'}}) do
   reset()
@@ -255,3 +260,30 @@ reset()
 local accepted, error = pcall(action.run, context, {})
 assert(not accepted and tostring(error):find('selected .log, .txt file or a directory', 1, true),
   tostring(error))
+
+-- dekit accepts a project root, not a YAML positional: preserve the selected
+-- config through preflight and leave runner lifetime/reporting to the launcher.
+options.plugin, options.title, options.context = 'procs', 'Processes', 'dekit-config'
+options.tool, options.tool_label, options.dekit = 'dekit', 'dekit', '/dekit'
+options.args = {}
+install(options)
+reset()
+local accepted_config, config_error = pcall(action.run, context, {})
+assert(not accepted_config and tostring(config_error):find('trusted dekit.yaml', 1, true))
+assert(effects == 0 and opened == 0)
+rex.exec = function(argv)
+  assert(argv[6] == 'dekit-config' and argv[8] == 'project/dekit.yaml')
+  return {ok = true, stdout = 'validated'}
+end
+rex.json.decode = function() return {cwd = '/project', target = '/project/dekit.yaml'} end
+rex.session.new_split = function(request)
+  opened = opened + 1
+  local command = request.layout.block.options.command
+  assert(request.layout.block.options.cwd == '/project')
+  assert(command[6] == 'dekit-config' and command[14] == '/project/dekit.yaml'
+    and #command == 14, 'dekit config selection lost')
+  return {block_ids = {'procs-1'}}
+end
+reset()
+action.run(context, {file = 'project/dekit.yaml'})
+assert(opened == 1)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -169,6 +170,18 @@ def selected_file(spec: str, raw: str, selected: str | None = None) -> str:
     if path.is_file() and path.suffix.lower() in suffixes:
         return str(path)
     raise ValueError(f"Select an existing {wanted}, not {str(path)!r}")
+
+
+def dekit_config(raw: str, selected: str | None = None) -> str:
+    """Select only a trusted dekit.yaml; upstream accepts a root, not a YAML arg."""
+    path = Path(selected_file(".yaml", raw, selected))
+    if path.name != "dekit.yaml":
+        raise ValueError("Select the trusted config named exactly dekit.yaml")
+    if any(not char.isprintable() for char in str(path)):
+        raise ValueError(
+            "dekit config paths must not contain terminal control characters"
+        )
+    return str(path)
 
 
 def git_directory(raw: str) -> str:
@@ -451,6 +464,7 @@ CONTEXTS = {
     "document": document,
     "github-worktree": git_directory,
     "media": media,
+    "dekit-config": dekit_config,
 }
 
 
@@ -499,6 +513,8 @@ def resolve(context: str, raw: str, selected: str | None = None) -> str:
     name, separator, spec = context.partition(":")
     if name == SELECTED_FILE and separator:
         return selected_file(spec, raw, selected)
+    if context == "dekit-config":
+        return dekit_config(raw, selected)
     if context not in CONTEXTS:
         raise ValueError(f"Unknown integration context: {context!r}")
     if context in ("document", "media"):
@@ -514,6 +530,149 @@ def workdir(target: str) -> str:
     """Run in the target directory, or a selected file's directory."""
     path = Path(target)
     return str(path if path.is_dir() else path.parent)
+
+
+def dekit_environment() -> dict[str, str]:
+    """Keep upstream homes, but never give persistent tasks a stale pane/runner."""
+    environment = execution_environment()
+    for name in tuple(environment):
+        if name in ("REX_SESSION", "REX_BLOCK", "REX_CLIENT") or name.startswith(
+            "DEKIT_"
+        ):
+            environment.pop(name)
+    for name in ("XDG_RUNTIME_DIR", "TMPDIR"):
+        if any(not char.isprintable() for char in environment.get(name, "")):
+            raise ValueError(f"{name} must not contain terminal control characters")
+    return environment
+
+
+def dekit_stop_command(tool: str, root: str) -> str:
+    """Preserve the runtime namespace when the command is pasted in another pane."""
+    if "=" in tool:
+        raise ValueError("dekit executable paths must not contain '='")
+    environment = dekit_environment()
+    unset = [
+        part
+        for name in ("XDG_RUNTIME_DIR", "TMPDIR")
+        if name not in environment
+        for part in ("-u", name)
+    ]
+    routing = [
+        f"{name}={environment[name]}"
+        for name in ("XDG_RUNTIME_DIR", "TMPDIR")
+        if name in environment
+    ]
+    return shlex.join(["env", *unset, *routing, tool, "-C", root, "down"])
+
+
+def dekit_query(tool: str, root: str, *args: str) -> dict[str, object]:
+    """Read one explicit runner without starting it; bound every post-quit probe."""
+    result = subprocess.run(
+        [tool, "-C", root, "--json", *args],
+        cwd=root,
+        env=dekit_environment(),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError(
+            f"dekit {' '.join(args)} failed: "
+            f"{(result.stderr.strip() or result.stdout.strip())!r}"
+        )
+    try:
+        value: object = json.loads(result.stdout)
+    except (ValueError, RecursionError) as error:
+        raise ValueError("dekit returned invalid or excessively nested JSON") from error
+    if not isinstance(value, dict):
+        raise ValueError("dekit returned an invalid status object")
+    return value
+
+
+def dekit_report(tool: str, root: str) -> None:
+    """Never stop tasks implicitly; report the selected runner before closing."""
+    print(f"\nRexDeck Processes: selected project {root!r}", flush=True)
+    try:
+        status = dekit_query(tool, root, "runner", "status")
+        socket_path = status.get("socket")
+        print(
+            "Runner socket: "
+            + (
+                json.dumps(socket_path, ensure_ascii=True)
+                if socket_path is not None
+                else "not published by runner status"
+            ),
+            flush=True,
+        )
+        if status.get("status") == "absent":
+            print("Runner stopped; no tasks remain in this runner.", flush=True)
+        elif status.get("status") == "running":
+            tasks = dekit_query(tool, root, "ls")
+            if not isinstance(tasks.get("tasks"), list):
+                raise ValueError("dekit returned an invalid task list")
+            # JSON escaping prevents task names/output from injecting terminal controls.
+            print("Runner still running; tasks and their current states:", flush=True)
+            print(json.dumps(tasks, ensure_ascii=True, indent=2), flush=True)
+        else:
+            raise ValueError(f"Runner state is {status.get('status')!r}")
+    except (OSError, ValueError, RecursionError, subprocess.SubprocessError) as error:
+        print(f"Cannot determine remaining tasks: {str(error)!r}", flush=True)
+    finally:
+        print(
+            "To stop this project's runner and tasks:\n"
+            + dekit_stop_command(tool, root),
+            flush=True,
+        )
+
+
+def dekit_run(tool: str, config: str, args: tuple[str, ...]) -> int:
+    """Attach with upstream lifetime semantics, scoped to the selected config root."""
+    if args:
+        raise ValueError("dekit-config does not accept extra tool arguments")
+    if any(not char.isprintable() for char in tool):
+        raise ValueError(
+            "dekit executable paths must not contain terminal control characters"
+        )
+    if "=" in tool:
+        raise ValueError("dekit executable paths must not contain '='")
+    root = workdir(config)
+    status = dekit_query(tool, root, "runner", "status")
+    qualified = str(Path(tool).resolve(strict=True))
+    if status.get("selection_error") or status.get("selected_binary") != qualified:
+        raise ValueError(
+            "dekit selects a different kernel; remove the project/user kernel "
+            "override or select the qualified executable explicitly"
+        )
+    if status.get("status") == "running":
+        version = subprocess.run(
+            [tool, "--version"],
+            cwd=root,
+            env=dekit_environment(),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout.strip()
+        if (
+            status.get("binary") != qualified
+            or version != f"dekit {status.get('version')}"
+        ):
+            raise ValueError(
+                "The existing dekit runner is not the qualified version; stop it "
+                "explicitly with " + dekit_stop_command(tool, root)
+            )
+    elif status.get("status") != "absent":
+        raise ValueError(f"dekit runner is not ready: {status.get('status')!r}")
+    try:
+        return subprocess.run(
+            [tool, "-C", root],
+            cwd=root,
+            env=dekit_environment(),
+            check=False,
+        ).returncode
+    finally:
+        dekit_report(tool, root)
 
 
 def run(
@@ -538,9 +697,11 @@ def run(
         if not Path(tool).is_absolute() or not Path(rex).is_absolute():
             raise ValueError("Absolute tool and Rex executable paths are required")
         # File targets are rechecked as explicit selections at launch time.
-        file_context = context in ("document", "media") or context.startswith(
-            SELECTED_FILE + ":"
-        )
+        file_context = context in (
+            "document",
+            "media",
+            "dekit-config",
+        ) or context.startswith(SELECTED_FILE + ":")
         checked = resolve(context, cwd, cwd if file_context else None)
         if context == "github-worktree":
             # The captured selection is always last; anything before it is an owned
@@ -578,6 +739,8 @@ def run(
                         env=environment,
                         check=False,
                     ).returncode
+        elif context == "dekit-config":
+            exit_code = dekit_run(tool, checked, args)
         else:
             target = (checked,) if file_context else ()
             # Inherit the pane TTY/configuration, but never search its cwd for helpers.
@@ -591,6 +754,7 @@ def run(
             exit_code = 128 - exit_code
         if exit_code:
             print(f"RexDeck {title}: {label} exited {exit_code}", file=sys.stderr)
+        if exit_code or context == "dekit-config":
             acknowledge()
     except LaunchInterrupted as error:
         exit_code = 128 + error.signum
