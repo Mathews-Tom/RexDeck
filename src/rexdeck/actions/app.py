@@ -29,6 +29,11 @@ Data = RunsPage | tuple[Job, ...] | str
 View = Literal["runs", "jobs", "logs"]
 
 
+def _line(text: str) -> str:
+    """Sanitize a value that must stay on one display line (logs keep newlines)."""
+    return " ".join(clean(text).split())
+
+
 @dataclass(frozen=True)
 class Snapshot:
     data: Data
@@ -114,12 +119,12 @@ class ActionsApp(App[None]):
         snap = self.cache.get(self._key())
         self.query_one("#filters").display = self.view == "runs"
         location = (
-            f"{self.selected.kind}={clean(self.selected.value)} · page {self.page}"
+            f"{self.selected.kind}={_line(self.selected.value)} · page {self.page}"
         )
         if self.selected_run and self.view != "runs":
-            location = f"Run {self.selected_run.id} · {clean(self.selected_run.name)}"
+            location = f"Run {self.selected_run.id} · {_line(self.selected_run.name)}"
         if self.job and self.view == "logs":
-            location += f" / {clean(self.job.name)} · last 200 log lines (memory only)"
+            location += f" / {_line(self.job.name)} · last 200 log lines (memory only)"
         if self.view == "runs" and snap and isinstance(snap.data, RunsPage):
             location += f" · {snap.data.total} matches (GitHub search limit: 1,000)"
         self.query_one("#location", Static).update(location)
@@ -145,10 +150,10 @@ class ActionsApp(App[None]):
             for run in snap.data.runs:
                 table.add_row(
                     str(run.id),
-                    Text(clean(run.name)),
-                    Text(clean(run.conclusion or run.status)),
-                    Text(clean(run.branch)),
-                    Text(clean(run.sha[:10])),
+                    Text(_line(run.name)),
+                    Text(_line(run.conclusion or run.status)),
+                    Text(_line(run.branch)),
+                    Text(_line(run.sha[:10])),
                     key=str(run.id),
                 )
         elif isinstance(snap.data, tuple):
@@ -156,8 +161,8 @@ class ActionsApp(App[None]):
             for job in snap.data:
                 table.add_row(
                     str(job.id),
-                    Text(clean(job.name)),
-                    Text(clean(job.conclusion or job.status)),
+                    Text(_line(job.name)),
+                    Text(_line(job.conclusion or job.status)),
                     key=str(job.id),
                 )
         else:
