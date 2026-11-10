@@ -55,7 +55,9 @@ def test_new_modules_follow_the_original_seven_sorted_by_id(tmp_path: Path) -> N
         _derived(catalogue, name)
     result = _plugins(catalogue)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip().split(",") == [*ORIGINAL, "alpha", "zeta"]
+    # Later lanes add their own modules; the order rule, not today's list, is pinned.
+    added = [*integrations.PLUGINS[len(ORIGINAL) :], "alpha", "zeta"]
+    assert result.stdout.strip().split(",") == [*ORIGINAL, *sorted(added)]
 
 
 @pytest.mark.parametrize(
