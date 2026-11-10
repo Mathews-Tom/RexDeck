@@ -333,6 +333,8 @@ def test_workspace_dialog_filters_and_saved_default(tmp_path: Path) -> None:
                     app.screen.query_one("#workspace-lookback", Select).value = "7d"
                     await pilot.click("#load-workspace")
                     await pilot.pause()
+                    await app.workers.wait_for_complete()
+                    await app.poll_view()
                     assert controller.service.filters == cu.WorkspaceFilters(
                         "any", "7d"
                     )
