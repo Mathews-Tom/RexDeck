@@ -102,11 +102,16 @@ class TaskQueue(DataTable[Text]):
 
     def on_resize(self, event: Resize) -> None:
         columns = self.ordered_columns
-        if len(columns) != 2 or event.size.width <= 0:
+        if len(columns) not in {2, 3} or event.size.width <= 0:
             return
         width = max(16, event.size.width - 2)
         status_width = min(16, max(9, width // 4))
-        columns[0].width = max(3, width - status_width - 4)
+        if len(columns) == 3:
+            list_width = min(16, max(8, width // 4))
+            columns[0].width = max(3, width - status_width - list_width - 6)
+            columns[2].width = list_width
+        else:
+            columns[0].width = max(3, width - status_width - 4)
         columns[1].width = status_width
         self.virtual_size = Size(width, self.virtual_size.height)
         self.refresh(layout=True)
@@ -171,6 +176,11 @@ class ActionsModal(ModalScreen[str | None]):
                 Option(
                     "Choose list / workspace",
                     id="lists",
+                    disabled=self.view.state == "writing",
+                ),
+                Option(
+                    "Space view / server filters",
+                    id="workspace",
                     disabled=self.view.state == "writing",
                 ),
                 Option(
@@ -326,6 +336,71 @@ class StatusModal(ModalScreen[str | None]):
     @on(Button.Pressed, "#cancel-status")
     def cancel_status(self) -> None:
         self.dismiss(None)
+
+
+class WorkspaceModal(
+    ModalScreen[tuple[frontend.Selection, bool, frontend.WorkspaceFilters] | None]
+):
+    BINDINGS = [Binding("escape", "dismiss", show=False)]
+
+    def __init__(self, service: frontend.Service) -> None:
+        super().__init__()
+        self.service = service
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static("Space view / server filters", classes="dialog-title")
+            with VerticalScroll(classes="dialog-scroll"):
+                yield Static("Mode", markup=False)
+                yield Select(
+                    [("List (unchanged)", "list"), ("Space", "space")],
+                    value="space" if self.service.workspace else "list",
+                    allow_blank=False,
+                    id="workspace-mode",
+                )
+                yield Static(
+                    "Default space ID (saved; filters reset each launch)", markup=False
+                )
+                yield Input(self.service.selection.space, id="workspace-space")
+                yield Static("Assignee: me, any, or member ID", markup=False)
+                yield Input(self.service.filters.assignee, id="workspace-assignee")
+                yield Static("Updated within", markup=False)
+                yield Select(
+                    [(value, value) for value in ("1d", "7d", "14d", "30d", "any")],
+                    value=self.service.filters.lookback,
+                    allow_blank=False,
+                    id="workspace-lookback",
+                )
+            yield Static("", id="workspace-error", markup=False)
+            with Horizontal(classes="dialog-buttons"):
+                yield Button("Cancel", id="cancel-workspace")
+                yield Button("Load view", id="load-workspace", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#cancel-workspace", Button).focus()
+
+    @on(Button.Pressed, "#cancel-workspace")
+    def cancel_workspace(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#load-workspace")
+    def load_workspace(self) -> None:
+        try:
+            selection = replace(
+                self.service.selection,
+                space=self.query_one("#workspace-space", Input).value.strip(),
+            )
+            workspace = self.query_one("#workspace-mode", Select).value == "space"
+            if workspace and not selection.space:
+                raise ValueError("Enter a space ID")
+            filters = frontend.WorkspaceFilters(
+                self.query_one("#workspace-assignee", Input).value.strip(),
+                str(self.query_one("#workspace-lookback", Select).value),
+            )
+        except ValueError as error:
+            self.query_one("#workspace-error", Static).update(Text(str(error)))
+            return
+        self.dismiss((selection, workspace, filters))
 
 
 class ScopeModal(ModalScreen[frontend.Selection | None]):
@@ -572,7 +647,7 @@ class HierarchyModal(ModalScreen[frontend.Selection | None]):
         if self.chosen is not None:
             try:
                 selection = replace(
-                    self.selection, team=self.workspace, list=self.chosen.id
+                    self.selection, team=self.workspace, list=self.chosen.id, space=""
                 )
             except ValueError as error:
                 self.query_one("#hierarchy-note", Static).update(
@@ -608,7 +683,7 @@ class ReviewModal(DeskModal):
             with VerticalScroll(classes="dialog-scroll"):
                 yield Static(
                     Text(
-                        f"Account: {selected.account}\nWorkspace: {selected.team}\nList: {selected.list}"
+                        f"Account: {selected.account}\nWorkspace: {selected.team}\nList: {change.task_list or selected.list}"
                         f"\nCredential source: {selected.credential_env}\nTask: {change.task}\nAction: {change.action}"
                     ),
                     id="review-identity",
@@ -815,6 +890,7 @@ class ClickUpApp(App[int]):
             yield Button("Refresh", id="refresh")
             yield Button("Lists", id="lists")
             yield Button("Actions", id="actions")
+            yield Button("Space", id="workspace")
         with Horizontal(id="desk"):
             with Vertical(id="queue-pane"):
                 yield Input(placeholder="Filter this list  (/)", id="filter")
@@ -962,7 +1038,9 @@ class ClickUpApp(App[int]):
             parts.append(listing.name)
             label = " / ".join(parts)
         self.query_one("#scope", Static).update(
-            Text(f"{label}\nAccount {selected.account}  ·  List {selected.list}")
+            Text(
+                f"{label}\nAccount {selected.account}  ·  {listing.filter_label if listing and listing.filter_label else f'List {selected.list}'}"
+            )
         )
 
     def visible_tasks(self) -> tuple[frontend.Task, ...]:
@@ -995,9 +1073,18 @@ class ClickUpApp(App[int]):
         if not tasks and listing is not None:
             count += " — no matches" if total else " — list is empty"
         self.query_one("#task-count", Static).update(count)
+        table = self.query_one(TaskQueue)
+        workspace = bool(listing and listing.filter_label)
+        if len(table.ordered_columns) != (3 if workspace else 2):
+            table.clear(columns=True)
+            table.add_column("Task", key="task", width=24)
+            table.add_column("Status", key="status", width=12)
+            if workspace:
+                table.add_column("List", key="list", width=14)
+            table.on_resize(Resize(table.size, table.size))
+            self._queue_tasks = ()
         if tasks == self._queue_tasks:
             return
-        table = self.query_one(TaskQueue)
         cursor_id = ""
         if table.cursor_row < len(self._queue_tasks):
             cursor_id = self._queue_tasks[table.cursor_row].id
@@ -1013,7 +1100,10 @@ class ClickUpApp(App[int]):
                     "  " + ", ".join(person.name for person in task.assignees),
                     style="dim",
                 )
-            table.add_row(title, status_text(task), key=task.id, height=2)
+            cells = [title, status_text(task)]
+            if workspace:
+                cells.append(Text(task.list_name or task.list_id))
+            table.add_row(*cells, key=task.id, height=2)
         for index, task in enumerate(tasks):
             if task.id == anchor:
                 table.move_cursor(row=index, animate=False, scroll=False)
@@ -1183,6 +1273,55 @@ class ClickUpApp(App[int]):
     def lists_button(self) -> None:
         self.action_lists()
 
+    @on(Button.Pressed, "#workspace")
+    def workspace_button(self) -> None:
+        if self.controller.snapshot().state != "writing":
+            self.push_screen(
+                WorkspaceModal(self.controller.service), self.workspace_selected
+            )
+
+    def workspace_selected(
+        self, result: tuple[frontend.Selection, bool, frontend.WorkspaceFilters] | None
+    ) -> None:
+        if result is None or self.controller.snapshot().state == "writing":
+            return
+        selection, workspace, filters = result
+
+        def load() -> None:
+            future = self.controller.switch_workspace(
+                selection, workspace=workspace, filters=filters
+            )
+            service = self.controller.service
+
+            async def save_default() -> None:
+                try:
+                    await asyncio.wrap_future(future)
+                    view = self.controller.snapshot()
+                    if (
+                        not workspace
+                        or self.controller.service is not service
+                        or view.state not in {"ready", "empty"}
+                    ):
+                        return
+                    saved = frontend.load_selection()
+                    if replace(saved, space="") == replace(selection, space=""):
+                        frontend.save_selection(replace(saved, space=selection.space))
+                    else:
+                        self._notice = "Space loaded for this pane only; saved account and scope are unchanged."
+                except (
+                    frontend.ClickUpError,
+                    diagnostics.EngineError,
+                    ValueError,
+                    OSError,
+                ):
+                    self._notice = "The saved default space was not changed. Only a successful Space load for the saved account and scope can update it."
+                if self.is_running:
+                    self._render_state()
+
+            self.run_worker(save_default(), exit_on_error=False)
+
+        self._call(load)
+
     @on(Button.Pressed, "#actions")
     def actions_button(self) -> None:
         self.action_actions()
@@ -1259,6 +1398,8 @@ class ClickUpApp(App[int]):
                 ScopeModal(view.selection),
                 lambda selected: self.switch_scope(selected, persist=False),
             )
+        elif action == "workspace":
+            self.workspace_button()
         elif action == "help":
             self.action_help()
         elif action == "output":

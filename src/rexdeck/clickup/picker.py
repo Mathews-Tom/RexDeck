@@ -223,7 +223,7 @@ def switch_space(
         _, space_name, listing, list_name = _space_and_list(
             say, ask, session, selection.team, query
         )
-    chosen = replace(selection, list=listing)
+    chosen = replace(selection, list=listing, space="")
     save_selection(chosen)
     say(f"Now tracking {space_name} / {list_name}; saved for next time.")
     return chosen

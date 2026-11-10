@@ -18,6 +18,8 @@ Run `rexdeck clickup select` in a terminal to choose again later, or pass every 
 ```sh
 rexdeck clickup select                                   # guided, same menus
 rexdeck clickup select --account USER_ID --team WORKSPACE_ID --list LIST_ID
+rexdeck clickup select --space SPACE_ID                   # use saved account/team/list
+rexdeck clickup select --account USER_ID --team WORKSPACE_ID --list LIST_ID --space SPACE_ID
 rexdeck clickup status
 ```
 
@@ -28,6 +30,18 @@ Invoke **RexDeck ClickUp** from the native palette. The shared host runs its ins
 ## Task desk
 
 The pane is an interactive task browser, not a scrolling command transcript. A selectable queue sits beside a Markdown task reader when there is enough width. Narrow panes show the queue or the selected task; `Esc` returns to the queue. Descriptions and threaded comments scroll inside the reader. Resizing keeps the current task and filter.
+
+### Space workspace view
+
+Save a default space with `clickup select --space SPACE_ID` (after selecting the account/workspace/list), or use the **Space** toolbar/action-menu dialog. A saved space opens the aggregate view on the next launch. The dialog switches between the unchanged list desk and one selected space. Only a successful Space load updates the saved default space, and only when the pane still uses the saved account/workspace/list/credential reference; advanced pane-local selections never overwrite that saved scope. Filters and pane-local mode are not persisted. Use `clickup select --space ''` to clear the default and launch the list desk next time. Old selection files without `space` remain valid; unknown selection keys are refused.
+
+Space mode starts with **assignee `me` AND updated within `14d`**. The account is verified through `/user` before its ID is sent as the assignee. The Space dialog accepts `me`, `any` or a numeric member ID and lookbacks `1d`, `7d`, `14d`, `30d`, `any`. These server filters reset every launch. The existing text/Mine/Closed controls further narrow the returned rows locally. Only Space mode adds a List column; list-mode columns and narrow-width allocation are unchanged.
+
+Reads use the team task endpoint with one `space_ids[]`, paged with the existing 50-page ceiling and one-second request spacing. Updated cutoffs are epoch milliseconds. Refresh is explicit; HTTP 429 shows Retry-After without retrying, and refresh recovers after access/network/credential problems are resolved.
+
+Writes still use only the existing proposal/review workflow. Select a task, then **Sync registry** to sync that task's own list before proposing a write; engine reports likewise use the selected task's list (or the saved list without a selection). Membership checks require the home list to belong to the selected space and workspace, status choices come from that list, and space-mode approval digests additionally bind the home-list ID. A detected move refuses the proposal/apply and requires refresh. List-mode approval digests retain their previous shape.
+
+If a successful write removes a task from the current server-filtered queue (for example by reassigning it), the desk reads the task back by ID and checks its home space before reporting **applied; no longer matches the current filters**. An individual task outside the selected space is a recoverable scope error, not a revocation of access to the whole queue.
 
 | Key | Action |
 | --- | --- |
@@ -51,7 +65,7 @@ Typing in a filter or editor does not invoke single-letter shortcuts. The footer
 - The filter matches the complete loaded list, not just visible rows, using task names, native statuses and internal/custom IDs. This is not workspace search.
 - Task API pages include closed tasks, subtasks and tasks in multiple lists; duplicate IDs are merged. Missing `last_page` metadata triggers another-page probing until an empty result. The 50-page safety ceiling is an explicit error, never a silently complete prefix.
 - Task details retain native status names and colours, home list, update time, Sprint Points, assignees, due date and priority when present. Missing metadata stays unset. Comments load all older pages with paired `start`/`start_id` cursors, deduplication and loop detection; authors, dates and indented replies stay with the conversation.
-- The hierarchy picker browses every accessible space in the chosen workspace and includes foldered and folderless lists. Same-named folders remain separate. Selecting a list saves that choice for the next pane. Cancel keeps the current selection and stops subsequent discovery reads; an already dispatched request may finish. This is **one list at a time**, not an aggregate of all workspace tasks.
+- The hierarchy picker browses every accessible space in the chosen workspace and includes foldered and folderless lists. Same-named folders remain separate. Selecting a list saves that choice for the next pane. Cancel keeps the current selection and stops subsequent discovery reads; an already dispatched request may finish. Use the Space dialog for aggregation instead of the per-list picker.
 - Advanced selection retains pane-local account/workspace/list/environment-reference switching without globally switching accounts. A selection change clears previous rows, detail, comments, opener and proposal; generation tags discard late results.
 - Browser opening uses only the selected task's canonical `https://app.clickup.com/t/INTERNAL_ID` link, passed as one argv element to the OS opener without a shell. It is never automatic. `BROWSER` may name one absolute executable, not a command template. Loading/stale views cannot open links, and rendered Markdown does not bypass this checked opener.
 - Refresh reloads the complete list and selected detail/comment history, retaining the selected identity when it remains present. Failures never present retained data as fresh.
