@@ -13,6 +13,7 @@ Inspect Docker services, containers, logs and stats in a native Rex pane with un
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable containers
 rexdeck status containers
 ```
@@ -52,7 +53,7 @@ Controls exercised in the private Rex qualification lab:
 
 ### Pane layout
 
-Use `rexdeck enable containers --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+Use `rexdeck enable containers --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 50%.
 
 ### lazydocker settings
 

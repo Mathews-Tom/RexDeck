@@ -14,6 +14,7 @@ pomo loads config **even for `--version`**. The enable probe runs in your shell'
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable focus
 rexdeck status focus
 # From a terminal inside Rex, in a directory you trust:
@@ -45,7 +46,7 @@ Start the timer, pause when needed, and choose whether to begin the next session
 
 ### Pane layout
 
-`rexdeck enable focus --placement right|left|below|above --size 20-80`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable focus --placement below --size 35`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### pomo settings
 

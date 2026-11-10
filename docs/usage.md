@@ -18,6 +18,8 @@ uv tool install "rexdeck @ git+https://github.com/Mathews-Tom/RexDeck@<full-comm
 
 The installed command works from any directory. The package includes the shared native action and Python launcher for every integration; no shell wrapper, `RD_*` variables or developer checkout is needed. Make sure the tool executable directory reported by `uv` is on `PATH`.
 
+Upgrade a PyPI installation with `uv tool upgrade rexdeck`. A Git-pinned installation keeps its source constraint, so rerun `uv tool install` with the new commit instead.
+
 Installing or upgrading replaces only the RexDeck package. If an upgrade changes the bundled host, `status` reports a refresh `fault` for previously enabled integrations; run `rexdeck enable <id>` for each one. A missing selected tool reports `missing-dependency` instead: restore that tool first, then rerun `rexdeck enable <id>`. Integrations you never enabled stay unselected.
 
 ## Set up once
@@ -69,7 +71,7 @@ Inspection faults stay visible alongside healthy sibling rows and return a nonze
 | `disabled` | Not selected, or turned off |
 | `ready` | Its native action is registered in the running Rex. This says nothing about whether the tool is currently open |
 | `missing-dependency` | An applied integration's tool is not on the current `PATH`; `enabled` shows whether it is turned on. Make the tool available (reinstall it yourself if it was removed), then rerun `status`, or `rexdeck enable <id>` if its path changed |
-| `conflict` | The Rex configuration, the RexDeck loader or the registered action no longer matches RexDeck's ownership record (for example, an unowned or edited loader). The mismatches are listed in `conflicts`, and nothing is changed |
+| `conflict` | The Rex configuration, the RexDeck loader or the registered action no longer matches RexDeck's ownership record (for example, an unowned or edited loader). The mismatches are listed in `conflicts`. Changed or unowned artifacts are kept for your judgment; unchanged owned state may still be removed |
 | `fault` | An ownership, refresh or registration problem, with an `error` |
 | `not-configured` | Shown by `plugins` before setup |
 | `failed` | A command-level error, such as no saved target or an unknown or old receipt for `status <id>` |
@@ -89,4 +91,4 @@ See the [attention guide](../plugins/attention/README.md) for observe, list, jum
 
 ## Uninstall or reset
 
-Run `rexdeck disable <id>` for every applied integration before uninstalling RexDeck or deliberately resetting a saved target. That includes integrations reported as disabled after a failed enable. `disable` and package uninstall leave upstream tools and their configuration installed.
+Run `rexdeck disable <id>` for every applied integration before uninstalling RexDeck or deliberately resetting a saved target. That includes integrations reported as disabled after a failed enable. Then uninstall the package with `uv tool uninstall rexdeck`. `disable` and package uninstall leave upstream tools and their configuration installed. To point RexDeck at a different Rex target instead, see [Retarget a saved setup](configuration.md#retarget-a-saved-setup).

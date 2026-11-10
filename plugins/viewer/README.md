@@ -1,12 +1,8 @@
 # Viewer
 
-Preview an explicitly selected **PDF, JPG, PNG or SVG** inside a native Rex pane with unmodified [Yazi 26.9.1](https://github.com/sxyazi/yazi/releases/tag/v26.9.1). This independently selectable integration reuses Files' upstream tool, not a RexDeck graphics renderer, and does not open a native GUI automatically.
+Preview an explicitly selected **PDF, JPG, PNG or SVG** inside a native Rex pane with unmodified [Yazi 26.9.1](https://github.com/sxyazi/yazi/releases/tag/v26.9.1). This independently selectable integration reuses Files' upstream tool, not a RexDeck graphics renderer, and does not open a native GUI automatically. Quitting returns focus to the exact invoking terminal.
 
 [Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
-
-
-
-Quitting returns focus to the exact invoking terminal.
 
 ## Requirements
 
@@ -17,6 +13,7 @@ Quitting returns focus to the exact invoking terminal.
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable viewer
 rexdeck status viewer
 # Optional larger preview pane:
@@ -55,7 +52,7 @@ For SVG source, press `:` in Yazi, type `less -L -+F -- %h` and press Enter **on
 
 ### Pane layout
 
-`rexdeck enable viewer --placement right|left|below|above --size 20-80` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable viewer --placement below --size 35` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### Yazi settings
 

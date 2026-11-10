@@ -13,6 +13,7 @@ Browse Redis keys, TTLs, values and server metrics in a native Rex pane with unm
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable redis
 rexdeck status redis
 ```
@@ -49,7 +50,7 @@ Controls exercised against a disposable, password-free loopback Redis server:
 
 ### Pane layout
 
-Use `rexdeck enable redis --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+Use `rexdeck enable redis --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 50%.
 
 ### redis-tui settings
 

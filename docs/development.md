@@ -65,7 +65,7 @@ To host another installed interactive terminal tool, add two files, and do not c
 
 [`src/rexdeck/integrations.py`](../src/rexdeck/integrations.py) discovers the [catalogue modules](../src/rexdeck/catalogue/) and lists new plugins after the original seven, ordered by id. The descriptor declares:
 
-- **Identity and dependencies:** a unique lowercase `id` and a plain-word `title`, plus:
+- **Identity and dependencies:** a unique `id` matching `[a-z][a-z0-9]*` (`attention` is reserved) and a plain-word `title`, plus:
   - the executable name, resolved from absolute `PATH` entries
   - qualified versions, with the version-report pattern
   - the release URL and upstream license
@@ -80,7 +80,7 @@ To host another installed interactive terminal tool, add two files, and do not c
   - `github-account`: an explicit verified GitHub account on github.com for owned views, without a repository or worktree.
   - `github-worktree`: reuses Git discovery and also freezes an explicit host, repository and account choice.
     - Ambiguous remotes require `remote` or a fully qualified `repo`, and `account` must match supported existing gh authentication.
-    - For gh-dash, it passes process-local `GH_HOST`/`GH_REPO` plus a temporary repository-section config overlay.
+    - Without descriptor `args`, the launcher always passes gh-dash's `--config` overlay with process-local `GH_HOST`/`GH_REPO`, so this branch supports gh-dash only.
     - An owned view (descriptor `args` before the captured selection) runs after the same verification with `GH_HOST`/`GH_REPO`/`GH_PATH` and `REXDECK_GITHUB_ACCOUNT`, and gets no overlay.
 
   File contexts pass the validated target as the tool's final argument. A cwd never stands in for a selected file, account or agent identity.

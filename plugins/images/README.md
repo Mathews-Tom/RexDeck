@@ -13,6 +13,7 @@ Browse public OCI image tags, digests and platforms with a RexDeck-authored Text
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable images
 rexdeck status images
 ```
@@ -21,13 +22,13 @@ Open **RexDeck Images** from Rex's command palette, or run `rex do rexdeck_image
 
 ## Use
 
-Tags are fetchedone page at a time (30 requested). The reference field has focus on startup and after `e`, where letters are typed as text: press Escape to focus the tag table before using the letter shortcuts. From the table, use arrows and Enter to select a tag, `n`/`p` for pages, `r` to refresh the current page and selected manifest, `e` to edit the reference, and `q` to return to the exact invoking terminal. The detail area scrolls. Source and fetched-at times are shown separately for tags and manifest; refresh is explicit, never polling. Loading, empty, stale, permission, rate-limit and network states remain visible. A failed refresh preserves the last successful data as stale; `r` retries.
+Tags are fetched one page at a time (30 requested). The reference field has focus on startup and after `e`, where letters are typed as text: press Escape to focus the tag table before using the letter shortcuts. From the table, use arrows and Enter to select a tag, `n`/`p` for pages, `r` to refresh the current page and selected manifest, `e` to edit the reference, and `q` to return to the exact invoking terminal. The detail area scrolls. Source and fetched-at times are shown separately for tags and manifest; refresh is explicit, never polling. Loading, empty, stale, permission, rate-limit and network states remain visible. A failed refresh preserves the last successful data as stale; `r` retries.
 
 ## Configuration
 
 ### Pane layout
 
-`rexdeck enable images --placement right|left|below|above --size 20-80` sets placement and size; default: right, 60%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable images --placement below --size 35` sets placement and size; default: right, 60%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### Images view settings
 
@@ -43,7 +44,7 @@ Only `/v2/<repository>/tags/list` and `/manifests/<tag>` metadata is fetched. No
 
 `o` opens a validated exact Docker Hub repository page with `/usr/bin/open` argv (`https://hub.docker.com/_/nginx` for library images, `/r/<namespace>/<name>/tags` otherwise). GHCR image coordinates do not identify the owning GitHub source repository, so the view refuses to guess a package web URL. Other registries likewise refuse when there is no well-defined mapping. No automatic browser opens.
 
- ### Protocol design check
+### Protocol design check
 
 GO: [OCI Distribution v1.1.1](https://github.com/opencontainers/distribution-spec/blob/v1.1.1/spec.md) provides tag pagination (`n`, `last`, `Link: rel="next"`) and manifest metadata. Live Docker Hub `library/nginx` and GHCR `astral-sh/uv` reads verified the 401 authentication challenge, anonymous token GET, tags, and multi-platform index manifests. GET is used rather than HEAD because platforms and fallback digest computation require the body. No blob request is necessary. The implementation validates same-origin pagination and printable, canonical token realm URLs and pull scope before issuing requests. Redirects are not followed; duplicate tag names, malformed and unexpected responses fail visibly.
 

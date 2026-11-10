@@ -21,6 +21,7 @@ Missing Go, missing Dashbrew or an unqualified module version refuses enable and
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable dashboard
 rexdeck status dashboard
 ```
@@ -85,7 +86,7 @@ Native-lab qualification rendered a local clock and public GitHub GET, refreshed
 
 ### Pane layout
 
-Use `rexdeck enable dashboard --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+Use `rexdeck enable dashboard --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 50%.
 
 ### Dashbrew settings
 
@@ -94,8 +95,6 @@ Edit your selected JSON board with `$EDITOR /absolute/boards/trusted.json`, then
 For custom themes, edit JSON files in `DASHBREW_THEMES_DIR` or `${XDG_CONFIG_HOME:-$HOME/.config}/dashbrew/themes`; create the directory yourself if needed. See [theme loading](https://github.com/rasjonell/dashbrew/blob/v1.2.0/internal/config/themes.go). RexDeck passes only `-c /absolute/selected.json`, with cwd set to that file’s parent, no theme flag, environment override or configuration overlay.
 
 RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
-
-
 
 ## Capabilities and limits
 

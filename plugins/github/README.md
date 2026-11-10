@@ -1,12 +1,8 @@
 # GitHub
 
-Host unmodified [gh-dash 4.26.2](https://github.com/dlvhdr/gh-dash) in a native Rex pane for repository-scoped pull requests and issues. Local [Git](../git/README.md) remains independently selectable and unchanged.
+Host unmodified [gh-dash 4.26.2](https://github.com/dlvhdr/gh-dash) in a native Rex pane for repository-scoped pull requests and issues. Local [Git](../git/README.md) remains independently selectable and unchanged. Quitting returns focus to the exact invoking terminal.
 
 [Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
-
-
-
-Quitting returns focus to the exact invoking terminal.
 
 ## Requirements
 
@@ -46,7 +42,7 @@ The default split is right/50%; `rexdeck enable github --placement below --size 
 
 ### Pane layout
 
-`rexdeck enable github --placement right|left|below|above --size 20-80` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable github --placement below --size 35` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### gh-dash settings
 

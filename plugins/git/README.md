@@ -4,10 +4,6 @@ Launch unmodified [lazygit 0.66.2 / 0.66.3](https://github.com/jesseduffield/laz
 
 [Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-
-
-Quitting returns focus to the exact invoking terminal.
-
 ## Requirements
 
 - macOS arm64, existing Rex CLI/server (API revision 10 baseline, not an exact-version gate), Python 3.12+, and `uv`.
@@ -44,13 +40,13 @@ From the intended repository terminal, choose **RexDeck Git** in Rex's native pa
 
 Use upstream lazygit controls to inspect diffs, stage, commit, and perform other Git operations. Normal `q` returns to the exact captured terminal. Each deliberate launch is independent. If the origin has closed, focus restoration fails visibly for acknowledgement instead of selecting a replacement pane. Launch failures and nonzero tool exits are also visible.
 
-The lazygit pane opens to the right of the invoking terminal using half its space by default. Choose another side or share with `rexdeck enable git --placement below --size 40` (since 0.2.0); see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). The choice is saved with Git's ownership record and does not change Files, lazygit's configuration, or Git settings.
+The lazygit pane opens to the right of the invoking terminal using half its space by default. Choose another side or share with `rexdeck enable git --placement below --size 40` (since 0.2.0); see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. The choice is saved with Git's ownership record and does not change Files, lazygit's configuration, or Git settings.
 
 ## Configuration
 
 ### Pane layout
 
-`rexdeck enable git --placement right|left|below|above --size 20-80` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable git --placement below --size 35` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
 
 ### Lazygit settings
 

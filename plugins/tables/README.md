@@ -14,6 +14,7 @@ Explore one explicitly selected **CSV, TSV, JSON or JSONL file** in a native Rex
 Open **RexDeck Tables** from Rex's command palette, or invoke the native action with an explicit `file=` selection:
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable tables
 rexdeck status tables
 # From the invoking Rex terminal, explicitly select a file:
@@ -44,7 +45,7 @@ Sorting/selecting/frequency analysis does not itself save the source. Quit witho
 
 ### Pane layout
 
-`rexdeck enable tables --placement right|left|below|above --size 20-80` sets placement and size; default: right, 50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable tables --placement below --size 35` sets placement and size; default: right, 50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### VisiData settings
 

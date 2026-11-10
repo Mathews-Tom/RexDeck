@@ -13,6 +13,7 @@ Browse package dependencies, licenses and known advisories with a RexDeck-author
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable deps
 rexdeck status deps
 ```
@@ -29,7 +30,7 @@ Escape focuses the report; scroll with arrows/PageDown. `n`/`p` page dependency 
 
 ### Pane layout
 
-`rexdeck enable deps --placement right|left|below|above --size 20-80` sets placement and size; default: right, 60%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable deps --placement below --size 35` sets placement and size; default: right, 60%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### Dependencies view settings
 

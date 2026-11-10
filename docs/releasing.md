@@ -4,7 +4,13 @@
 
 Published versions are listed in [CHANGELOG.md](../CHANGELOG.md) and on [PyPI](https://pypi.org/project/rexdeck/). Each one's GitHub Release and PyPI files carry the same approved wheel/sdist hashes. Never rebuild, retag or republish a published version.
 
-A later release needs a separately named version target. Its release-preparation change updates the package version, and `<version>` below stands for that version. Local version metadata, a tag or a GitHub Release alone does not prove PyPI delivery.
+A later release needs a separately named version target. Its release-preparation change does three things before the candidate merges:
+
+- bumps the package version and runs `uv lock`
+- replaces the old version string in `.github/workflows/checks.yml` (wheel path, version assert, artifact name)
+- replaces it in `.github/workflows/publish.yml` (name, concurrency group, artifact name, tag ref, expected filenames, publish paths)
+
+Without these changes, CI still installs the old wheel and publishing expects the old artifact and tag. `<version>` below stands for the new version. Local version metadata, a tag or a GitHub Release alone does not prove PyPI delivery.
 
 The manual [`publish.yml`](../.github/workflows/publish.yml) workflow supports [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/) using [uv](https://docs.astral.sh/uv/guides/package/#publishing-your-package). No ordinary push, PR or tag publishes anything, and no rebuild happens at release time.
 

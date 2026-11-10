@@ -52,7 +52,7 @@ Loading, empty results, permission errors (403/404), rate limits (403/429), expi
 
 ### Pane layout
 
-`rexdeck enable actions --placement right|left|below|above --size 20-80` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable actions --placement below --size 35` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### Actions view and GitHub CLI settings
 

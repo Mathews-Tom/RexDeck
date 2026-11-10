@@ -13,13 +13,14 @@ Send HTTP requests and inspect responses in a native Rex pane with unmodified [S
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable http
 rexdeck status http
 ```
 
 Open **RexDeck HTTP** from Rex’s command palette, or `rex do rexdeck_http`.
 
-Choose **RexDeck HTTP** in the palette from a terminal in your collection directory. Placement follows the [shared convention](../../docs/configuration.md#pane-placement-and-size), initially right / 50%.
+Choose **RexDeck HTTP** in the palette from a terminal in your collection directory. Placement follows the [shared convention](../../docs/configuration.md#pane-placement-and-size) `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80., initially right / 50%.
 
 ## Use
 
@@ -46,7 +47,7 @@ Private qualification used an installed wheel outside the checkout, an isolated 
 
 ### Pane layout
 
-Use `rexdeck enable http --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+Use `rexdeck enable http --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
 
 ### Slumber settings
 

@@ -39,7 +39,7 @@ Select the account, read the current page, filter its reasons, and explicitly re
 
 ### Pane layout
 
-`rexdeck enable inbox --placement right|left|below|above --size 20-80`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable inbox --placement below --size 35`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### GitHub CLI settings
 

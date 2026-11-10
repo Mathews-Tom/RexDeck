@@ -23,7 +23,7 @@ rexdeck plugins            # list every integration, its state and qualified too
 rexdeck enable <id>        # turn on only what you need
 ```
 
-Install a hosted tool yourself before enabling it: RexDeck never installs Rex, Python, uv or upstream tools. Then open the integration from Rex's command palette as **RexDeck &lt;Title&gt;**, or run `rex do rexdeck_<id>` in a Rex terminal. Quit the tool or view to return focus to the invoking terminal.
+Install a hosted tool yourself before enabling it: RexDeck never installs Rex, Python, uv or upstream tools. Then open the integration from Rex's command palette as **RexDeck &lt;Title&gt;**, or run `rex do rexdeck_<id>` in a Rex terminal. Some integrations need arguments, such as `file=` for a selected file or `account=` for a GitHub account; each integration's guide lists them. Quit the tool or view to return focus to the invoking terminal.
 
 ## Documentation
 

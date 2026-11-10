@@ -12,6 +12,7 @@ Run unmodified [dekit 0.10.3](https://github.com/pvolok/dekit/releases/tag/v0.10
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable procs
 rexdeck status procs
 rexdeck plugins
@@ -67,7 +68,7 @@ In isolated 0.10.3 qualification, one detach after a narrow resize returned upst
 
 ### Pane layout
 
-Use `rexdeck enable procs --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 60%.
+Use `rexdeck enable procs --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 60%.
 
 ### dekit settings
 
@@ -76,8 +77,6 @@ Edit the explicitly selected project YAML with `$EDITOR /absolute/project/dekit.
 RexDeck passes `-C /absolute/project` rather than the YAML filename, adds no config overlay and never redirects upstream homes. It removes `REX_SESSION`, `REX_BLOCK`, `REX_CLIENT` and all `DEKIT_*` variables for the TUI, version check and runner probes, while preserving upstream XDG/runtime settings.
 
 RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
-
-
 
 ## Capabilities and limits
 

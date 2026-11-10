@@ -14,6 +14,7 @@ Query one explicitly selected **SQLite** database in a native Rex pane with unmo
 Open **RexDeck SQL** from Rex's command palette, or invoke the native action with an explicit `file=` selection:
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable sql
 rexdeck status sql
 rex do rexdeck_sql file="data/app.db"
@@ -38,7 +39,7 @@ These are Harlequin's own keys:
 
 ### Pane layout
 
-`rexdeck enable sql --placement right|left|below|above --size 20-80` sets placement and size; default: right, 50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable sql --placement below --size 35` sets placement and size; default: right, 50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### Harlequin settings
 

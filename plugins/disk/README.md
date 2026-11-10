@@ -15,6 +15,7 @@ RexDeck never installs, upgrades or removes dua. Missing or unqualified versions
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable disk
 rexdeck status disk
 # From a terminal in a directory you own inside Rex:
@@ -46,7 +47,7 @@ Default upstream bindings (an existing dua config can change them):
 
 ### Pane layout
 
-Use `rexdeck enable disk --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+Use `rexdeck enable disk --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 50%.
 
 ### dua settings
 
@@ -55,8 +56,6 @@ Edit the optional TOML with `$EDITOR "$HOME/Library/Application Support/dua-cli/
 RexDeck launches exactly `dua interactive`, without path arguments, key replay, snapshot flags, config overlays or `DUA_*` overrides. Inherited `DUA_*` settings remain effective.
 
 RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
-
-
 
 ## Capabilities and limits
 

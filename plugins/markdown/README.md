@@ -4,8 +4,6 @@ Read Markdown in a native Rex pane with unmodified [markdown-reader 1.35.4](http
 
 [Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-
-
 ## Requirements
 
 - macOS arm64, a running Rex server and RexDeck set up as described in the [root README](../../README.md#getting-started).
@@ -14,11 +12,12 @@ Read Markdown in a native Rex pane with unmodified [markdown-reader 1.35.4](http
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable markdown
 rexdeck status markdown
 ```
 
-Enabling Markdown changes nothing for Files or Git; each integration owns its own loader, module and receipt. Pane placement and size follow the shared convention, for example `rexdeck enable markdown --placement below --size 60`. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+Enabling Markdown changes nothing for Files or Git; each integration owns its own loader, module and receipt. Pane placement and size follow the shared convention, for example `rexdeck enable markdown --placement below --size 60`. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 Choose **RexDeck Markdown** from Rex’s command palette, or `rex do rexdeck_markdown` to browse the invoking directory; pass `file=PATH` to select a Markdown file or directory as described below.
 
@@ -41,7 +40,7 @@ Use markdown-reader's own keys. `Tab` switches between tree and viewer, `j`/`k`/
 
 ### Pane layout
 
-`rexdeck enable markdown --placement right|left|below|above --size 20-80` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable markdown --placement below --size 35` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
 
 ### markdown-reader settings
 
@@ -64,6 +63,8 @@ Qualified in a private Rex pane with markdown-reader 1.35.4:
 | Root README, Files and Git READMEs | none | Prose and tables render |
 
 Outside that corpus, state, class and ER diagrams also rendered. Unsupported types such as `zenuml`, and malformed blocks such as unknown diagram types or broken sequences, show their source with an explicit `[mermaid — figurehead render failed, showing source]` footer. A flowchart with unbalanced brackets can still be drawn literally, with the broken text as node labels, so the reader does not always validate Mermaid syntax. RexDeck does not claim full Mermaid-language coverage.
+
+### Filesystem access and privacy
 
 - **File writes:** the edit modes save Markdown in place.
 - **Reads:** the browsed directory tree. The reader stores its own `config.toml`, session state (open tabs, scroll positions and the full paths of opened documents) and update-check cache under `~/Library/Application Support/markdown-reader` and `~/Library/Caches/markdown-tui-explorer`.

@@ -89,7 +89,7 @@ Loading, stale and writing states disable inappropriate actions. Refresh is refu
 
 ### Pane layout
 
-`rexdeck enable clickup --placement right|left|below|above --size 20-80`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable clickup --placement below --size 35`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### ClickUp settings
 
@@ -101,7 +101,7 @@ Export an authorized personal token from your shell profile, for example `export
 
 ### Space and filter defaults
 
-Save a default space with `clickup select --space SPACE_ID` (after selecting the account/workspace/list), or use the **Space** toolbar/action-menu dialog. A saved space opens the aggregate view on the next launch. The dialog switches between the unchanged list desk and one selected space. Only a successful Space load updates the saved default space, and only when the pane still uses the saved account/workspace/list/credential reference; advanced pane-local selections never overwrite that saved scope. Filters and pane-local mode are not persisted. Use `clickup select --space ''` to clear the default and launch the list desk next time. Old selection files without `space` remain valid; unknown selection keys are refused.
+Save a default space with `rexdeck clickup select --space SPACE_ID` (after selecting the account/workspace/list), or use the **Space** toolbar/action-menu dialog. A saved space opens the aggregate view on the next launch. The dialog switches between the unchanged list desk and one selected space. Only a successful Space load updates the saved default space, and only when the pane still uses the saved account/workspace/list/credential reference; advanced pane-local selections never overwrite that saved scope. Filters and pane-local mode are not persisted. Use `rexdeck clickup select --space ''` to clear the default and launch the list desk next time. Old selection files without `space` remain valid; unknown selection keys are refused.
 
 Space mode starts with **assignee `me` AND updated within `14d`**. The account is verified through `/user` before its ID is sent as the assignee. The Space dialog accepts `me`, `any` or a numeric member ID and lookbacks `1d`, `7d`, `14d`, `30d`, `any`. These server filters reset every launch. The existing text/Mine/Closed controls further narrow the returned rows locally. Only Space mode adds a List column; list-mode columns and narrow-width allocation are unchanged.
 

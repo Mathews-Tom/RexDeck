@@ -12,11 +12,12 @@ Watch AI token usage, models, sessions and projects in a native Rex pane with un
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable usage
 rexdeck status usage
 ```
 
-Usage is independent of the other integrations. Pane placement and size follow the shared convention, for example `rexdeck enable usage --placement below --size 60`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+Usage is independent of the other integrations. Pane placement and size follow the shared convention, for example `rexdeck enable usage --placement below --size 60`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 Open **RexDeck Usage** from Rex’s command palette, or `rex do rexdeck_usage`. No file or account argument is required. The invoking directory is only the pane cwd; missing, remote or invalid directory context is refused.
 
@@ -44,7 +45,7 @@ The pane always runs online. Offline mode is available only by running `tokscale
 
 ### Pane layout
 
-`rexdeck enable usage --placement right|left|below|above --size 20-80`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable usage --placement below --size 35`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
 
 ### tokscale settings
 

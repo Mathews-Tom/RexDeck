@@ -12,6 +12,7 @@ Open the [bottom 0.15.0](https://github.com/ClementTsang/bottom/releases/tag/0.1
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable system
 rexdeck status system
 rex do rexdeck_system
@@ -40,11 +41,13 @@ These are bottom's own keys, unchanged:
 
 ### Pane layout
 
-Use `rexdeck enable system --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+Use `rexdeck enable system --placement below --size 35` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80. Default: right, 50%.
 
 ### bottom settings
 
-Edit the TOML file with `$EDITOR "${XDG_CONFIG_HOME:-$HOME/.config}/bottom/bottom.toml"` after its first run creates it. Widget layout, refresh rate, display options, themes and process-command display are upstream settings; see the [bottom configuration guide](https://clementtsang.github.io/bottom/0.15.0/configuration/config-file/). RexDeck launches exactly `btm --read_only`, so signalling remains disabled regardless of saved preferences; it passes no config-path override or overlay.
+On macOS, bottom 0.15.0 first uses `~/.config/bottom/bottom.toml` if that file exists. Otherwise, when `XDG_CONFIG_HOME` is set, it uses `~/Library/Application Support/bottom/bottom.toml` if that file exists, or `$XDG_CONFIG_HOME/bottom/bottom.toml` otherwise. With `XDG_CONFIG_HOME` unset, it uses `~/Library/Application Support/bottom/bottom.toml`; this is also the first-run default location on macOS when neither an existing config nor an XDG override applies. See the [bottom configuration guide](https://bottom.pages.dev/stable/configuration/config-file/).
+
+After the first run, edit the TOML file selected by that order. For the default macOS location, use `$EDITOR "$HOME/Library/Application Support/bottom/bottom.toml"`; if an existing `~/.config/bottom/bottom.toml` or an XDG-selected file takes precedence, edit that file instead. Widget layout, refresh rate, display options, themes and process-command display are upstream settings. RexDeck launches exactly `btm --read_only`, so signalling remains disabled regardless of saved preferences; it passes no config-path override or overlay.
 
 RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
 
@@ -54,7 +57,7 @@ Qualification viewed the CPU, memory and process widgets, sorted processes by me
 
 - `--read_only` disables stopping or signalling processes; `dd` did nothing in qualification. Navigation, sorting, search and quit stay available. RexDeck never passes `--disable_keys`, which would also disable quit.
 - Process lists show every visible process's name and, with `--process_command` or its toggle, full command lines. Command lines can contain secrets.
-- On first run bottom writes a default `bottom.toml` under the XDG config home (`~/.config/bottom/` by default) if none exists, and reads it afterwards. No network access.
+- If its selected config file does not exist, bottom writes a default `bottom.toml` there on first run and reads it afterwards; see the macOS selection order above. No network access.
 
 ## Disable
 

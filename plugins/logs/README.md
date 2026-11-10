@@ -14,6 +14,7 @@ Explore explicitly selected local logs in a native Rex pane with unmodified [lna
 Open **RexDeck Logs** from Rex's command palette, or invoke the native action with an explicit `file=` selection:
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable logs
 rexdeck status logs
 # Inside Rex, explicitly select a log or a directory containing plain logs:
@@ -45,7 +46,7 @@ These are upstream lnav controls, unchanged:
 
 ### Pane layout
 
-`rexdeck enable logs --placement right|left|below|above --size 20-80` sets placement and size; default: right, 50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable logs --placement below --size 35` sets placement and size; default: right, 50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### lnav settings
 

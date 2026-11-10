@@ -12,6 +12,7 @@ Present one explicitly selected **`.md` deck** in a native Rex pane with unmodif
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable slides
 rexdeck status slides
 # From a terminal inside Rex:
@@ -40,7 +41,7 @@ Qualification navigated forward/back through a four-slide deck, displayed a Pyth
 
 ### Pane layout
 
-`rexdeck enable slides --placement right|left|below|above --size 20-80` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable slides --placement below --size 35` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### presenterm settings
 

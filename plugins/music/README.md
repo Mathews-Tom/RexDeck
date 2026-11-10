@@ -13,6 +13,7 @@ Browse playlists and control Spotify playback in a native Rex pane with unmodifi
 ## Enable and open
 
 ```sh
+rexdeck setup   # once, if not already done
 rexdeck enable music
 rexdeck status music
 ```
@@ -57,7 +58,7 @@ Default controls from the [pinned upstream command table](https://github.com/aom
 
 ### Pane layout
 
-`rexdeck enable music --placement right|left|below|above --size 20-80`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+`rexdeck enable music --placement below --size 35`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). `--placement` accepts `right`, `left`, `below` or `above`; `--size` is a whole percentage from 20 to 80.
 
 ### spotify_player settings
 
