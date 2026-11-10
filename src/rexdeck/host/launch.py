@@ -537,26 +537,41 @@ def run(
         )
         checked = resolve(context, cwd, cwd if file_context else None)
         if context == "github-worktree":
-            if len(args) != 1:
+            # The captured selection is always last; anything before it is an owned
+            # view's own argv. Without one, the tool is gh-dash with its overlay.
+            if not args:
                 raise ValueError(
                     "GitHub requires its captured repository/account selection"
                 )
-            selection = github_selection(checked, args[0])
+            *view, raw = args
+            selection = github_selection(checked, raw)
             environment = github_environment(selection, checked)
-            with (
-                cleanup_signals(),
-                tempfile.TemporaryDirectory(prefix="rexdeck-github-") as temporary,
-            ):
-                config = Path(temporary) / "config.yml"
-                config.write_text(
-                    json.dumps(github_config(checked, selection)), encoding="utf-8"
-                )
-                exit_code = subprocess.run(
-                    [tool, "--config", str(config)],
-                    cwd=checked,
-                    env=environment,
-                    check=False,
-                ).returncode
+            if view:
+                # Owned views read the verified host/repository from GH_HOST/GH_REPO
+                # and call `gh` at GH_PATH; the account is shown, never switched.
+                environment["REXDECK_GITHUB_ACCOUNT"] = selection["account"]
+                # Views parse gh output; forced colour would corrupt captured JSON.
+                for forced in ("GH_FORCE_TTY", "CLICOLOR_FORCE"):
+                    environment.pop(forced, None)
+                with cleanup_signals():
+                    exit_code = subprocess.run(
+                        [tool, *view], cwd=checked, env=environment, check=False
+                    ).returncode
+            else:
+                with (
+                    cleanup_signals(),
+                    tempfile.TemporaryDirectory(prefix="rexdeck-github-") as temporary,
+                ):
+                    config = Path(temporary) / "config.yml"
+                    config.write_text(
+                        json.dumps(github_config(checked, selection)), encoding="utf-8"
+                    )
+                    exit_code = subprocess.run(
+                        [tool, "--config", str(config)],
+                        cwd=checked,
+                        env=environment,
+                        check=False,
+                    ).returncode
         else:
             target = (checked,) if file_context else ()
             # Inherit the pane TTY/configuration, but never search its cwd for helpers.

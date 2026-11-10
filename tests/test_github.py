@@ -387,3 +387,83 @@ raise SystemExit(launch.run(
             if process.poll() is None:
                 process.kill()
                 process.communicate(timeout=10)
+
+
+def test_owned_view_runs_its_argv_with_verified_identity_and_no_overlay(
+    repo: Path, helpers: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Arguments before the selection are an owned view's argv, not gh-dash's."""
+    _tool, marker = helpers
+    view = repo.parent / "bin" / "view"
+    view.write_text(f"""#!{sys.executable}
+import json, os, pathlib, sys
+pathlib.Path({str(marker)!r}).write_text(json.dumps({{
+    "argv": sys.argv[1:], "host": os.environ["GH_HOST"],
+    "repo": os.environ["GH_REPO"], "gh": os.environ["GH_PATH"],
+    "account": os.environ["REXDECK_GITHUB_ACCOUNT"],
+    "prompt": os.environ["GH_PROMPT_DISABLED"], "cwd": os.getcwd(),
+}}))
+""")
+    view.chmod(0o755)
+    monkeypatch.setattr(launch, "restore_focus", lambda *args: None)
+    assert (
+        launch.run(
+            "github-worktree",
+            "Actions",
+            "Actions view",
+            str(view),
+            "/rex",
+            "unix:///private.sock",
+            "session",
+            "origin",
+            str(repo),
+            args=(
+                "-I",
+                "-m",
+                "rexdeck.actions",
+                choice(repo="github.com/owner/project"),
+            ),
+        )
+        == 0
+    )
+    seen = json.loads(marker.read_text())
+    assert seen["argv"] == ["-I", "-m", "rexdeck.actions"]
+    assert (seen["host"], seen["repo"], seen["account"]) == (
+        "github.com",
+        "github.com/owner/project",
+        "reader",
+    )
+    assert Path(seen["gh"]).name == "gh" and seen["prompt"] == "1"
+    assert seen["cwd"] == str(repo.resolve())
+
+
+def test_owned_view_never_starts_when_account_verification_fails(
+    repo: Path,
+    helpers: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _tool, marker = helpers
+    view = repo.parent / "bin" / "view"
+    view.write_text(
+        f"#!{sys.executable}\nimport pathlib\n"
+        f"pathlib.Path({str(marker)!r}).write_text('started')\n"
+    )
+    view.chmod(0o755)
+    monkeypatch.setenv("TEST_LOGIN", "different")
+    monkeypatch.setattr(launch, "restore_focus", lambda *args: None)
+    monkeypatch.setattr(launch, "acknowledge", lambda: None)
+    code = launch.run(
+        "github-worktree",
+        "Actions",
+        "Actions view",
+        str(view),
+        "/rex",
+        "unix:///private.sock",
+        "session",
+        "origin",
+        str(repo),
+        args=("-I", "-m", "rexdeck.actions", choice(repo="github.com/owner/project")),
+    )
+    assert code != 0 and "account mismatch" in capsys.readouterr().err
+    assert not marker.exists()
