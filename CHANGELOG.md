@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.6.2 — 2026-11-11
 
-Upgrading: the shared host changed, so `rexdeck plugins` reports every enabled integration as `outdated` with one `rexdeck enable …` command that refreshes them all.
+Upgrading: the shared host changed, so run `rexdeck enable <id>` for every enabled integration after installing 0.6.2. `rexdeck plugins` reports each of them as `outdated` and prints one `rexdeck enable …` command that refreshes them all.
 
 ### Fixes
 
