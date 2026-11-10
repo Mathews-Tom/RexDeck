@@ -36,4 +36,10 @@ INTEGRATION = Integration(
         "config/cache overrides or daemon; directory is only the pane cwd",
     ),
     default_layout=Layout("right", 50),
+    enable_notice=(
+        "Music needs a Spotify Premium account and a one-time Spotify sign-in; on a "
+        "fresh cache, run the two-stage sign-in from "
+        "https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/music/README.md "
+        "before opening it."
+    ),
 )

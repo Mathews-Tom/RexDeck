@@ -9,16 +9,18 @@ import unicodedata
 import urllib.parse
 from collections.abc import Mapping
 
-_PROBLEMS = {"conflict", "failed", "fault", "missing-dependency"}
+_PROBLEMS = {"conflict", "failed", "fault", "missing-dependency", "outdated"}
 _COLORS = {
     "ready": "32",
     "disabled": "2",
     "not-configured": "2",
     "conflict": "33",
     "missing-dependency": "33",
+    "outdated": "33",
     "fault": "31",
     "failed": "31",
 }
+_ENABLE = "rexdeck enable "
 
 
 def _plain(value: object) -> str:
@@ -33,6 +35,27 @@ def _plain(value: object) -> str:
 def _paint(text: str, state: str, color: bool) -> str:
     code = _COLORS.get(state)
     return f"\033[{code}m{text}\033[0m" if color and code else text
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    """Indented paragraph whose paths and `quoted commands` stay on one line."""
+    # textwrap breaks only at ASCII whitespace, so a no-break space holds a
+    # backtick-quoted command together until it is restored after wrapping.
+    joined = "`".join(
+        part.replace(" ", "\xa0") if index % 2 else part
+        for index, part in enumerate(text.split("`"))
+    )
+    return [
+        line.replace("\xa0", " ")
+        for line in textwrap.wrap(
+            joined,
+            width,
+            initial_indent="    ",
+            subsequent_indent="    ",
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+    ]
 
 
 def _tool(row: Mapping[str, object]) -> str:
@@ -105,45 +128,34 @@ def render(
     lines.extend(format_row(cells, cells[1]) for cells in table)
 
     wrap = max(40, available - 4)
-    # One shared cause (for example Rex missing from PATH) is listed once.
-    grouped: dict[str, list[str]] = {}
+    # One shared cause (for example Rex missing from PATH) is listed once, and
+    # per-plugin enable fixes for that cause collapse into one command.
+    grouped: dict[str, tuple[list[str], list[str]]] = {}
     for name, row in rows.items():
         if row.get("state") in _PROBLEMS and row.get("error"):
-            grouped.setdefault(_plain(row["error"]), []).append(name)
+            names, fixes = grouped.setdefault(_plain(row["error"]), ([], []))
+            names.append(name)
+            if row.get("fix"):
+                fixes.append(_plain(row["fix"]))
         conflicts = row.get("conflicts")
         if isinstance(conflicts, list) and conflicts:
             message = "conflicts: " + "; ".join(_plain(item) for item in conflicts)
-            grouped.setdefault(message, []).append(name)
+            grouped.setdefault(message, ([], []))[0].append(name)
     problems: list[str] = []
-    for message, names in grouped.items():
+    for message, (names, fixes) in grouped.items():
         problems.append(f"  {', '.join(names)}:")
-        problems.extend(
-            textwrap.wrap(
-                message,
-                wrap,
-                initial_indent="    ",
-                subsequent_indent="    ",
-                # Paths and commands in fixes must stay copyable in one piece.
-                break_long_words=False,
-                break_on_hyphens=False,
-            )
-        )
+        problems.extend(_wrap(message, wrap))
+        if fixes and all(fix.startswith(_ENABLE) for fix in fixes):
+            fixes = [_ENABLE + " ".join(fix.removeprefix(_ENABLE) for fix in fixes)]
+        # A fix command is never wrapped, so it can be copied as one line.
+        problems.extend(f"    Fix: {fix}" for fix in dict.fromkeys(fixes))
     if problems:
         lines.extend(["", "Needs attention:", *problems])
     notices: list[str] = []
     for name, row in rows.items():
         if row.get("notice"):
             notices.append(f"  {name}:")
-            notices.extend(
-                textwrap.wrap(
-                    _plain(row["notice"]),
-                    wrap,
-                    initial_indent="    ",
-                    subsequent_indent="    ",
-                    break_long_words=False,
-                    break_on_hyphens=False,
-                )
-            )
+            notices.extend(_wrap(_plain(row["notice"]), wrap))
     if notices:
         lines.extend(["", "Next steps:", *notices])
 

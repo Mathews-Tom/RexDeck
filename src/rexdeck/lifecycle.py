@@ -223,6 +223,19 @@ class MissingDependency(RuntimeError):
     """A selected upstream executable is absent; only the owner can install it."""
 
 
+class Outdated(RuntimeError):
+    """An applied integration predates the installed host or its tool paths moved."""
+
+    REASON = "Enabled before a RexDeck upgrade or a tool path change"
+
+    def __init__(self, plugin: str) -> None:
+        self.fix = f"rexdeck enable {plugin}"
+        super().__init__(
+            f"Owned {plugin} source, launcher or tool paths no longer match the "
+            f"installed RexDeck; run {self.fix} to refresh them"
+        )
+
+
 def _executable(name: str) -> str:
     """Resolve trusted absolute PATH entries and explain external prerequisites."""
     search_path = os.pathsep.join(
@@ -833,10 +846,7 @@ def _current_bundle(setup: Setup, paths: _Paths, receipt: dict[str, object]) -> 
         )
         != receipt["module_sha256"]
     ):
-        raise RuntimeError(
-            f"Canonical {setup.plugin} source, launcher or tool paths changed; "
-            f"run rexdeck enable {setup.plugin} to refresh the owned integration"
-        )
+        raise Outdated(setup.plugin)
 
 
 @contextmanager
@@ -1297,6 +1307,27 @@ def status(setup: Setup) -> dict[str, object]:
             "layout": _layout(setup, receipt).document(),
             "conflicts": receipt["conflicts"] if receipt else [],
             "error": str(missing),
+        }
+    except Outdated as stale:
+        enabled = bool(receipt and receipt["enabled"])
+        try:
+            # Staleness must not hide a registration fault behind it either.
+            _expect_action(setup, enabled)
+        except RuntimeError as exc:
+            return {
+                "state": "fault",
+                "server": setup.server,
+                "error": f"{exc}; also {stale}",
+            }
+        return {
+            "state": "outdated",
+            "server": setup.server,
+            "applied": True,
+            "enabled": enabled,
+            "layout": _layout(setup, receipt).document(),
+            "conflicts": receipt["conflicts"] if receipt else [],
+            "error": Outdated.REASON,
+            "fix": stale.fix,
         }
     except RuntimeError as exc:
         return {"state": "fault", "server": setup.server, "error": str(exc)}

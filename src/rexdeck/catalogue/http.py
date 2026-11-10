@@ -38,4 +38,9 @@ INTEGRATION = Integration(
         "RexDeck passes no arguments and enables no remote-control feature",
     ),
     default_layout=Layout("right", 50),
+    enable_notice=(
+        "HTTP needs a Slumber collection: open it from a directory that contains "
+        "slumber.yml (or slumber.yaml, .slumber.yml, .slumber.yaml), or from one "
+        "of its subdirectories."
+    ),
 )
