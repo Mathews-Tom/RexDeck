@@ -3,7 +3,7 @@
 -- shell-less argv, configured split layout and exact-origin return by the launcher.
 local contexts = {directory = true, ['git-worktree'] = true, document = true,
   ['github-worktree'] = true, media = true, ['selected-file'] = true,
-  ['dekit-config'] = true}
+  ['dekit-config'] = true, ['github-account'] = true}
 local function nonempty(value)
   return type(value) == 'string' and value ~= '' and not value:find('%z')
 end
@@ -72,6 +72,7 @@ return function(opts)
   if opts.context == 'dekit-config' then wanted = 'trusted dekit.yaml' end
   local document = opts.context == 'document' or opts.context == 'media' or wanted ~= nil
   local github = opts.context == 'github-worktree'
+  local github_account = opts.context == 'github-account'
 
   rex.action{
     name = 'rexdeck_' .. opts.plugin,
@@ -80,7 +81,8 @@ return function(opts)
     description = opts.description,
     keywords = opts.keywords,
     args = document and {file = 'string?'}
-      or (github and {repo = 'string?', remote = 'string?', account = 'string?'} or nil),
+      or (github and {repo = 'string?', remote = 'string?', account = 'string?'}
+      or (github_account and {account = 'string?', host = 'string?'} or nil)),
     run = function(ctx, action_args)
       local selected = nil
       if not document and type(action_args) == 'table' and action_args.file ~= nil then
@@ -104,6 +106,29 @@ return function(opts)
             if not nonempty(value) then error(title .. ' requires a nonempty ' .. key, 0) end
             choice[key] = value
           end
+        end
+        if not nonempty(choice.account) then
+          error(title .. ' requires account=LOGIN matching existing gh authentication', 0)
+        end
+        selected = rex.json.encode(choice)
+      end
+      if github_account then
+        local choice = {}
+        if type(action_args) == 'table' and (action_args.repo ~= nil or action_args.remote ~= nil) then
+          error(title .. ' accepts only account and host, not repository selections', 0)
+        end
+        for _, key in ipairs({'account', 'host'}) do
+          local value = type(action_args) == 'table' and action_args[key] or nil
+          if value ~= nil then
+            if not nonempty(value) then error(title .. ' requires a nonempty ' .. key, 0) end
+            choice[key] = value
+          end
+        end
+        if choice.host ~= nil then
+          if choice.host:lower() ~= 'github.com' then
+            error(title .. ' supports only host=github.com; Enterprise is not qualified', 0)
+          end
+          choice.host = choice.host:lower()
         end
         if not nonempty(choice.account) then
           error(title .. ' requires account=LOGIN matching existing gh authentication', 0)
@@ -151,7 +176,7 @@ return function(opts)
         opts.tool_label, paths[opts.tool], paths.rex, opts.server, session, origin,
         decoded.target}
       for index = 1, #args do command[#command + 1] = args[index] end
-      if github then
+      if github or github_account then
         if not nonempty(decoded.selection) then
           error(title .. ' did not receive a validated repository/account selection', 0)
         end
