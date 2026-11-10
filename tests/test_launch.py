@@ -749,6 +749,34 @@ def test_selected_file_refuses_before_launch(
     assert message in result.stderr
 
 
+@pytest.mark.parametrize(
+    "name", ["x[1]/app.json", "logs*", "a?.json", "a\\b.json", "uri", "link"]
+)
+def test_selected_file_refuses_glob_metacharacters(tmp_path: Path, name: str) -> None:
+    """A tool that globs its arguments must never receive a selection it could widen."""
+    (tmp_path / "x1").mkdir()
+    (tmp_path / "x1" / "app.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "ab.json").write_text("{}", encoding="utf-8")
+    if name in ("uri", "link"):
+        target = tmp_path / "star*.json"
+        target.write_text("{}", encoding="utf-8")
+        if name == "uri":
+            selected = target.as_uri().replace("*", "%2A")
+        else:
+            (tmp_path / "plain.json").symlink_to(target)
+            selected = "plain.json"
+    else:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if name.endswith(".json"):
+            target.write_text("{}", encoding="utf-8")
+        else:
+            target.mkdir()
+        selected = name
+    with pytest.raises(ValueError, match=r"cannot contain \*, \?, \[ or \\ "):
+        launch.resolve("selected-file:.json,/", str(tmp_path), selected)
+
+
 def test_selected_file_refusal_escapes_terminal_control_characters(
     tmp_path: Path,
 ) -> None:

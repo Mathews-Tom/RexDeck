@@ -16,7 +16,7 @@ rexdeck status json
 rex do rexdeck_json file="data/response.json"
 ```
 
-The `file` argument is required. Invoking the action without it, or with a missing path, a directory or a file that does not end in `.json` (case-insensitive), fails before a pane opens with a visible message. Absolute paths, local `file://` URIs and paths relative to the invoking terminal are accepted. A symlink is judged by its target's suffix. The resolved path reaches jless as one absolute argument after `--json`, so the file is always parsed as JSON, never as YAML. The pane opens in the file's directory.
+The `file` argument is required. Invoking the action without it, or with a missing path, a directory, a file that does not end in `.json` (case-insensitive) or a path containing `*`, `?`, `[` or `\`, fails before a pane opens with a visible message. Absolute paths, local `file://` URIs and paths relative to the invoking terminal are accepted. A symlink is judged by its target's suffix. The resolved path reaches jless as one absolute argument after `--json`, so the file is always parsed as JSON, never as YAML. The pane opens in the file's directory.
 
 ## Controls
 
