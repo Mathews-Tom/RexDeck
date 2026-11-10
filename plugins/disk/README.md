@@ -2,15 +2,17 @@
 
 Explore the invoking terminal's directory in a native Rex pane with unmodified [dua-cli 3.0.1](https://github.com/Byron/dua-cli/releases/tag/v3.0.1) (`dua interactive`). Quit to return focus to the exact invoking terminal.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64 and the qualified Rex server.
 - Owner-installed **dua 3.0.1** on a trusted absolute PATH. On macOS, install from source with an existing Rust toolchain: run `cargo install dua-cli --version 3.0.1 --locked` yourself, or build the tagged v3.0.1 source. The v3.0.1 release is a Linux-only build fix and provides no Apple binary download. Verify `dua --version` prints `dua 3.0.1`.
 - The Homebrew formula is **`dua-cli`**, not `dua`. At qualification Homebrew provides **3.0.0**, which is **not qualified**. `brew info dua-cli` is informational; do not assume `brew install dua-cli` supplies 3.0.1. Use the pinned Cargo/tagged-source route instead unless Homebrew later selects exactly the qualified version.
 
 RexDeck never installs, upgrades or removes dua. Missing or unqualified versions print owner-managed guidance and register nothing.
+
+## Enable and open
 
 ```sh
 rexdeck enable disk
@@ -19,9 +21,13 @@ rexdeck status disk
 rex do rexdeck_disk
 ```
 
+Open **RexDeck Disk** from Rex’s command palette, or `rex do rexdeck_disk`.
+
 The terminal must report an existing working directory. RexDeck passes no paths, shell expressions or dynamic arguments: dua scans the entries in that directory. A missing, invalid or unavailable terminal directory is refused before a pane opens.
 
-## Controls
+## Use
+
+Inspect sizes, enter a directory you own, return to its parent, then quit without marking entries.
 
 Default upstream bindings (an existing dua config can change them):
 
@@ -36,9 +42,25 @@ Default upstream bindings (an existing dua config can change them):
 | `?` | Show help |
 | `q` | Quit (close an active auxiliary pane first if needed); press a second time when entries are marked or a costly scan is still running |
 
-Qualification navigated nested owned fixtures of different sizes, sorted by size, entered and left directories, resized to 40 columns and quit without marking/deleting/trashing anything. A before/after path-and-content checksum manifest was unchanged.
+## Configuration
+
+### Pane layout
+
+Use `rexdeck enable disk --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+
+### dua settings
+
+Edit the optional TOML with `$EDITOR "$HOME/Library/Application Support/dua-cli/config.toml"` on macOS. `dua config show-default` prints a starting template without creating a file; create the parent directory yourself if needed. Formatting, Git-ignore/cleanup heuristics, notifications and `[keys]` bindings are configurable; review destructive bindings before using a customized file. See the [pinned configuration source](https://github.com/Byron/dua-cli/blob/v3.0.1/src/config.rs).
+
+RexDeck launches exactly `dua interactive`, without path arguments, key replay, snapshot flags, config overlays or `DUA_*` overrides. Inherited `DUA_*` settings remain effective.
+
+RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
+
+
 
 ## Capabilities and limits
+
+Qualification navigated nested owned fixtures of different sizes, sorted by size, entered and left directories, resized to 40 columns and quit without marking/deleting/trashing anything. A before/after path-and-content checksum manifest was unchanged.
 
 - **Not read-only or sandboxed.** Interactive mode can mark entries (`Space`, `x`, `d`, `a`, and other mark commands), permanently delete marked entries **without another prompt** (`Ctrl+r`) or move them to Trash (`Ctrl+t`). Trash is included by the default `trash-move` feature in 3.0.1 and was visible in the installed build's help; custom builds may omit it. Do not press these commands unless you intend their effects. Qualification uses only disposable owned trees, never owner data, and does not exercise deletion or Trash.
 - `O` delegates the selected path to an external application using the OS opener. That application has its own side effects. No external opener was exercised during qualification.
@@ -54,4 +76,4 @@ The disclosures and default controls were checked against the [pinned configurat
 rexdeck disable disk
 ```
 
-Only Disk's owned loader, module and receipt change. Other integrations and already open dua panes are left alive. dua-cli is MIT-licensed, unbundled and owner-managed.
+Only Disk's owned loader, module and receipt change. Other integrations and already open dua panes are left alive. dua-cli and its configuration are left untouched; it is MIT-licensed, unbundled and owner-managed.

@@ -2,22 +2,35 @@
 
 Inspect Docker services, containers, logs and stats in a native Rex pane with unmodified [lazydocker 0.25.2](https://github.com/jesseduffield/lazydocker/releases/tag/v0.25.2). Quitting returns focus to the exact invoking terminal.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64, a running Rex server and [RexDeck setup](../../README.md#getting-started).
 - Owner-installed **lazydocker 0.25.2** on a trusted absolute `PATH` entry. Use the [qualified upstream release](https://github.com/jesseduffield/lazydocker/releases/tag/v0.25.2), verify it yourself and check `lazydocker --version` (the first line is `Version: 0.25.2`). RexDeck never installs, upgrades or removes it; missing and other versions are refused with manual installation guidance before registration.
 - A reachable Docker daemon and an existing Docker context; Docker Desktop was used in qualification. Enable requires a preinstalled [Docker CLI](https://docs.docker.com/get-docker/) on `PATH`. Upstream Compose commands use `docker compose`, falling back to standalone `docker-compose` when the version probe fails; these helpers must be available on the **Rex server's `PATH`**, which can differ from your enabling shell. No Podman compatibility is claimed.
+
+## Enable and open
 
 ```sh
 rexdeck enable containers
 rexdeck status containers
 ```
 
+Open **RexDeck Containers** from Rex’s command palette, or `rex do rexdeck_containers`.
+
 Containers is independently selectable. Default placement is right, 50%; the shared `--placement` and `--size` options apply.
 
 ## Use
+
+Select the intended service, inspect Logs and Stats, then quit without executing lifecycle commands.
+
+| Key | Action |
+| --- | --- |
+| `2` | Focus Services |
+| `]` / `[` | Next / previous main tab |
+| `b` / `Esc` | Open / cancel bulk-command menu |
+| `q` | Quit and restore invoking-terminal focus |
 
 From the directory containing your Compose project, choose **RexDeck Containers** in the palette. RexDeck launches `lazydocker` with no arguments, using that exact directory as cwd. It does not force a project name, compose file or Docker endpoint. Without a Compose project, upstream still displays daemon resources.
 
@@ -35,7 +48,23 @@ Controls exercised in the private Rex qualification lab:
 - `q` quits and restores the exact origin block's focus.
 - `b` opens a bulk-command menu and `Esc` cancels it. Qualification only inspected and cancelled these menus; it never executed a bulk action.
 
-## Authority, files and limits
+## Configuration
+
+### Pane layout
+
+Use `rexdeck enable containers --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+
+### lazydocker settings
+
+Use the upstream project/status panel’s `e` to edit the YAML configuration, or `o` to open it; quit and reopen lazydocker to apply changes. For the default modern macOS location, the equivalent is `$EDITOR "$HOME/Library/Application Support/lazydocker/config.yml"`; use the actual legacy/XDG/`CONFIG_DIR` location if configured. Relevant settings include `gui.sidePanelWidth`, `gui.wrapMainPanel`, `logs`, `commandTemplates`, custom/bulk commands and OS openers. See the [configuration guide](https://github.com/jesseduffield/lazydocker/blob/v0.25.2/docs/Config.md).
+
+RexDeck passes no arguments, endpoint flags, environment overrides or configuration overlay. Docker context/config, `DOCKER_HOST`, `DOCKER_CONTEXT` and Compose project inputs remain upstream-managed in the Rex server’s inherited environment.
+
+RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
+
+lazydocker reads and can write `config.yml` in its configuration directory. On macOS the default is `~/Library/Application Support/lazydocker`; an existing legacy `~/Library/Application Support/jesseduffield/lazydocker` is preferred. XDG settings can change this (the isolated lab created `$XDG_CONFIG_HOME/lazydocker/config.yml`); `CONFIG_DIR` overrides it. Debug mode writes `development.log` beside it. Configuration can supply executable custom commands, editor/openers and command templates. Session inspection/statistics are upstream runtime state, not a separate RexDeck data store. See the [configuration guide](https://github.com/jesseduffield/lazydocker/blob/v0.25.2/docs/Config.md) and [configuration implementation](https://github.com/jesseduffield/lazydocker/blob/v0.25.2/pkg/config/app_config.go).
+
+## Capabilities and limits
 
 **This is not a read-only Docker viewer or a project sandbox.** The launch directory selects the Compose project, but lazydocker can see other containers, images, volumes and networks on the same daemon. Qualification visibly included unrelated daemon resources alongside the disposable project. Do not operate on resources you do not intend to change.
 
@@ -44,8 +73,6 @@ Controls exercised in the private Rex qualification lab:
 The [upstream keybindings](https://github.com/jesseduffield/lazydocker/blob/v0.25.2/docs/keybindings/Keybindings_en.md) include start/stop, restart, pause, recreate, remove, attach, **exec shell** and configured custom commands. Project down can remove volumes/images; resource menus include **prune** (the image-prune menu was inspected without execution). These actions use your Docker authority and may irreversibly destroy data. Upstream browser openers and custom commands also use your OS authority. RexDeck does not remove these controls. Destructive actions were not invoked in qualification; automatic Compose validation, endpoint helpers and view-triggered subprocesses still run as described above.
 
 Network access includes the configured Docker endpoint, which may be remote; Compose up/build/pull and custom commands may fetch images or other data. Compose files can reference environment files and secrets. Docker's existing configuration/context and any credentials used by its helpers remain owner-managed, not isolated by RexDeck.
-
-lazydocker reads and can write `config.yml` in its configuration directory. On macOS the default is `~/Library/Application Support/lazydocker`; an existing legacy `~/Library/Application Support/jesseduffield/lazydocker` is preferred. XDG settings can change this (the isolated lab created `$XDG_CONFIG_HOME/lazydocker/config.yml`); `CONFIG_DIR` overrides it. Debug mode writes `development.log` beside it. Configuration can supply executable custom commands, editor/openers and command templates. Session inspection/statistics are upstream runtime state, not a separate RexDeck data store. See the [configuration guide](https://github.com/jesseduffield/lazydocker/blob/v0.25.2/docs/Config.md) and [configuration implementation](https://github.com/jesseduffield/lazydocker/blob/v0.25.2/pkg/config/app_config.go).
 
 Qualification created only one labelled disposable Compose project on Docker Desktop, inspected its logs/stats/config, and then removed that project with `down -v`. The single newly pulled fixture image was removed; existing daemon resources were not mutated. The lab used its own HOME/XDG directories and a private Rex endpoint, with only non-secret Docker socket/context metadata recreated locally. No existing credentials or owner configuration were copied.
 

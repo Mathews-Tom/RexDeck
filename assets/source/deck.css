@@ -117,23 +117,43 @@ html, body { background: var(--ink); }
 .tool-label { font: 600 13px var(--display); color: var(--muted); margin-bottom: 7px; }
 .tool-row { display: flex; flex-wrap: wrap; gap: 8px; }
 
-/* Illustration of RexDeck's own queue/reader, using fictional task data. */
-.desk { position: absolute; inset: 0 0 26px; display: flex; flex-direction: column; white-space: normal; }
-.desk-scope { padding: 5px 10px 0; font-weight: 700; }
-.desk-fresh { padding: 0 10px; color: var(--teal); font-size: 0.85em; }
-.desk-toolbar { padding: 4px 10px; border-bottom: 1px solid var(--line); color: var(--sky); }
-.desk-columns { display: grid; grid-template-columns: 43% 57%; flex: 1; min-height: 0; }
-.desk-queue, .desk-reader { padding: 6px 10px; overflow: hidden; }
-.desk-queue { border-right: 1px solid var(--line); }
-.desk-filter { border: 1px solid var(--line); padding: 2px 5px; color: var(--muted); margin-bottom: 4px; }
-.desk-controls, .desk-meta { font-size: 0.85em; color: var(--muted); }
-.desk-task { display: flex; gap: 6px; justify-content: space-between; padding: 3px 4px; white-space: nowrap; }
-.desk-task b { overflow: hidden; text-overflow: ellipsis; font-weight: 400; }
-.desk-task span { font-size: 0.8em; flex-shrink: 0; }
-.desk-reader h5 { font: 700 1em var(--mono); margin-bottom: 3px; }
-.desk-reader p { margin: 5px 0; }
-.desk-comment { border-left: 2px solid var(--line); padding-left: 6px; font-size: 0.9em; }
-.desk + .bar { gap: 10px; font-size: 0.8em; }
+/* Skeleton content for the generic pane archetypes (no tool or data names). */
+.sk { display: inline-block; height: 0.62em; border-radius: 3px; background: #3a3f4a; vertical-align: middle; }
+.sk.dim { background: #2c313b; }
+.sk.hi { background: #8fa8d6; }
+.sk.a { background: var(--amber); opacity: 0.85; }
+.sk.t { background: var(--teal); opacity: 0.75; }
+.sk.fg { background: var(--fg); opacity: 0.8; height: 0.75em; }
+.sk.inline { height: 0.55em; margin-left: 6px; }
+.sk-col { white-space: normal; }
+.sk-row { height: 1.55em; display: flex; align-items: center; gap: 6px; padding: 0 4px; }
+.sk-row.on { background: #2b3a55; border-radius: 3px; }
+.sk-table { position: absolute; inset: 0 0 26px; padding: 10px 12px; white-space: normal; }
+.sk-tr { display: flex; gap: 14px; height: 1.6em; align-items: center; padding: 0 6px; border-bottom: 1px solid #1f232b; }
+.sk-tr.head { border-bottom: 1px solid var(--line); }
+.sk-tr.on { background: #2b3a55; border-radius: 3px; }
+.sk-tr span { display: flex; }
+.sk-dash { position: absolute; inset: 0 0 26px; padding: 10px; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 8px; white-space: normal; }
+.sk-panel { border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; overflow: hidden; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.sk-gauge { display: grid; grid-template-columns: 5.5em 1fr; align-items: center; font-size: 0.85em; }
+.sk-gauge .track { height: 0.6em; border-radius: 3px; background: #23272f; overflow: hidden; }
+.sk-gauge .fill { height: 100%; border-radius: 3px; }
+.fill.a { background: var(--amber); } .fill.t { background: var(--teal); } .fill.s { background: var(--sky); }
+.spark { width: 100%; height: 100%; }
+.spark polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.spark.a polyline { stroke: var(--amber); } .spark.t polyline { stroke: var(--teal); }
+.sk-view { position: absolute; inset: 0 0 26px; display: flex; flex-direction: column; white-space: normal; }
+.sk-scope { padding: 8px 10px 6px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+.sk-scope .fresh { color: var(--teal); font-size: 0.85em; }
+.sk-columns { display: grid; grid-template-columns: 42% 58%; flex: 1; min-height: 0; }
+.sk-queue, .sk-reader { padding: 8px 10px; overflow: hidden; }
+.sk-queue { border-right: 1px solid var(--line); }
+.sk-filter { border: 1px solid var(--line); padding: 1px 6px; color: var(--muted); margin-bottom: 6px; font-size: 0.85em; }
+.sk-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 1.7em; padding: 0 5px; }
+.sk-item.on { background: #2b3a55; border-radius: 3px; }
+.pill { display: inline-block; width: 3.2em; height: 0.9em; border-radius: 999px; flex-shrink: 0; opacity: 0.8; }
+.pill.a { background: var(--amber); } .pill.s { background: var(--sky); } .pill.t { background: var(--teal); } .pill.m { background: #4a4f5b; }
+.sk-note { margin-top: 8px; border-left: 2px solid var(--line); padding-left: 8px; display: flex; flex-direction: column; gap: 6px; }
 .key {
   display: inline-block;
   min-width: 1.6em;

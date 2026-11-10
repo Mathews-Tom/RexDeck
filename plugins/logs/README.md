@@ -2,12 +2,16 @@
 
 Explore explicitly selected local logs in a native Rex pane with unmodified [lnav 0.14.1](https://github.com/tstack/lnav/releases/tag/v0.14.1): merged chronological logs, filters, SQL and time navigation. Quitting returns focus to the exact invoking terminal.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64 and the qualified Rex server.
 - Preinstalled **lnav 0.14.1** on PATH. Install it yourself from the upstream release, or inspect `brew info lnav` and use `brew install lnav` only if it selects 0.14.1 and you accept Homebrew's dependency/build/upgrade effects. Verify with `lnav --version`. RexDeck never installs, upgrades or removes lnav. A missing or unqualified version prints actionable guidance and registers nothing.
+
+## Enable and open
+
+Open **RexDeck Logs** from Rex's command palette, or invoke the native action with an explicit `file=` selection:
 
 ```sh
 rexdeck enable logs
@@ -23,7 +27,7 @@ Selected paths containing `*`, `?`, `[` or `\` are refused before launch because
 
 The resolved local path is the final, single absolute argument to lnav, with no static flags. The pane cwd is the selected directory or the selected file's parent. RexDeck provides no stdin/pipe capture, remote SSH target, URL, startup command or script argument. An input such as `user@host:/var/log/app.log` is treated as a local selection, never forwarded as a remote target. This is a path-selection policy, not content validation or a sandbox.
 
-## Controls
+## Use
 
 These are upstream lnav controls, unchanged:
 
@@ -37,9 +41,23 @@ These are upstream lnav controls, unchanged:
 | `?` | Show / leave help |
 | `q` | Leave the current view; repeat as needed to quit and restore origin focus |
 
-Qualification selected a directory containing `application.log` and `worker.log.0`, filtered their two ERROR messages, obtained `log_level=error; messages=2` through SQL, disabled the filter and jumped to 10:04. The viewer stayed usable at 40 columns and quit to the exact origin. Opening a single `.log` was also observed.
+## Configuration
+
+### Pane layout
+
+`rexdeck enable logs --placement right|left|below|above --size 20-80` sets placement and size; default: right, 50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+
+### lnav settings
+
+Use lnav's `:config` command to change options such as `/ui/theme` and `/ui/keymap`; those local customizations are saved in `<lnav-home>/config.json`. Alternatively, edit JSON files under `<lnav-home>/configs/default/` (remove `.sample` from a shipped sample before customizing), or use `$EDITOR ~/.config/lnav/config.json` when that is your active home. `<lnav-home>` is `~/.config/lnav` or legacy `~/.lnav`; configuration JSON needs the upstream `$schema` property. System config under `/etc/lnav`, user formats and installed scripts also remain active. See [pinned configuration documentation](https://github.com/tstack/lnav/blob/v0.14.1/docs/source/config.rst) for schema and load order.
+
+RexDeck passes only the selected absolute file/directory, with no static flags, startup commands or scripts.
+
+RexDeck preserves the inherited environment, except that PATH contains only absolute entries (or the system default if none remain). It adds no tool-specific environment variables or configuration overlay and never edits upstream configuration.
 
 ## Capabilities and limits
+
+Qualification selected a directory containing `application.log` and `worker.log.0`, filtered their two ERROR messages, obtained `log_level=error; messages=2` through SQL, disabled the filter and jumped to 10:04. The viewer stayed usable at 40 columns and quit to the exact origin. Opening a single `.log` was also observed.
 
 - **Logs can hold secrets**, including tokens, personal data and request bodies. Directory selection reads every file lnav discovers there. Select directories containing only plain logs that you intend to inspect.
 - lnav follows files and persists searches, filters, positions, bookmarks, command history and configuration. With a fresh home containing `.config`, 0.14.1 uses `~/.config/lnav`; legacy `~/.lnav` is also supported. The lab observed `view-info-*.json`, `textinput-history.db` and `log_metadata.db`. Existing system/user formats, configuration and installed SQL scripts are loaded from lnav's own locations, not isolated by RexDeck.
@@ -58,3 +76,5 @@ rexdeck disable logs
 ```
 
 Only Logs' owned loader, module and receipt are removed. Other integrations and existing panes stay alive; qualification kept both Files and lnav panes open while disabling Logs. lnav is BSD-2-Clause-licensed, unbundled and owner-managed.
+
+The upstream tool and its configuration remain untouched.

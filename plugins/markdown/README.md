@@ -1,22 +1,26 @@
 # Markdown
 
-Read Markdown in a native Rex pane with unmodified [markdown-reader](https://github.com/leboiko/markdown-reader). Prose, tables and code render in the pane, and Mermaid diagrams are drawn as actual diagrams, not raw code fences. Quitting returns focus to the exact terminal you invoked it from.
+Read Markdown in a native Rex pane with unmodified [markdown-reader 1.35.4](https://github.com/leboiko/markdown-reader). Prose, tables and code render in the pane, and Mermaid diagrams are drawn as actual diagrams, not raw code fences. Quitting returns focus to the exact terminal you invoked it from.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
+
+
 
 ## Requirements
 
 - macOS arm64, a running Rex server and RexDeck set up as described in the [root README](../../README.md#getting-started).
 - markdown-reader **1.35.4** on a trusted absolute `PATH` entry. Install it yourself from the [upstream release](https://github.com/leboiko/markdown-reader/releases/tag/v1.35.4): verify the archive against its `SHA256SUMS`, put `markdown-reader` on `PATH`, and check `markdown-reader --version`. RexDeck never installs, upgrades or removes it. Other versions are refused with manual guidance until they are qualified.
 
-## Enable
+## Enable and open
 
 ```sh
 rexdeck enable markdown
 rexdeck status markdown
 ```
 
-Enabling Markdown changes nothing for Files or Git; each integration owns its own loader, module and receipt. Pane placement and size follow the shared convention, for example `rexdeck enable markdown --placement below --size 60`. See [pane placement and size](../../README.md#pane-placement-and-size).
+Enabling Markdown changes nothing for Files or Git; each integration owns its own loader, module and receipt. Pane placement and size follow the shared convention, for example `rexdeck enable markdown --placement below --size 60`. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+
+Choose **RexDeck Markdown** from Rex’s command palette, or `rex do rexdeck_markdown` to browse the invoking directory; pass `file=PATH` to select a Markdown file or directory as described below.
 
 ## Use
 
@@ -33,7 +37,21 @@ Use markdown-reader's own keys. `Tab` switches between tree and viewer, `j`/`k`/
 
 **Source view:** `i` (hybrid mode) shows the raw Markdown of the block under the cursor, and `I` opens the fullscreen editor. Both are editors and can save with `:w`. RexDeck does not make markdown-reader read-only.
 
-## Mermaid behavior in Rex
+## Configuration
+
+### Pane layout
+
+`rexdeck enable markdown --placement right|left|below|above --size 20-80` changes only this integration; the default is right/50%. See [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+
+### markdown-reader settings
+
+Press `c` for the upstream settings modal (theme, line numbers, tree position and search preview), or edit TOML with `$EDITOR "$HOME/Library/Application Support/markdown-reader/config.toml"`. macOS sessions live alongside it in `state.toml`; the update cache is `~/Library/Caches/markdown-tui-explorer/last-version-check.json`. To stop daily update checks, add `[updates]` with `check_for_updates = false`. See [qualified upstream configuration and state documentation](https://github.com/leboiko/markdown-reader/blob/v1.35.4/README.md#configuration-and-state-files).
+
+RexDeck passes the validated absolute file/directory as the only argument, with cwd set to that directory or the selected file's parent. There are no config overlays, Mermaid-mode overrides, image-protocol spoofing or `--check-external` flag. RexDeck never edits upstream config. The launcher inherits upstream configuration/authentication environment, but removes relative and empty `PATH` entries so helpers are not found in the invoking directory.
+
+## Capabilities and limits
+
+### Mermaid behavior in Rex
 
 markdown-reader renders Mermaid in-process. Rex terminals do not advertise an image protocol that markdown-reader uses, so in a Rex pane it automatically draws **Unicode text diagrams**, footed `[mermaid — text mode, text-mode diagram]`, with boxes, labels, arrows and edge labels. RexDeck does not change its `mermaid_mode` setting or spoof terminal capabilities.
 
@@ -46,8 +64,6 @@ Qualified in a private Rex pane with markdown-reader 1.35.4:
 | Root README, Files and Git READMEs | none | Prose and tables render |
 
 Outside that corpus, state, class and ER diagrams also rendered. Unsupported types such as `zenuml`, and malformed blocks such as unknown diagram types or broken sequences, show their source with an explicit `[mermaid — figurehead render failed, showing source]` footer. A flowchart with unbalanced brackets can still be drawn literally, with the broken text as node labels, so the reader does not always validate Mermaid syntax. RexDeck does not claim full Mermaid-language coverage.
-
-## Capabilities and privacy
 
 - **File writes:** the edit modes save Markdown in place.
 - **Reads:** the browsed directory tree. The reader stores its own `config.toml`, session state (open tabs, scroll positions and the full paths of opened documents) and update-check cache under `~/Library/Application Support/markdown-reader` and `~/Library/Caches/markdown-tui-explorer`.

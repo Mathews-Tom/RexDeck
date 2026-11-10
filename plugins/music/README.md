@@ -2,22 +2,26 @@
 
 Browse playlists and control Spotify playback in a native Rex pane with unmodified [spotify_player 0.25.2](https://github.com/aome510/spotify-player/releases/tag/v0.25.2). Quit returns to the exact invoking terminal.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - A running Rex server and RexDeck [set up](../../README.md#getting-started).
 - Owner-installed **spotify_player 0.25.2** on a trusted absolute `PATH` entry. Use the matching [upstream release](https://github.com/aome510/spotify-player/releases/tag/v0.25.2), verify its checksum and check `spotify_player --version` reports `spotify_player 0.25.2`. RexDeck never installs, updates or removes it. Missing and other versions are refused before registration with manual guidance.
 - Your **Spotify Premium** account and your participation in upstream OAuth. RexDeck never signs in for you or passes secrets in argv.
+
+## Enable and open
 
 ```sh
 rexdeck enable music
 rexdeck status music
 ```
 
-Choose **RexDeck Music** in the palette. RexDeck runs `spotify_player` **without arguments** in the invoking directory. The directory is only the pane cwd, not an account selector. Placement follows the shared convention, for example `rexdeck enable music --placement below --size 60`.
+Choose **RexDeck Music** in the palette. RexDeck runs `spotify_player` **without arguments** in the invoking directory. The directory is only the pane cwd, not an account selector. Placement follows the shared convention, for example `rexdeck enable music --placement below --size 60`. Or run `rex do rexdeck_music` from a Rex terminal. No account or file argument is required; missing, remote or invalid directory context is refused.
 
-## Sign in and choose a device
+## Use
+
+### Sign in and choose a device
 
 On first launch upstream opens an authorization URL in your browser and waits for its loopback callback. Sign in with the intended Premium account and review the consent page. Web API and streaming access require separate approvals; a custom client ID can require a third ncspot fallback approval. `spotify_player authenticate` forces fresh interactive approvals rather than reusing cached tokens; RexDeck never invokes it.
 
@@ -47,13 +51,25 @@ Default controls from the [pinned upstream command table](https://github.com/aom
 - `r`: refresh playback; `?`: help; **Esc**: close a popup.
 - `q` or **Ctrl-C**: quit the foreground application and return to origin. RexDeck never starts daemon mode (`-d`/`--daemon`). Quitting is not a guarantee that playback on another Spotify device stops.
 
-At **40 columns**, the upstream playlist remains open, but table columns and playback/device metadata are heavily truncated. Widen the pane to inspect full titles or confirm the selected device; RexDeck does not restyle the upstream layout.
 
-## Authority, storage and limitations
 
-This is **not read-only**. Upstream requests playback, playlist, follow, library and listening-history scopes; it can modify playlists, likes, saved items and follows as well as control playback. Network requests reach Spotify. Album-artwork caching and desktop notifications are **on by default** in builds with those features and expose track metadata (disable with `enable_notify = false` / `enable_cover_image_cache = false` in `app.toml`). RexDeck adds no account sandbox or restricted-scope OAuth wrapper.
+## Configuration
+
+### Pane layout
+
+`rexdeck enable music --placement right|left|below|above --size 20-80`; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size).
+
+### spotify_player settings
 
 Version 0.25.2 defaults to **`$HOME/.config/spotify-player`** for `app.toml`, `keymap.toml` and `theme.toml`, and **`$HOME/.cache/spotify-player`** for caches. These defaults use `HOME`, **not `XDG_CONFIG_HOME` or `XDG_CACHE_HOME`**. Upstream supports `-c`/`--config-folder` and `-C`/`--cache-folder`; RexDeck passes neither, preserving your upstream configuration.
+
+Edit TOML with `$EDITOR ~/.config/spotify-player/app.toml`; use `keymap.toml` for key bindings and `theme.toml` for colours in that same directory. See the [pinned configuration reference](https://github.com/aome510/spotify-player/blob/v0.25.2/docs/config.md). Review `client_port`, OAuth callback settings, notification/cover caching and executable hooks before launch. RexDeck passes no arguments, tool-specific environment overrides or config overlays, and never edits upstream config; it inherits the pane environment with helper lookup restricted to trusted absolute PATH entries.
+
+## Capabilities and limits
+
+At **40 columns**, the upstream playlist remains open, but table columns and playback/device metadata are heavily truncated. Widen the pane to inspect full titles or confirm the selected device; RexDeck does not restyle the upstream layout.
+
+This is **not read-only**. Upstream requests playback, playlist, follow, library and listening-history scopes; it can modify playlists, likes, saved items and follows as well as control playback. Network requests reach Spotify. Album-artwork caching and desktop notifications are **on by default** in builds with those features and expose track metadata (disable with `enable_notify = false` / `enable_cover_image_cache = false` in `app.toml`). RexDeck adds no account sandbox or restricted-scope OAuth wrapper.
 
 **OAuth credentials are cached on disk**, not in a RexDeck keychain: Web API tokens use `<client_id>_token.json`, and streaming credentials use `credentials.json`. Treat the whole cache as sensitive: it also contains logs/backtraces, cover images and optional audio. Do not copy it into evidence or source control. Sign out/revoke access through Spotify when appropriate; disabling Music does not delete upstream credentials.
 

@@ -2,22 +2,36 @@
 
 Send HTTP requests and inspect responses in a native Rex pane with unmodified [Slumber 5.4.4](https://github.com/LucasPickering/slumber/releases/tag/v5.4.4). Quitting returns focus to the exact terminal that opened it.
 
-[Back to RexDeck](../../README.md)
+[Back to RexDeck](../../README.md) · [All integrations](../../docs/integrations.md)
 
-## Requirements and enable
+## Requirements
 
 - macOS arm64, a running Rex server and [RexDeck setup](../../README.md#getting-started).
 - Install **Slumber 5.4.4** yourself from the [upstream release](https://github.com/LucasPickering/slumber/releases/tag/v5.4.4), on a trusted absolute `PATH` entry. Check `slumber --version`. RexDeck never installs, upgrades or removes Slumber; missing and other versions are refused with manual guidance.
 - A trusted Slumber request collection. RexDeck launches plain `slumber`, with **no arguments**, in the invoking terminal's reported directory. Slumber searches that directory, then its parents, checking `slumber.yml`, `slumber.yaml`, `.slumber.yml`, `.slumber.yaml` in that order in each directory. No `--file` override is needed. A parent collection can therefore be selected; this is not project isolation or a sandbox. See the [5.4.4 collection loading rules](https://github.com/LucasPickering/slumber/blob/v5.4.4/docs/src/api/request_collection/index.md#format--loading).
+
+## Enable and open
 
 ```sh
 rexdeck enable http
 rexdeck status http
 ```
 
-Choose **RexDeck HTTP** in the palette from a terminal in your collection directory. Placement follows the [shared convention](../../README.md#pane-placement-and-size), initially right / 50%.
+Open **RexDeck HTTP** from Rex’s command palette, or `rex do rexdeck_http`.
 
-## Controls and qualification
+Choose **RexDeck HTTP** in the palette from a terminal in your collection directory. Placement follows the [shared convention](../../docs/configuration.md#pane-placement-and-size), initially right / 50%.
+
+## Use
+
+Review the collection and profile, select a recipe, send it only when intended, inspect the response, then quit.
+
+| Key | Action |
+| --- | --- |
+| `Enter` | Send selected recipe |
+| `r` / `j` | Focus recipes / select next recipe |
+| `s` | Hide recipe sidebar |
+| `2` / `f` | Focus Request / Response / fullscreen |
+| `q` | Quit and restore invoking-terminal focus |
 
 Controls exercised with the default bindings:
 
@@ -28,7 +42,21 @@ Controls exercised with the default bindings:
 
 Private qualification used an installed wheel outside the checkout, an isolated Rex endpoint/HOME and a disposable local HTTP server bound to `127.0.0.1` on a random port. One GET and one POST returned `200 OK`; both JSON response markers and the echoed POST body were inspected in the pane. No production endpoint or real credential was used. Disabling HTTP with HTTP and Files panes open left both panes alive and Files enabled.
 
-## Network, secrets, commands and persistence
+## Configuration
+
+### Pane layout
+
+Use `rexdeck enable http --placement right|left|below|above --size 20-80` to choose placement and size; see [pane placement and size](../../docs/configuration.md#pane-placement-and-size). Default: right, 50%.
+
+### Slumber settings
+
+Run `slumber config --path` to locate the global YAML, then `slumber config --edit` to open it in your configured editor, or use `$EDITOR "$HOME/Library/Application Support/slumber/config.yml"` for the default macOS path. `SLUMBER_CONFIG_PATH` overrides that path. Review `preview_templates: false` to disable background execution previews, `persist: false` to prevent new request-history persistence, and editor/pager/query commands. See the [pinned configuration reference](https://github.com/LucasPickering/slumber/blob/v5.4.4/docs/src/api/configuration/index.md).
+
+Edit your trusted collection YAML in your editor (for example `$EDITOR ./slumber.yml`) to change recipes, profiles and templates; review referenced `$ref` files too. RexDeck launches plain `slumber` with no arguments, environment overrides or config overlay; upstream collection discovery and inherited settings remain effective.
+
+RexDeck never edits upstream configuration. The launch environment is inherited from the Rex server, with relative `PATH` entries removed so helpers cannot resolve from the working directory.
+
+## Capabilities and limits
 
 Slumber is an HTTP client, **not read-only**. Requests can mutate remote services. Collections can chain additional requests through templates, and redirects are followed by default. RexDeck does not restrict destinations or isolate credentials. **Review the collection/profile outside Slumber before opening it:** background template previews are enabled by default (`preview_templates: true`), so opening Slumber or selecting a recipe can execute commands and read local files/environment variables before you send a request. Set `preview_templates: false` in Slumber's global configuration to disable these previews; this does not sandbox templates when a request is sent.
 
