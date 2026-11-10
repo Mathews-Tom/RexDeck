@@ -14,6 +14,19 @@ Upgrading: the shared host changed, so run `rexdeck enable <id>` for every enabl
 
 - List every available plugin with a one-line description in the README.
 
+### Publication
+
+- Published the owner-approved main-CI wheel and sdist to GitHub and PyPI:
+  - commit `76e28b8`, artifact `13793498871`
+  - annotated tag `v0.6.2`
+  - [protected publish run 42885617002](https://github.com/Mathews-Tom/RexDeck/actions/runs/42885617002)
+
+  The public hashes match the approved pair. A no-cache public-index install lists all 25 plugins.
+
+  Both wheels passed native smoke tests in a private Rex lab: enable, render, narrow resize, quit back to the exact origin, and disable. The candidate covered json, system, logs and deps; the public PyPI wheel covered json and images.
+
+  An in-place upgrade from 0.6.1 reported the enabled integrations as `outdated` with one combined fix command. Running it returned them to `ready`.
+
 ## 0.6.1 — 2026-11-10
 
 Upgrading: the shared host and launcher are unchanged, so integrations enabled under 0.6.0 keep working without `rexdeck enable`.
