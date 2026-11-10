@@ -19,6 +19,15 @@ ClickUp dates now follow this machine's local calendar day. Earlier versions wro
 - Give every integration guide the same sections (requirements, enable and open, use, configuration, capabilities and limits, disable). Each guide now says how to edit the tool's own configuration and what RexDeck passes at launch.
 - Replace the banner and launch animation with generic, tool-agnostic artwork that shows categories and pane archetypes, so new integrations need no new media.
 
+### Publication
+
+- Published the owner-approved main-CI wheel and sdist to GitHub and PyPI:
+  - commit `955357d`, artifact `13783374825`
+  - annotated tag `v0.6.1`
+  - [protected publish run 42866412970](https://github.com/Mathews-Tom/RexDeck/actions/runs/42866412970)
+
+  The public hashes match the approved pair. A no-cache public-index install lists all 25 plugins. The candidate and public wheels both passed native private-Rex smoke tests: enable, interaction, narrow resize, exact-origin quit and disable. An in-place upgrade from 0.6.0 kept enabled integrations `ready`.
+
 ## 0.6.0 — 2026-11-10
 
 Upgrading: the shared host and launcher changed, including the new `github-account` context, so run `rexdeck enable <id>` for every enabled integration after installing 0.6.0.
