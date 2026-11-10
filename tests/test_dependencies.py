@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import chdir
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -238,6 +239,66 @@ class DependencyTests(unittest.TestCase):
         ):
             lifecycle._executable("rex")
         self.assertFalse(self.manager_marker.exists())
+
+    def _probed(self) -> integrations.Integration:
+        """A tool without --version whose version a prerequisite reports."""
+        return replace(
+            integrations.get("files"),
+            tool="silent",
+            versions=("1.2.0",),
+            version_pattern=r"^\s*mod\s+example\.com/silent\s+v(\d+\.\d+\.\d+)\s",
+            prerequisites=(("reporter", "https://example.com/reporter"),),
+            version_probe=("reporter", "version", "-m", "{tool}"),
+            homebrew="silent-cli",
+        )
+
+    def test_version_probe_asks_the_declared_reporter_about_the_tool(self) -> None:
+        """The reporter receives the qualified executable; --version is never run."""
+        silent = self.script("silent", "raise SystemExit(2)\n")
+        for version, accepted in (("v1.2.0", True), ("v1.3.0", False)):
+            self.script(
+                "reporter",
+                "import sys\n"
+                f"if sys.argv[1:] != ['version', '-m', {str(silent)!r}]: raise SystemExit(97)\n"
+                f"print('\\tmod\\texample.com/silent\\t{version}\\th1:x=')\n",
+            )
+            with (
+                self.subTest(version=version),
+                patch.object(integrations, "get", return_value=self._probed()),
+            ):
+                if accepted:
+                    self.assertEqual(dependencies.ensure("silent").path, str(silent))
+                else:
+                    with self.assertRaisesRegex(
+                        RuntimeError, "Unqualified silent version 1.3.0"
+                    ):
+                        dependencies.ensure("silent")
+        self.assertFalse(self.manager_marker.exists())
+
+    def test_guidance_names_the_homebrew_formula_and_probe(self) -> None:
+        """Manual guidance names the real formula and the declared version check."""
+        self.script("reporter", "raise SystemExit(0)\n")
+        with (
+            patch.object(integrations, "get", return_value=self._probed()),
+            self.assertRaises(RuntimeError) as failure,
+        ):
+            dependencies.ensure("silent")
+        message = str(failure.exception)
+        self.assertIn("brew info silent-cli; run brew install silent-cli only", message)
+        self.assertIn(
+            'Verify with reporter version -m "$(command -v silent)",', message
+        )
+        self.assertNotIn("silent --version", message)
+
+    def test_invalid_version_probe_or_formula_fails_loudly(self) -> None:
+        for changes in (
+            {"version_probe": ("go", "version", "{tool}")},
+            {"version_probe": ("reporter", "version")},
+            {"version_probe": ("reporter", "{tool}", "{tool}")},
+            {"homebrew": "Bad Formula"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(self._probed(), **changes)
 
 
 if __name__ == "__main__":
