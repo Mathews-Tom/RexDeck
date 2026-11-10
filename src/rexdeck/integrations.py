@@ -27,6 +27,8 @@ from dataclasses import dataclass
 # "selected-file" requires an explicit existing file with one of the descriptor's
 # ``file_suffixes`` (or a directory when ``file_directories``), never a cwd
 # fallback, and passes the validated path as the tool's final argument.
+# "dekit-config" requires an explicit trusted dekit.yaml and launches dekit with
+# its parent as an explicit project root, reporting surviving tasks on TUI exit.
 CONTEXTS = (
     "directory",
     "git-worktree",
@@ -34,6 +36,7 @@ CONTEXTS = (
     "github-worktree",
     "media",
     "selected-file",
+    "dekit-config",
 )
 PLACEMENTS = ("right", "left", "below", "above")
 MIN_SIZE = 20

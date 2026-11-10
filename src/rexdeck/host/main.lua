@@ -2,7 +2,8 @@
 -- Every integration shares this action: frozen origin identity, validated context,
 -- shell-less argv, configured split layout and exact-origin return by the launcher.
 local contexts = {directory = true, ['git-worktree'] = true, document = true,
-  ['github-worktree'] = true, media = true, ['selected-file'] = true}
+  ['github-worktree'] = true, media = true, ['selected-file'] = true,
+  ['dekit-config'] = true}
 local function nonempty(value)
   return type(value) == 'string' and value ~= '' and not value:find('%z')
 end
@@ -68,6 +69,7 @@ return function(opts)
     wanted = #names > 0 and (table.concat(names, ', ') .. ' file') or ''
     if directories then wanted = wanted .. (#names > 0 and ' or a directory' or 'directory') end
   end
+  if opts.context == 'dekit-config' then wanted = 'trusted dekit.yaml' end
   local document = opts.context == 'document' or opts.context == 'media' or wanted ~= nil
   local github = opts.context == 'github-worktree'
 
@@ -81,6 +83,9 @@ return function(opts)
       or (github and {repo = 'string?', remote = 'string?', account = 'string?'} or nil),
     run = function(ctx, action_args)
       local selected = nil
+      if not document and type(action_args) == 'table' and action_args.file ~= nil then
+        error(title .. ' does not accept a selected file', 0)
+      end
       if document and type(action_args) == 'table' then selected = action_args.file end
       if opts.context == 'media' and selected == nil then
         error(title .. ' requires an explicitly selected PDF, JPG, PNG or SVG file', 0)
