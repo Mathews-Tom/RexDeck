@@ -166,6 +166,9 @@ class KataDesk(App[None]):
         # True from scheduling a tail until it ends, so a refresh burst starts one.
         self._tailing = False
         self._settle: Timer | None = None
+        # The highlighted row's ref: live re-sorts keep the cursor on that issue, so
+        # a, g and x never act on a row that merely moved under the cursor.
+        self._cursor_ref: str | None = None
         self.agent_setup = agents if isinstance(agents, AgentSetup) else None
         # Why agents are off; None once the desk verified its own Rex block.
         self.agents_off: str | None = agents if isinstance(agents, str) else None
@@ -422,6 +425,13 @@ class KataDesk(App[None]):
                 )
             count = len(self.requests)
         if count:
+            refs = (
+                [issue.ref for _, issue in self.rows]
+                if self.mode == "issues"
+                else [request.ref for request in self.requests]
+            )
+            if self._cursor_ref in refs:
+                row = refs.index(self._cursor_ref)
             table.move_cursor(row=min(max(row, 0), count - 1))
         elif self.state == "ready":
             empty = (
@@ -443,6 +453,7 @@ class KataDesk(App[None]):
 
     @on(DataTable.RowHighlighted)
     def _highlighted(self) -> None:
+        self._cursor_ref = self._selected_ref()
         self._open_detail()
 
     @on(DataTable.RowSelected)

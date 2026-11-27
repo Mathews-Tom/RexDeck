@@ -52,7 +52,7 @@ The header names the project, the daemon kind and whose attention requests are s
 
 1. claim it with `kata claim <ref> --ttl 2h` and renew the claim while working;
 2. comment findings and how they were verified;
-3. close it with `kata close <ref> --done -m …` only once verified;
+3. close it with `kata close <ref> --done -m … --test "<command>"` (or `--commit <sha>`) only once verified, since kata requires evidence for a done close;
 4. otherwise set `work.attention=needs-human` with `work.attention_msg`, and stop.
 
 The agent asks you in its block whenever a decision is needed. omp is started without a shell: `python -I -m rexdeck.katadesk.agent` validates the issue ref, drops inherited `KATA_REF`, `KATA_INBOX_USER` and `KATA_TEAMMATE` so the agent writes to kata as your own actor, and then replaces itself with `omp @<prompt file>`. The agent's block keeps kata's and omp's directories first on `PATH`.
@@ -72,6 +72,16 @@ Controls exercised in the private Rex qualification lab, against a disposable pr
 - From a directory with no kata binding the view opened on Attention with "Run kata init here to bind a project"; `1` explained that Attention works without one.
 - At 40 columns the list and detail stack vertically.
 - No `kata events` process remained 5 seconds after quitting or after closing the pane. `q` restored focus to the exact origin.
+
+Agents were qualified with omp 19.2.1 against a local stub model with zero hosted model calls. Bash required approval, and the stub's first turn asked to run `kata claim "$KATA_REF" --ttl 2h`:
+
+- Split, window and background agents each ran `omp @<prompt file>` with `KATA_REF` set to their issue in the invoking directory (`ps eww`). After approval in the agent's block, `kata show` listed the lab actor as owner with a two-hour expiry. The background agent opened an unfocused `Kata agents` window and the desk kept focus.
+- Without refresh, badges went `waiting for you` while omp asked to run `kata claim`, then `working`, then `done` when the turn ended. With omp's `terminal.programStatus` off, the agent's badge read `state unknown`.
+- `n` focused the waiting agent's exact block during the approval step. `g` focused the background agent in its window.
+- Stop asked first and closed only that agent's block; the desk, the origin and the other agents' blocks remained.
+- A closed issue, a desk started without `REX_SESSION`/`REX_BLOCK`, and agents recorded before a Rex server restart were each refused with a visible reason. No Rex block changed. `rexdeck enable katadesk` without omp on `PATH` printed install guidance and registered nothing.
+- Quit while agents ran listed each with issue, placement and state; `n` kept the desk open. After quitting, the agents kept running. Reopening listed them again, showed an agent whose omp exited as `exited 143` until Stop closed its block, and dropped an agent whose block was closed in Rex.
+- No `rex events` process remained 5 seconds after quitting or after closing the desk's pane. After `kill -9` of the desk, it ended when the pane closed.
 
 ## Configuration
 

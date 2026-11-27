@@ -159,11 +159,11 @@ def test_event_lines_are_classified_by_shape() -> None:
         assert event_kind(noise) is None
 
 
-def test_catalogue_runs_kata_from_its_enable_bound_prerequisite() -> None:
+def test_catalogue_runs_kata_and_omp_from_enable_bound_prerequisites() -> None:
     desk = integrations.get("katadesk")
     assert desk.owned_module == "rexdeck.katadesk"
     assert desk.context == "directory"
-    assert [name for name, _ in desk.prerequisites] == ["kata"]
+    assert [name for name, _ in desk.prerequisites] == ["kata", "omp"]
 
 
 class LiveKata(Kata):
@@ -272,3 +272,37 @@ def test_stream_errors_drop_live_and_a_stopped_daemon_ends_the_stream() -> None:
 
     process = asyncio.run(scenario())
     assert process.returncode is not None
+
+
+def test_a_live_reorder_keeps_the_cursor_on_the_selected_issue() -> None:
+    fake = Fake(dict(READS))
+    app = KataDesk(Kata(KATA, Path.cwd(), runner=fake))
+    app._tailing = True  # no live stream in this scenario
+    listing = json.loads(fixture("list.json"))
+
+    async def scenario() -> None:
+        async with app.run_test(size=(120, 30)) as pilot:
+            for _ in range(30):
+                await pilot.pause(0.1)
+                if app.rows:
+                    break
+            before = [issue.ref for _, issue in app.rows]
+            chosen = before[-1]
+            app.query_one("#rows").move_cursor(row=len(before) - 1)  # type: ignore[attr-defined]
+            await pilot.pause(0.2)
+            # An update elsewhere re-sorts kata's list under the cursor.
+            listing["issues"].reverse()
+            fake.answers[("list", "--status", "open", "--limit", "0")] = (
+                0,
+                json.dumps(listing),
+            )
+            await pilot.press("r")
+            for _ in range(20):
+                await pilot.pause(0.1)
+                if [issue.ref for _, issue in app.rows] != before:
+                    break
+            await pilot.pause(0.3)
+            assert [issue.ref for _, issue in app.rows] != before
+            assert app._selected_ref() == chosen
+
+    asyncio.run(scenario())

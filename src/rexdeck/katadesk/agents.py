@@ -71,8 +71,9 @@ same command again to renew the claim while you are still working.
 2. Read it with `kata show {ref}`, then do the work in this directory.
 3. Comment your findings and how you verified them: \
 `kata comment {ref} -m "<findings and verification>" --agent`.
-4. Close it only once the work is verified: \
-`kata close {ref} --done -m "<what changed and how it was verified>" --agent`.
+4. Close it only once the work is verified, with the evidence kata requires: \
+`kata close {ref} --done -m "<what changed and how it was verified>" \
+--test "<command that passed>" --agent`, or `--commit <sha>` instead of `--test`.
 5. If you cannot finish, do not close it. Run \
 `kata meta set {ref} work.attention needs-human --agent` and \
 `kata meta set {ref} work.attention_msg "<why a person is needed>" --agent`, \

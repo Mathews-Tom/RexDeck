@@ -174,6 +174,7 @@ def test_prompt_states_kata_agent_loop_for_the_issue() -> None:
         f"kata claim {PARENT_REF} --ttl 2h",
         f"kata comment {PARENT_REF} -m",
         f"kata close {PARENT_REF} --done -m",
+        '--test "<command that passed>" --agent',
         f"kata meta set {PARENT_REF} work.attention needs-human",
         f"kata meta set {PARENT_REF} work.attention_msg",
     ):
