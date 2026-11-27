@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -11,10 +14,12 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
-from textual.events import Resize
+from textual.events import Key, Resize
+from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Markdown, Static
 
+from rexdeck.katadesk.agents import Agent, Store, prompt_text
 from rexdeck.katadesk.kata import (
     Daemon,
     Detail,
@@ -26,6 +31,7 @@ from rexdeck.katadesk.kata import (
     event_kind,
     tree,
 )
+from rexdeck.katadesk.rex import AgentRex, Desk, State, event_block, moment
 
 # Wide enough for the list and the detail side by side; narrower panes stack them.
 SIDE_BY_SIDE = 100
@@ -77,6 +83,45 @@ def _markdown(detail: Detail) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class AgentSetup:
+    """What starting agents needs: verified Rex calls, the store and omp's path."""
+
+    rex: AgentRex
+    store: Store
+    omp: str
+    endpoint: str
+
+
+class Choice(ModalScreen[str | None]):
+    """A one-key question: each listed key answers with its value; escape cancels."""
+
+    CSS = """
+    Choice { align: center middle; }
+    #question { width: 76; height: auto; padding: 1 2; border: solid $accent;
+                background: $surface; }
+    """
+
+    def __init__(self, question: str, answers: dict[str, tuple[str, str]]) -> None:
+        super().__init__()
+        self.question = question
+        self.answers = answers
+
+    def compose(self) -> ComposeResult:
+        keys = "   ".join(f"{key} {label}" for key, (_, label) in self.answers.items())
+        yield Static(
+            f"{self.question}\n\n{keys}   esc cancel", id="question", markup=False
+        )
+
+    def on_key(self, event: Key) -> None:
+        event.stop()
+        event.prevent_default()
+        if event.key == "escape":
+            self.dismiss(None)
+        elif event.key in self.answers:
+            self.dismiss(self.answers[event.key][0])
+
+
 class KataDesk(App[None]):
     TITLE = "RexDeck Kata Desk"
     ENABLE_COMMAND_PALETTE = False
@@ -96,9 +141,15 @@ class KataDesk(App[None]):
         Binding("1", "issues", "Issues"),
         Binding("2", "attention", "Attention"),
         Binding("s", "status_filter", "Open/closed"),
+        Binding("a", "agent", "Agent"),
+        Binding("g", "focus_agent", "Go to agent"),
+        Binding("n", "next_waiting", "Next waiting"),
+        Binding("x", "stop_agent", "Stop agent"),
     ]
 
-    def __init__(self, kata: Kata) -> None:
+    def __init__(
+        self, kata: Kata, agents: AgentSetup | str = "agents are not configured"
+    ) -> None:
         super().__init__()
         self.kata = kata
         self.mode = "issues"
@@ -115,6 +166,14 @@ class KataDesk(App[None]):
         # True from scheduling a tail until it ends, so a refresh burst starts one.
         self._tailing = False
         self._settle: Timer | None = None
+        self.agent_setup = agents if isinstance(agents, AgentSetup) else None
+        # Why agents are off; None once the desk verified its own Rex block.
+        self.agents_off: str | None = agents if isinstance(agents, str) else None
+        self.desk: Desk | None = None
+        self.agents: list[Agent] = []
+        self.agent_states: dict[str, State] = {}
+        self._agent_events: asyncio.subprocess.Process | None = None
+        self._agent_settle: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Static("Kata Desk", id="header", markup=False)
@@ -128,12 +187,16 @@ class KataDesk(App[None]):
     def on_mount(self) -> None:
         self.query_one(DataTable).focus()
         self.action_refresh()
+        self._open_agents()
 
     def on_resize(self, event: Resize) -> None:
         self.query_one("#body").set_class(event.size.width < SIDE_BY_SIDE, "stacked")
 
     async def on_unmount(self) -> None:
         await self._stop_events()
+        process, self._agent_events = self._agent_events, None
+        if process is not None:
+            await self._terminate(process)
 
     # Reading
 
@@ -164,6 +227,8 @@ class KataDesk(App[None]):
         generation, status = self._generation, self.status_filter
         self.state = "loading"
         self._render()
+        if self.desk is not None:
+            self._schedule_agents()
 
         async def fetch() -> None:
             try:
@@ -295,6 +360,12 @@ class KataDesk(App[None]):
                 f"Kata Desk · {project} · daemon {snapshot.daemon.kind}"
                 f" · attention for {snapshot.recipient}"
             )
+        if self.agents:
+            waiting = sum(1 for agent in self.agents if self._waiting(agent))
+            header += f" · agents {len(self.agents)}"
+            header += f", {waiting} waiting" if waiting else ""
+        elif self.agents_off is not None:
+            header += " · agents off"
         self.query_one("#header", Static).update(header)
         freshness = (
             "live"
@@ -323,10 +394,11 @@ class KataDesk(App[None]):
         row = table.cursor_row
         table.clear(columns=True)
         if self.mode == "issues":
-            table.add_columns("ID", "P", "Status", "Title", "Owner", "Updated")
+            table.add_columns("ID", "P", "Status", "Title", "Owner", "Updated", "Agent")
             for index, (depth, issue) in enumerate(self.rows):
                 title = ("  " * (depth - 1) + "└ " if depth else "") + issue.title
                 status = issue.status + (" · blocked" if issue.blocked else "")
+                agent = self._agent_for(issue.ref)
                 table.add_row(
                     Text(issue.short),
                     Text("—" if issue.priority is None else f"P{issue.priority}"),
@@ -334,6 +406,7 @@ class KataDesk(App[None]):
                     Text(title),
                     Text(issue.owner or "—"),
                     Text(issue.updated),
+                    Text("" if agent is None else self._state(agent).badge),
                     key=str(index),
                 )
             count = len(self.rows)
@@ -424,3 +497,333 @@ class KataDesk(App[None]):
             return
         self.status_filter = "closed" if self.status_filter == "open" else "open"
         self.action_refresh()
+
+    # Agents
+
+    def _state(self, agent: Agent) -> State:
+        return self.agent_states.get(agent.block_id, State("reading"))
+
+    def _waiting(self, agent: Agent) -> bool:
+        state = self._state(agent)
+        return state.running and state.waiting_since is not None
+
+    def _agent_for(self, ref: str) -> Agent | None:
+        return max(
+            (agent for agent in self.agents if agent.ref == ref),
+            key=lambda agent: agent.started,
+            default=None,
+        )
+
+    def _refuse(self, reason: str) -> None:
+        self.notice = reason
+        self._render()
+
+    def _open_agents(self) -> None:
+        setup = self.agent_setup
+        if setup is None:
+            return
+
+        async def verify() -> None:
+            try:
+                desk = await asyncio.to_thread(setup.rex.desk)
+            except (OSError, RuntimeError) as error:
+                self.agents_off = f"Agents unavailable: {error}"
+                self._render()
+                return
+            self.desk = desk
+            self.run_worker(self._follow_agents(desk), group="agent-events")
+            await self._read_agents()
+
+        self.run_worker(verify(), group="agent-open", exclusive=True)
+
+    def _schedule_agents(self) -> None:
+        if self._agent_settle is not None:
+            self._agent_settle.stop()
+        self._agent_settle = self.set_timer(
+            SETTLE,
+            lambda: self.run_worker(
+                self._read_agents(), group="agent-read", exclusive=True
+            ),
+        )
+
+    async def _read_agents(self) -> None:
+        """Relist this endpoint's agents with Rex's state; forget those whose block is gone."""
+        setup = self.agent_setup
+        if setup is None or self.desk is None:
+            return
+
+        def read() -> tuple[list[Agent], dict[str, State]]:
+            agents = [a for a in setup.store.load() if a.endpoint == setup.endpoint]
+            states = setup.rex.states(agents)
+            gone = {block for block, state in states.items() if state.gone}
+            if gone:
+                setup.store.update(
+                    lambda rows: [a for a in rows if a.block_id not in gone]
+                )
+                for agent in agents:
+                    if agent.block_id in gone:
+                        setup.store.forget_prompt(agent)
+            kept = [agent for agent in agents if agent.block_id not in gone]
+            return kept, {block: states[block] for block in states if block not in gone}
+
+        try:
+            self.agents, self.agent_states = await asyncio.to_thread(read)
+        except (OSError, RuntimeError) as error:
+            self.notice = f"Agents: {error}"
+        self._render()
+
+    async def _follow_agents(self, desk: Desk) -> None:
+        # Same process group as the pane: Rex's hangup on close reaches it too.
+        setup = self.agent_setup
+        if setup is None:
+            return
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *setup.rex.events_argv(desk),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                limit=LINE_LIMIT,
+            )
+        except (OSError, RuntimeError) as error:
+            self._refuse(f"Agent updates unavailable: {error}")
+            return
+        self._agent_events = process
+        assert process.stdout is not None
+        try:
+            async for raw in process.stdout:
+                block = event_block(raw.decode(errors="replace"))
+                if block is not None and any(a.block_id == block for a in self.agents):
+                    self._schedule_agents()
+        except ValueError:
+            pass
+        finally:
+            if self._agent_events is process:
+                self._agent_events = None
+                await self._terminate(process)
+                if self.is_running:
+                    self._refuse(
+                        self.notice or "Agent updates stopped; press r to refresh."
+                    )
+
+    def _selected_issue(self) -> Issue | None:
+        index = self.query_one(DataTable).cursor_row
+        if self.mode == "issues" and 0 <= index < len(self.rows):
+            return self.rows[index][1]
+        return None
+
+    def action_agent(self) -> None:
+        if self.agent_setup is None or self.desk is None:
+            self._refuse(self.agents_off or "Agents are still starting; try again")
+            return
+        issue = self._selected_issue()
+        if issue is None:
+            self._refuse("Select an issue in Issues (1) to start an agent on it")
+            return
+        if issue.status != "open":
+            self._refuse(f"{issue.ref} is {issue.status}; agents start on open issues")
+            return
+        current = self._agent_for(issue.ref)
+        if current is not None and self._state(current).running:
+            self._refuse(f"An agent already works on {issue.ref}; g focuses it")
+            return
+
+        def chosen(placement: str | None) -> None:
+            if placement is not None:
+                self._start(issue, placement)
+
+        self.push_screen(
+            Choice(
+                f"Start an omp agent on {issue.ref}: {issue.title}",
+                {
+                    "s": ("split", "split beside the desk"),
+                    "w": ("window", "new window"),
+                    "b": ("background", "background window"),
+                },
+            ),
+            chosen,
+        )
+
+    def _start(self, issue: Issue, placement: str) -> None:
+        setup, desk = self.agent_setup, self.desk
+        if setup is None or desk is None:
+            return
+        anchor = next(
+            (
+                agent
+                for agent in self.agents
+                if agent.placement == "background" and self._state(agent).running
+            ),
+            None,
+        )
+        self._refuse(f"Starting an agent on {issue.ref}…")
+
+        def start() -> Agent:
+            # A fresh locate first: kata show would start a stopped daemon.
+            self.kata.locate()
+            current = self.kata.detail(issue.ref).issue
+            if current.status != "open":
+                raise RuntimeError(f"{issue.ref} is {current.status} now")
+            setup.rex.require_current(desk)
+            prompt = setup.store.prompt(
+                issue.ref, prompt_text(issue.ref, current.title)
+            )
+            command = [
+                sys.executable,
+                "-I",
+                "-m",
+                "rexdeck.katadesk.agent",
+                setup.omp,
+                issue.ref,
+                str(prompt),
+            ]
+            # The agent runs kata and omp under the Rex server's minimal PATH.
+            prepend = list(
+                dict.fromkeys(os.path.dirname(p) for p in (setup.omp, self.kata.path))
+            )
+            try:
+                block, window, host = setup.rex.start(
+                    desk,
+                    placement,
+                    label=f"kata {issue.ref}",
+                    cwd=str(self.kata.cwd),
+                    command=command,
+                    path_prepend=prepend,
+                    background=anchor,
+                )
+            except (OSError, RuntimeError):
+                prompt.unlink(missing_ok=True)
+                raise
+            agent = Agent(
+                block_id=block,
+                session_id=desk.session_id,
+                host_id=host,
+                instance_id=desk.instance_id,
+                endpoint=setup.endpoint,
+                ref=issue.ref,
+                title=current.title,
+                placement=placement,
+                window_id=window,
+                prompt=str(prompt),
+                started=time.time(),
+            )
+            try:
+                setup.store.update(lambda rows: [*rows, agent])
+            except (OSError, RuntimeError):
+                # Never leave an agent running that the desk cannot list.
+                setup.rex.stop(agent)
+                prompt.unlink(missing_ok=True)
+                raise
+            return agent
+
+        async def run() -> None:
+            try:
+                agent = await asyncio.to_thread(start)
+            except (OSError, RuntimeError, KataError) as error:
+                self._refuse(f"No agent started: {error}")
+                return
+            self.agents.append(agent)
+            self._refuse(f"Agent started on {agent.ref} ({agent.placement})")
+            self._schedule_agents()
+
+        self.run_worker(run(), group="agent-start", exclusive=True)
+
+    def _focus(self, agent: Agent) -> None:
+        setup = self.agent_setup
+        if setup is None:
+            return
+
+        async def run() -> None:
+            try:
+                await asyncio.to_thread(setup.rex.focus, agent)
+            except (OSError, RuntimeError) as error:
+                self._refuse(f"{agent.ref}: {error}")
+                return
+            self._refuse(f"Focused the agent on {agent.ref}")
+
+        self.run_worker(run(), group="agent-focus", exclusive=True)
+
+    def _selected_agent(self) -> Agent | None:
+        ref = self._selected_ref()
+        agent = None if ref is None else self._agent_for(ref)
+        if agent is None:
+            self._refuse("No agent on the selected issue; a starts one")
+        return agent
+
+    def action_focus_agent(self) -> None:
+        agent = self._selected_agent()
+        if agent is not None:
+            self._focus(agent)
+
+    def action_next_waiting(self) -> None:
+        waiting = [agent for agent in self.agents if self._waiting(agent)]
+        if not waiting:
+            self._refuse("No agent is waiting for you")
+            return
+        latest = max(
+            waiting, key=lambda agent: moment(self._state(agent).waiting_since or "")
+        )
+        self._focus(latest)
+
+    def action_stop_agent(self) -> None:
+        setup = self.agent_setup
+        agent = self._selected_agent()
+        if setup is None or agent is None:
+            return
+        if self._state(agent).replaced:
+            # Its block belonged to an earlier Rex server: nothing there to close.
+            setup.store.update(
+                lambda rows: [a for a in rows if a.block_id != agent.block_id]
+            )
+            self.agents = [a for a in self.agents if a.block_id != agent.block_id]
+            self._refuse(
+                f"The agent on {agent.ref} ran on a replaced Rex server; nothing "
+                "closed, record removed"
+            )
+            return
+
+        async def stop() -> None:
+            try:
+                await asyncio.to_thread(setup.rex.stop, agent)
+            except (OSError, RuntimeError) as error:
+                self._refuse(f"{agent.ref}: {error}")
+                return
+            self._refuse(f"Stopped the agent on {agent.ref}")
+            await self._read_agents()
+
+        def chosen(answer: str | None) -> None:
+            if answer == "stop":
+                self.run_worker(stop(), group="agent-stop", exclusive=True)
+
+        self.push_screen(
+            Choice(
+                f"Stop the agent on {agent.ref}? This closes its {agent.placement} "
+                "block and ends omp there; every other block stays.",
+                {"y": ("stop", "stop it"), "n": ("keep", "keep it")},
+            ),
+            chosen,
+        )
+
+    async def action_quit(self) -> None:
+        running = [agent for agent in self.agents if self._state(agent).running]
+        if not running:
+            self.exit()
+            return
+        lines = "\n".join(
+            f"  {agent.ref} · {agent.placement} · {self._state(agent).badge}"
+            for agent in running
+        )
+
+        def chosen(answer: str | None) -> None:
+            if answer == "quit":
+                self.exit()
+
+        self.push_screen(
+            Choice(
+                f"These agents keep running after Kata Desk quits:\n{lines}\n\n"
+                "Stop one with x first, or close its block in Rex. Reopening the "
+                "desk lists them again.",
+                {"y": ("quit", "quit, leave them running"), "n": ("stay", "stay")},
+            ),
+            chosen,
+        )
