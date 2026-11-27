@@ -19,7 +19,7 @@ from typing import cast
 
 from rexdeck import binding, lifecycle, settings
 
-# Hook receipts look these up through this module at call time.
+# observe and hook receipts look these up through this module at call time.
 _block = binding.block
 _call = binding.call
 

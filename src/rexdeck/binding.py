@@ -43,24 +43,42 @@ def call(
     return lifecycle._rex(setup, "api", "call", "-s", session, method, json.dumps(args))
 
 
-def block(
-    setup: lifecycle.Setup, session: str, block_id: str
-) -> dict[str, object] | None:
-    """Find one exact block, placed or detached, or None when it or its session is gone."""
+def _listed(setup: lifecycle.Setup, session: str) -> list[object] | None:
+    """The session's raw block list, or None when the session is gone."""
     sessions = lifecycle._rex(setup, "ls", "--json").get("sessions")
     if not isinstance(sessions, list):
         raise RuntimeError("Invalid Rex session list")
     if not any(_object(item).get("session_id") == session for item in sessions):
         return None
     value = call(setup, session, "session.list_blocks", {})
-    blocks = value.get("blocks") or []
-    if not isinstance(blocks, list):
+    listed = value.get("blocks") or []
+    if not isinstance(listed, list):
         raise RuntimeError("Invalid Rex block list")
-    for item in blocks:
+    return listed
+
+
+def block(
+    setup: lifecycle.Setup, session: str, block_id: str
+) -> dict[str, object] | None:
+    """Find one exact block, placed or detached, or None when it or its session is gone."""
+    for item in _listed(setup, session) or []:
         candidate = _object(item)
         if candidate.get("block_id") == block_id:
             return candidate
     return None
+
+
+def blocks(setup: lifecycle.Setup, session: str) -> dict[str, dict[str, object]] | None:
+    """Every block in the session by ID, or None when the session is gone."""
+    listed = _listed(setup, session)
+    if listed is None:
+        return None
+    found: dict[str, dict[str, object]] = {}
+    for item in listed:
+        candidate = _object(item)
+        if isinstance(candidate.get("block_id"), str):
+            found[cast(str, candidate["block_id"])] = candidate
+    return found
 
 
 def focus(
