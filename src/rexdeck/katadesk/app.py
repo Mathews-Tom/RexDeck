@@ -19,7 +19,7 @@ from textual.screen import ModalScreen
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Markdown, Static
 
-from rexdeck.katadesk.agents import Agent, Store, prompt_text
+from rexdeck.katadesk.agents import Agent, Store, one_line, prompt_text
 from rexdeck.katadesk.kata import (
     Daemon,
     Detail,
@@ -174,7 +174,10 @@ class KataDesk(App[None]):
         self.agents_off: str | None = agents if isinstance(agents, str) else None
         self.desk: Desk | None = None
         self.agents: list[Agent] = []
-        self.agent_states: dict[str, State] = {}
+        self.agent_states: dict[tuple[str, str, str], State] = {}
+        # The ref of the start in flight: one at a time, so a second a cannot race
+        # the first into a duplicate agent or a second background window.
+        self._starting: str | None = None
         self._agent_events: asyncio.subprocess.Process | None = None
         self._agent_settle: Timer | None = None
 
@@ -512,7 +515,7 @@ class KataDesk(App[None]):
     # Agents
 
     def _state(self, agent: Agent) -> State:
-        return self.agent_states.get(agent.block_id, State("reading"))
+        return self.agent_states.get(agent.key, State("reading"))
 
     def _waiting(self, agent: Agent) -> bool:
         state = self._state(agent)
@@ -563,19 +566,17 @@ class KataDesk(App[None]):
         if setup is None or self.desk is None:
             return
 
-        def read() -> tuple[list[Agent], dict[str, State]]:
+        def read() -> tuple[list[Agent], dict[tuple[str, str, str], State]]:
             agents = [a for a in setup.store.load() if a.endpoint == setup.endpoint]
             states = setup.rex.states(agents)
-            gone = {block for block, state in states.items() if state.gone}
+            gone = {key for key, state in states.items() if state.gone}
             if gone:
-                setup.store.update(
-                    lambda rows: [a for a in rows if a.block_id not in gone]
-                )
+                setup.store.update(lambda rows: [a for a in rows if a.key not in gone])
                 for agent in agents:
-                    if agent.block_id in gone:
+                    if agent.key in gone:
                         setup.store.forget_prompt(agent)
-            kept = [agent for agent in agents if agent.block_id not in gone]
-            return kept, {block: states[block] for block in states if block not in gone}
+            kept = [agent for agent in agents if agent.key not in gone]
+            return kept, {key: states[key] for key in states if key not in gone}
 
         try:
             self.agents, self.agent_states = await asyncio.to_thread(read)
@@ -627,6 +628,9 @@ class KataDesk(App[None]):
         if self.agent_setup is None or self.desk is None:
             self._refuse(self.agents_off or "Agents are still starting; try again")
             return
+        if self._starting is not None:
+            self._refuse(f"An agent is still starting on {self._starting}; wait for it")
+            return
         issue = self._selected_issue()
         if issue is None:
             self._refuse("Select an issue in Issues (1) to start an agent on it")
@@ -645,7 +649,7 @@ class KataDesk(App[None]):
 
         self.push_screen(
             Choice(
-                f"Start an omp agent on {issue.ref}: {issue.title}",
+                f"Start an omp agent on {issue.ref}: {one_line(issue.title, issue.ref)}",
                 {
                     "s": ("split", "split beside the desk"),
                     "w": ("window", "new window"),
@@ -659,14 +663,20 @@ class KataDesk(App[None]):
         setup, desk = self.agent_setup, self.desk
         if setup is None or desk is None:
             return
+        # Join a background window only if this desk placed it on this server.
         anchor = next(
             (
                 agent
                 for agent in self.agents
-                if agent.placement == "background" and self._state(agent).running
+                if agent.placement == "background"
+                and agent.session_id == desk.session_id
+                and agent.instance_id == desk.instance_id
+                and self._state(agent).running
+                and not self._state(agent).rehosted
             ),
             None,
         )
+        self._starting = issue.ref
         self._refuse(f"Starting an agent on {issue.ref}…")
 
         def start() -> Agent:
@@ -712,7 +722,7 @@ class KataDesk(App[None]):
                 instance_id=desk.instance_id,
                 endpoint=setup.endpoint,
                 ref=issue.ref,
-                title=current.title,
+                title=one_line(current.title, issue.ref),
                 placement=placement,
                 window_id=window,
                 prompt=str(prompt),
@@ -722,8 +732,10 @@ class KataDesk(App[None]):
                 setup.store.update(lambda rows: [*rows, agent])
             except (OSError, RuntimeError):
                 # Never leave an agent running that the desk cannot list.
-                setup.rex.stop(agent)
-                prompt.unlink(missing_ok=True)
+                try:
+                    setup.rex.stop(agent)
+                finally:
+                    prompt.unlink(missing_ok=True)
                 raise
             return agent
 
@@ -733,11 +745,13 @@ class KataDesk(App[None]):
             except (OSError, RuntimeError, KataError) as error:
                 self._refuse(f"No agent started: {error}")
                 return
+            finally:
+                self._starting = None
             self.agents.append(agent)
             self._refuse(f"Agent started on {agent.ref} ({agent.placement})")
             self._schedule_agents()
 
-        self.run_worker(run(), group="agent-start", exclusive=True)
+        self.run_worker(run(), group="agent-start")
 
     def _focus(self, agent: Agent) -> None:
         setup = self.agent_setup
@@ -782,15 +796,7 @@ class KataDesk(App[None]):
         if setup is None or agent is None:
             return
         if self._state(agent).replaced:
-            # Its block belonged to an earlier Rex server: nothing there to close.
-            setup.store.update(
-                lambda rows: [a for a in rows if a.block_id != agent.block_id]
-            )
-            self.agents = [a for a in self.agents if a.block_id != agent.block_id]
-            self._refuse(
-                f"The agent on {agent.ref} ran on a replaced Rex server; nothing "
-                "closed, record removed"
-            )
+            self._forget_replaced(agent)
             return
 
         async def stop() -> None:
@@ -811,6 +817,38 @@ class KataDesk(App[None]):
                 f"Stop the agent on {agent.ref}? This closes its {agent.placement} "
                 "block and ends omp there; every other block stays.",
                 {"y": ("stop", "stop it"), "n": ("keep", "keep it")},
+            ),
+            chosen,
+        )
+
+    def _forget_replaced(self, agent: Agent) -> None:
+        """Drop the record of an agent from an earlier Rex server; Rex is untouched."""
+        setup = self.agent_setup
+        if setup is None:
+            return
+
+        def forget() -> None:
+            setup.store.update(lambda rows: [a for a in rows if a.key != agent.key])
+            setup.store.forget_prompt(agent)
+
+        async def run() -> None:
+            try:
+                await asyncio.to_thread(forget)
+            except (OSError, RuntimeError) as error:
+                self._refuse(f"{agent.ref}: {error}")
+                return
+            self.agents = [a for a in self.agents if a.key != agent.key]
+            self._refuse(f"Removed the record of the agent on {agent.ref}")
+
+        def chosen(answer: str | None) -> None:
+            if answer == "forget":
+                self.run_worker(run(), group="agent-stop", exclusive=True)
+
+        self.push_screen(
+            Choice(
+                f"The agent on {agent.ref} ran on an earlier Rex server, so there is "
+                "nothing to close. Remove its record from Kata Desk?",
+                {"y": ("forget", "remove the record"), "n": ("keep", "keep it")},
             ),
             chosen,
         )

@@ -51,6 +51,8 @@ class State:
     waiting_since: str | None = None
     gone: bool = False
     replaced: bool = False
+    # The block ID now belongs to another host: refused, but never forgotten.
+    rehosted: bool = False
 
     @property
     def running(self) -> bool:
@@ -193,6 +195,8 @@ class AgentRex:
                 "command": list(command),
             },
         }
+        if placement == "background" and background is not None:
+            background = self._anchor(desk, background)
         window: str | None = None
         if placement == "split":
             created = self._call(
@@ -213,7 +217,6 @@ class AgentRex:
                 "session.new_window",
                 {"focus": True, "window_label": label, "layout": {"block": block}},
             )
-            window = _id(created.get("window_id"), "window")
         elif placement == "background" and background is not None:
             # Later background agents join the first one's window, unfocused.
             created = self._call(
@@ -238,35 +241,62 @@ class AgentRex:
                     "layout": {"block": block},
                 },
             )
-            window = _id(created.get("window_id"), "window")
         else:
             raise RuntimeError(f"Unknown agent placement: {placement}")
         ids = created.get("block_ids")
         if not isinstance(ids, list) or len(ids) != 1:
             raise RuntimeError("Rex did not report exactly one agent block")
         block_id = _id(ids[0], "agent block")
-        found = binding.block(self.setup, desk.session_id, block_id)
-        if found is None or found.get("placement") != "placed":
-            raise RuntimeError("Rex reported an agent block it cannot find")
-        return block_id, window, _id(found.get("host_id"), "host")
+        try:
+            if window is None and placement != "split":
+                window = _id(created.get("window_id"), "window")
+            found = binding.block(self.setup, desk.session_id, block_id)
+            if found is None or found.get("placement") != "placed":
+                raise RuntimeError("Rex reported an agent block it cannot find")
+            return block_id, window, _id(found.get("host_id"), "host")
+        except (OSError, RuntimeError) as error:
+            # Never leave a write-capable agent running that no record names.
+            try:
+                self._call(desk.session_id, "block.close", {"block_id": block_id})
+            except (OSError, RuntimeError) as closing:
+                raise RuntimeError(
+                    f"{error}; the new block {block_id} could not be closed: {closing}"
+                ) from error
+            raise
 
-    def states(self, agents: Sequence[Agent]) -> dict[str, State]:
+    def _anchor(self, desk: Desk, agent: Agent) -> Agent | None:
+        """A background agent to join only if it is this desk's, still placed."""
+        if agent.instance_id != desk.instance_id or agent.session_id != desk.session_id:
+            return None
+        found = binding.block(self.setup, desk.session_id, agent.block_id)
+        if (
+            found is None
+            or found.get("placement") != "placed"
+            or found.get("host_id") != agent.host_id
+        ):
+            return None
+        return agent
+
+    def states(self, agents: Sequence[Agent]) -> dict[tuple[str, str, str], State]:
         """Each agent's state, reading the server instance and block lists once."""
         if not agents:
             return {}
         instance = binding.instance(self.setup, PURPOSE)
         listed: dict[str, dict[str, dict[str, object]] | None] = {}
-        result: dict[str, State] = {}
+        result: dict[tuple[str, str, str], State] = {}
         for agent in agents:
             if agent.instance_id != instance:
-                result[agent.block_id] = State("server replaced", replaced=True)
+                result[agent.key] = State("server replaced", replaced=True)
                 continue
             if agent.session_id not in listed:
-                listed[agent.session_id] = self._blocks(agent.session_id)
+                listed[agent.session_id] = binding.blocks(self.setup, agent.session_id)
             blocks = listed[agent.session_id]
             found = None if blocks is None else blocks.get(agent.block_id)
-            if found is None or found.get("host_id") != agent.host_id:
-                result[agent.block_id] = State("gone", gone=True)
+            if found is None:
+                result[agent.key] = State("gone", gone=True)
+                continue
+            if found.get("host_id") != agent.host_id:
+                result[agent.key] = State("block changed host", rehosted=True)
                 continue
             target: dict[str, object] = {"block_id": agent.block_id, "args": {}}
             status = self._call(
@@ -275,24 +305,8 @@ class AgentRex:
             process = self._call(
                 agent.session_id, "com.superlogical.terminal.process", target
             )
-            result[agent.block_id] = badge(status.get("records", []), process)
+            result[agent.key] = badge(status.get("records", []), process)
         return result
-
-    def _blocks(self, session: str) -> dict[str, dict[str, object]] | None:
-        sessions = lifecycle._rex(self.setup, "ls", "--json").get("sessions")
-        if not isinstance(sessions, list):
-            raise RuntimeError("Invalid Rex session list")
-        if not any(_object(item).get("session_id") == session for item in sessions):
-            return None
-        blocks = self._call(session, "session.list_blocks", {}).get("blocks") or []
-        if not isinstance(blocks, list):
-            raise RuntimeError("Invalid Rex block list")
-        found: dict[str, dict[str, object]] = {}
-        for item in blocks:
-            candidate = _object(item)
-            if isinstance(candidate.get("block_id"), str):
-                found[cast(str, candidate["block_id"])] = candidate
-        return found
 
     def focus(self, agent: Agent) -> None:
         binding.focus(
