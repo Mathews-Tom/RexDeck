@@ -61,7 +61,7 @@ Each guide's **Configuration** section names the exact files, the environment va
 | [ClickUp](../plugins/clickup/README.md#configuration) | RexDeck: `$XDG_CONFIG_HOME/rexdeck/clickup.json` (default `~/.config/rexdeck/clickup.json`), written by `rexdeck clickup select`; token from a named environment variable (default `CLICKUP_API_TOKEN`) |
 | [Inbox](../plugins/inbox/README.md#configuration) | GitHub CLI: `GH_CONFIG_DIR`, `$XDG_CONFIG_HOME/gh` or `~/.config/gh`; filters are pane-local |
 | [Kata](../plugins/kata/README.md#configuration) | kata: `<KATA_HOME>/config.toml` (default `~/.kata/config.toml`) plus the workspace's `.kata.toml` and `.kata.local.toml` |
-| [Kata Desk](../plugins/katadesk/README.md#configuration) | kata's own configuration as for Kata; `KATA_INBOX_USER` selects the attention recipient; RexDeck stores nothing |
+| [Kata Desk](../plugins/katadesk/README.md#configuration) | kata's own configuration as for Kata; `KATA_INBOX_USER` selects the attention recipient; agents use your omp configuration; RexDeck stores the agents it started in `katadesk/state/` |
 | [Usage](../plugins/usage/README.md#configuration) | tokscale: `~/.config/tokscale/settings.json` (or `TOKSCALE_CONFIG_DIR`) |
 | [Focus](../plugins/focus/README.md#configuration) | pomo: a trusted local `pomo.yaml` overrides `~/.config/pomo/pomo.yaml` |
 | [Music](../plugins/music/README.md#configuration) | spotify_player: `~/.config/spotify-player/` (`app.toml`, `keymap.toml`, `theme.toml`) |

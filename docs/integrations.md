@@ -53,7 +53,7 @@ Each guide covers requirements, how to open the integration, its controls, confi
 | [ClickUp](../plugins/clickup/README.md) | `clickup` | RexDeck view over the ClickUp API | saved account, workspace and list or space | Browse a list or space queue, read details and comments, and apply reviewed task changes |
 | [Inbox](../plugins/inbox/README.md) | `inbox` | RexDeck view over GitHub CLI | verified GitHub account | Read unread notifications with filters and explicit refresh |
 | [Kata](../plugins/kata/README.md) | `kata` | kata tui | kata project bound to the invoking directory | Browse, triage and edit kata issues, jobs and workflows |
-| [Kata Desk](../plugins/katadesk/README.md) | `katadesk` | RexDeck view over the kata CLI | kata project bound to the invoking directory | Read issues and your attention requests, updated live; read-only |
+| [Kata Desk](../plugins/katadesk/README.md) | `katadesk` | RexDeck view over the kata CLI | kata project bound to the invoking directory | Read issues and your attention requests live; start, watch, focus and stop omp agents on an issue |
 | [Usage](../plugins/usage/README.md) | `usage` | tokscale | this machine | Explore omp token usage by model, session and project |
 | [Focus](../plugins/focus/README.md) | `focus` | pomo | invoking directory | Run a work timer with trusted directory settings |
 | [Music](../plugins/music/README.md) | `music` | spotify_player | invoking directory | Browse Spotify playlists and control playback |
