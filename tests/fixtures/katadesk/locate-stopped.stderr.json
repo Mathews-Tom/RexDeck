@@ -1,0 +1,1 @@
+{"error":{"kind":"daemon_unavailable","code":"local_stopped","message":"local_stopped: start the current home with kata daemon start","exit_code":7,"data":{"state":"local_stopped","source":"local runtime","kind":"local","binary_version":"v0.23.0","next_action":"start the current home with kata daemon start"}}}

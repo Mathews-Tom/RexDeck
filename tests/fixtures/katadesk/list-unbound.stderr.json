@@ -1,0 +1,1 @@
+{"error":{"kind":"not_found","code":"project_not_initialized","hint":"run \"kata init --project <name>\" in the workspace root, or pass --project <name>","message":"no .kata.toml ancestor and no git ancestor","exit_code":4}}
