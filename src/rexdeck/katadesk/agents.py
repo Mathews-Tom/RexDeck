@@ -65,8 +65,9 @@ class Agent:
 
 
 def one_line(title: str, ref: str) -> str:
-    """An issue title as one bounded line: it is issue text, never instructions."""
-    return " ".join(title.split())[:TITLE_LIMIT] or ref
+    """An issue title as one bounded printable line: issue text, never instructions."""
+    printable = "".join(ch if ch.isprintable() else " " for ch in title)
+    return " ".join(printable.split())[:TITLE_LIMIT] or ref
 
 
 def prompt_text(ref: str, title: str) -> str:

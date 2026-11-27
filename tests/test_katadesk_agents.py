@@ -58,6 +58,8 @@ class RexFake:
         self.created = 0
         # Rex answering new_window without a window ID, after it created the block.
         self.omit_window = False
+        # The server restarting right after it created a block.
+        self.replace_on_create = False
 
     def status(self, setup: lifecycle.Setup, *, selected: bool) -> dict[str, object]:
         return {"endpoint": setup.server, "instance_id": self.instance}
@@ -70,6 +72,8 @@ class RexFake:
             "placement": "placed",
             "host_id": f"host-{self.created}",
         }
+        if self.replace_on_create:
+            self.instance = "instance-two"
         return block
 
     def rex(self, setup: lifecycle.Setup, *args: str) -> dict[str, object]:
@@ -420,6 +424,20 @@ def test_a_block_whose_placement_cannot_be_confirmed_is_closed_again(
     assert set(fake.blocks) == {DESK}
 
 
+def test_a_new_block_is_never_closed_on_a_server_that_replaced_its_own(
+    rex: tuple[RexFake, AgentRex],
+) -> None:
+    fake, agents = rex
+    desk = agents.desk()
+    fake.omit_window = True
+    fake.replace_on_create = True
+    with pytest.raises(
+        RuntimeError, match="was not closed: The Rex server was replaced"
+    ):
+        started(agents, desk, "window")
+    assert fake.mutations() == ["session.new_window"]
+
+
 def test_background_agents_join_only_this_desks_live_window(
     rex: tuple[RexFake, AgentRex],
 ) -> None:
@@ -445,6 +463,7 @@ def test_titles_become_one_bounded_line_and_bad_rows_are_never_written(
     line = one_line(title, PARENT_REF)
     assert "\n" not in line and len(line) == TITLE_LIMIT
     assert one_line(" \n ", PARENT_REF) == PARENT_REF
+    assert one_line("a\x00b\x1b[31mc\u2028d", PARENT_REF) == "a b [31mc d"
     assert f"> {line}\n" in prompt_text(PARENT_REF, title)
     store = Store(tmp_path / "katadesk" / "state")
     store.update(lambda rows: [agent_row(1)])
@@ -674,6 +693,8 @@ def test_a_second_start_waits_for_the_first_instead_of_racing_it(
             await pilot.press("a")
             assert "still starting" in app.notice
             assert not isinstance(app.screen, Choice)
+            await pilot.press("q")
+            assert app.is_running and "quit once it is placed" in app.notice
             gate.set()
             await settle(pilot, lambda: app.agents)
             await pilot.pause(0.3)
@@ -707,26 +728,36 @@ def test_an_agent_that_cannot_be_recorded_is_closed_and_its_prompt_removed(
     asyncio.run(scenario())
 
 
-def test_stop_on_an_agent_from_a_replaced_server_asks_and_never_touches_rex(
+@pytest.mark.parametrize(
+    ("change", "badge", "reason"),
+    [
+        ({"instance_id": "instance-old"}, "server replaced", "nothing to close"),
+        ({"host_id": "host-elsewhere"}, "block changed host", "another host"),
+    ],
+)
+def test_stop_on_an_unreachable_agent_asks_and_removes_only_its_record(
     desk: tuple[KataDesk, RexFake, Fake, Store, Path],
+    change: dict[str, str],
+    badge: str,
+    reason: str,
 ) -> None:
     app, fake, _, store, _ = desk
     live = app.agent_setup
     assert live is not None
     old = started(live.rex, live.rex.desk(), "split")
     prompt = store.prompt(old.ref, "x")
-    old = replace(old, instance_id="instance-old", prompt=str(prompt))
+    old = replace(old, prompt=str(prompt), **change)  # type: ignore[arg-type]
     store.update(lambda rows: [old])
     fake.calls.clear()
 
     async def scenario() -> None:
         async with app.run_test(size=(160, 40)) as pilot:
             await settle(pilot, lambda: app.agent_states)
-            assert app._state(old).badge == "server replaced"
+            assert app._state(old).badge == badge
             app.query_one("DataTable").move_cursor(row=parent_row(app))  # type: ignore[attr-defined]
             await pilot.press("x")
             assert isinstance(app.screen, Choice)
-            assert "nothing to close" in app.screen.question
+            assert reason in app.screen.question
             await pilot.press("y")
             await settle(pilot, lambda: not app.agents)
             assert store.load() == [] and not prompt.exists()

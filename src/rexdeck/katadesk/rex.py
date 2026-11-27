@@ -255,12 +255,16 @@ class AgentRex:
                 raise RuntimeError("Rex reported an agent block it cannot find")
             return block_id, window, _id(found.get("host_id"), "host")
         except (OSError, RuntimeError) as error:
-            # Never leave a write-capable agent running that no record names.
+            # Never leave a write-capable agent running that no record names, and
+            # close it only on the same server, where the block still exists.
             try:
+                self.require_current(desk)
+                if binding.block(self.setup, desk.session_id, block_id) is None:
+                    raise RuntimeError("it is no longer in Rex")
                 self._call(desk.session_id, "block.close", {"block_id": block_id})
             except (OSError, RuntimeError) as closing:
                 raise RuntimeError(
-                    f"{error}; the new block {block_id} could not be closed: {closing}"
+                    f"{error}; the new block {block_id} was not closed: {closing}"
                 ) from error
             raise
 

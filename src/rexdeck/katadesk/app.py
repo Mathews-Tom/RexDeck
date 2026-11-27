@@ -795,8 +795,9 @@ class KataDesk(App[None]):
         agent = self._selected_agent()
         if setup is None or agent is None:
             return
-        if self._state(agent).replaced:
-            self._forget_replaced(agent)
+        state = self._state(agent)
+        if state.replaced or state.rehosted:
+            self._forget(agent, state)
             return
 
         async def stop() -> None:
@@ -821,8 +822,8 @@ class KataDesk(App[None]):
             chosen,
         )
 
-    def _forget_replaced(self, agent: Agent) -> None:
-        """Drop the record of an agent from an earlier Rex server; Rex is untouched."""
+    def _forget(self, agent: Agent, state: State) -> None:
+        """Drop the record of an agent Kata Desk can no longer reach; Rex is untouched."""
         setup = self.agent_setup
         if setup is None:
             return
@@ -844,16 +845,26 @@ class KataDesk(App[None]):
             if answer == "forget":
                 self.run_worker(run(), group="agent-stop", exclusive=True)
 
+        reason = (
+            "ran on an earlier Rex server, so there is nothing to close"
+            if state.replaced
+            else "has a block that now belongs to another host, so Kata Desk will "
+            "not close it; close it in Rex if omp still runs there"
+        )
         self.push_screen(
             Choice(
-                f"The agent on {agent.ref} ran on an earlier Rex server, so there is "
-                "nothing to close. Remove its record from Kata Desk?",
+                f"The agent on {agent.ref} {reason}. Remove its record from Kata Desk?",
                 {"y": ("forget", "remove the record"), "n": ("keep", "keep it")},
             ),
             chosen,
         )
 
     async def action_quit(self) -> None:
+        if self._starting is not None:
+            self._refuse(
+                f"An agent is still starting on {self._starting}; quit once it is placed"
+            )
+            return
         running = [agent for agent in self.agents if self._state(agent).running]
         if not running:
             self.exit()
