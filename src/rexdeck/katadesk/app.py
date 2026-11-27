@@ -169,14 +169,8 @@ class KataDesk(App[None]):
             try:
                 snapshot = await asyncio.to_thread(self._read, status)
             except KataError as error:
-                if generation != self._generation:
-                    return
-                self.state = error.state
-                self.notice = str(error)
-                if error.state == "stopped":
-                    self.notice += " · Start it with kata daemon start, then press r."
-                    await self._stop_events()
-                self._render()
+                if generation == self._generation:
+                    await self._fail(error)
                 return
             if generation != self._generation:
                 return
@@ -194,6 +188,14 @@ class KataDesk(App[None]):
 
         self.run_worker(fetch(), group="refresh", exclusive=True)
 
+    async def _fail(self, error: KataError) -> None:
+        self.state = error.state
+        self.notice = str(error)
+        if error.state == "stopped":
+            self.notice += " · Start it with kata daemon start, then press r."
+            await self._stop_events()
+        self._render()
+
     async def _tail(self) -> None:
         try:
             await self._follow()
@@ -208,7 +210,7 @@ class KataDesk(App[None]):
                 cwd=self.kata.cwd,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
                 limit=LINE_LIMIT,
             )
         except OSError as error:
@@ -219,13 +221,16 @@ class KataDesk(App[None]):
         self.live = True
         self._render()
         assert process.stdout is not None
+        errors = asyncio.create_task(self._watch_stream_errors(process))
         try:
             async for raw in process.stdout:
                 if event_kind(raw.decode(errors="replace")) is not None:
+                    self.live = True
                     self._schedule_refresh()
         except ValueError:
             self.notice = "A kata event was too large to read; press r to refresh."
         finally:
+            errors.cancel()
             self.live = False
             if self._events is process:
                 self._events = None
@@ -235,6 +240,22 @@ class KataDesk(App[None]):
                         self.notice or "Live updates stopped; press r to refresh."
                     )
                     self._render()
+
+    async def _watch_stream_errors(self, process: asyncio.subprocess.Process) -> None:
+        # kata events never exits when its daemon stops; it retries and says so on
+        # stderr. Stop claiming live, and re-probe: a stopped daemon ends the stream.
+        assert process.stderr is not None
+        while True:
+            try:
+                line = await process.stderr.readline()
+            except ValueError:
+                line = b"oversized"
+            if not line:
+                return
+            if self.live:
+                self.live = False
+                self._render()
+            self._schedule_refresh()
 
     def _schedule_refresh(self) -> None:
         if self._settle is not None:
@@ -356,7 +377,8 @@ class KataDesk(App[None]):
         self._open_detail()
 
     def _open_detail(self) -> None:
-        # kata show would auto-start a stopped daemon; read details only when ready.
+        # kata show would auto-start a stopped daemon: never read one without a fresh
+        # locate answer, and treat a stopped answer as the desk's own state.
         ref = self._selected_ref()
         if ref is None or self.state != "ready":
             return
@@ -364,6 +386,12 @@ class KataDesk(App[None]):
         generation = self._detail_generation
 
         async def load() -> None:
+            try:
+                await asyncio.to_thread(self.kata.locate)
+            except KataError as error:
+                if generation == self._detail_generation:
+                    await self._fail(error)
+                return
             try:
                 detail = await asyncio.to_thread(self.kata.detail, ref)
             except KataError as error:

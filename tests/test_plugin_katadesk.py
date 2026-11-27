@@ -202,7 +202,7 @@ def test_live_event_reloads_attention_opens_issue_and_quit_stops_the_stream() ->
     assert process.returncode is not None
 
 
-def test_after_a_stopped_answer_the_desk_runs_nothing_that_could_start_kata() -> None:
+def test_a_daemon_stopped_behind_a_ready_desk_is_never_started_by_it() -> None:
     fake = Fake(dict(READS))
     app = KataDesk(Kata(KATA, Path.cwd(), runner=fake))
     app._tailing = True  # no live stream in this scenario
@@ -213,17 +213,62 @@ def test_after_a_stopped_answer_the_desk_runs_nothing_that_could_start_kata() ->
                 await pilot.pause(0.1)
                 if ("show", PARENT_REF) in fake.calls:
                     break
+            # The daemon stops while the desk still shows READY; no refresh ran since.
             fake.answers[("daemon", "locate")] = (
                 7,
                 fixture("locate-stopped.stderr.json"),
             )
             before = len(fake.calls)
-            await pilot.press("r")
-            await pilot.pause(0.5)
             await pilot.press("down")
             await pilot.pause(0.5)
             assert app.state == "stopped"
-            # Only the daemon probe ran: no list, inbox or show could auto-start kata.
+            # Opening a detail probed first and ran no show that could start kata.
             assert fake.calls[before:] == [("daemon", "locate")]
+            await pilot.press("up")
+            await pilot.press("r")
+            await pilot.pause(0.5)
+            assert fake.calls[before:] == [("daemon", "locate")] * 2
 
     asyncio.run(scenario())
+
+
+class RetryingKata(LiveKata):
+    """An event stream that, like kata's, keeps retrying on stderr when the daemon stops."""
+
+    def events_argv(self) -> list[str]:
+        script = (
+            "import sys, time; time.sleep(2); "
+            "print('stream error: connection refused; reconnecting in 1s', "
+            "file=sys.stderr, flush=True); time.sleep(60)"
+        )
+        return [sys.executable, "-c", script]
+
+
+def test_stream_errors_drop_live_and_a_stopped_daemon_ends_the_stream() -> None:
+    fake = Fake(dict(READS))
+    app = KataDesk(RetryingKata(fake))
+
+    async def scenario() -> asyncio.subprocess.Process:
+        async with app.run_test(size=(120, 30)) as pilot:
+            for _ in range(15):
+                await pilot.pause(0.1)
+                if app._events and ("show", PARENT_REF) in fake.calls:
+                    break
+            process = app._events
+            assert process is not None and app.live
+            fake.answers[("daemon", "locate")] = (
+                7,
+                fixture("locate-stopped.stderr.json"),
+            )
+            for _ in range(60):
+                await pilot.pause(0.1)
+                if app.state == "stopped":
+                    break
+            assert app.state == "stopped"
+            assert not app.live and app._events is None
+            # The stream error's re-probe stopped at locate: nothing could start kata.
+            assert fake.calls[-1] == ("daemon", "locate")
+        return process
+
+    process = asyncio.run(scenario())
+    assert process.returncode is not None

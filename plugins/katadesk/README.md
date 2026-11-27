@@ -35,7 +35,7 @@ Kata Desk is independently selectable. Default placement is right, 50%; the shar
 | `r` | Read everything again |
 | `q` | Quit and restore invoking-terminal focus |
 
-The header names the project, the daemon kind and whose attention requests are shown. The status line shows the state (`READY`, `LOADING`, `STOPPED`, `UNBOUND`, `FAILED`, `VERSION`), the view, and `live` while kata's event stream is connected, otherwise the time of the last successful read.
+The header names the project, the daemon kind and whose attention requests are shown. The status line shows the state (`READY`, `LOADING`, `STOPPED`, `VERSION`, `MISSING`, `FAILED`), the view, and `live` while kata's event stream runs without errors, otherwise the time of the last successful read.
 
 - **Issues** lists ID, priority, status (with `blocked` when an open issue blocks it), title, owner and last update. The detail shows the body as Markdown, links (parent, children, blocking), children and comments.
 - **Attention** lists the requests kata holds for the recipient: `KATA_INBOX_USER` from the Rex server's environment when set, otherwise the actor `kata whoami` reports. kata itself supplies no default recipient. The detail of a request shows the issue it was raised on, in whichever project.
@@ -67,9 +67,9 @@ RexDeck passes no project, daemon, actor or credential flags, writes no configur
 
 **Read-only.** Kata Desk runs only `kata daemon locate`, `whoami`, `list`, `show` and `inbox` with `--json`, plus one `kata events --tail --json` while it is open. It makes no kata writes; use `kata` or the [Kata](../kata/README.md) integration to change issues.
 
-**kata's daemon is never started by Kata Desk.** Every read first asks `kata daemon locate`, which does not start a daemon, and a stopped daemon is reported without running any other command. Issue details load only while the daemon answered. Other kata commands start a stopped local daemon by themselves, so if the daemon stops in the moment between the probe and a read, that read can still start it.
+**kata's daemon is never started by Kata Desk.** Every refresh and every issue detail first asks `kata daemon locate`, which does not start a daemon, and a stopped daemon is reported without running any other command. Other kata commands start a stopped local daemon by themselves, so if the daemon stops in the moment between the probe and a read, that read can still start it.
 
-**The event stream lives only as long as the view.** It runs in the pane's process group: quitting the view stops it, and closing the pane ends it through the terminal's hangup. If the view itself is killed (for example `kill -9`), the stream keeps running until the pane closes. The pane then waits at "Press Enter to close RexDeck", which may not respond after the killed view left the terminal in raw mode; close the pane instead.
+**The event stream lives only as long as the view.** It runs in the pane's process group: quitting the view stops it, and closing the pane ends it through the terminal's hangup. When the daemon goes away, kata's stream keeps retrying instead of exiting; Kata Desk drops `live` on its first error, probes the daemon again, and stops the stream once the daemon reports stopped. If the view itself is killed (for example `kill -9`), the stream keeps running until the pane closes. The pane then waits at "Press Enter to close RexDeck", which may not respond after the killed view left the terminal in raw mode; close the pane instead.
 
 Issue titles, bodies, comments and requests are shown as kata returns them, with terminal control sequences removed, and stay in memory only. Links in Markdown are not opened.
 
