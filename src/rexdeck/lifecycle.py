@@ -301,11 +301,22 @@ def _tools(tool: str = "yazi", *, owned: bool = False) -> dict[str, str]:
     return tools
 
 
+def _owned_prerequisites(integration: integrations.Integration) -> tuple[str, ...]:
+    """Executables an owned view runs itself, bound at enable like an interpreter."""
+    if integration.owned_module is None:
+        return ()
+    return tuple(name for name, _source in integration.prerequisites)
+
+
 def _selected_tools(setup: Setup) -> dict[str, str]:
     """Resolve only the executables required by the selected integration."""
     integration = integrations.get(setup.plugin)
     if integration.owned_module is not None:
-        return _tools(integration.tool, owned=True)
+        tools = _tools(integration.tool, owned=True)
+        # The app-started Rex server's PATH is minimal, so the pane gets these first.
+        for name in _owned_prerequisites(integration):
+            tools[name] = _executable(name)
+        return tools
     return _tools(integration.tool)
 
 
@@ -716,8 +727,11 @@ def _module(
 ) -> bytes:
     """Embed the shared host, launcher and one integration's contract fields."""
     integration = integrations.get(setup.plugin)
+    prerequisites = {
+        name: tools[name] for name in _owned_prerequisites(integration) if name in tools
+    }
     opts: dict[str, object] = {
-        **tools,
+        **{key: value for key, value in tools.items() if key not in prerequisites},
         "server": setup.server,
         "launcher_code": launcher.decode("utf-8"),
         "plugin": integration.id,
@@ -730,6 +744,8 @@ def _module(
         "args": list(integration.args),
         "layout": layout.split(),
     }
+    if prerequisites:
+        opts["prerequisites"] = prerequisites
     if integration.context == "selected-file":
         opts["selected_file"] = integration.selected_file
     return (
@@ -788,8 +804,12 @@ def _receipt(paths: _Paths, setup: Setup) -> dict[str, object] | None:
     if result.get("loader_separator") not in ("", "\n"):
         raise RuntimeError("Setup receipt has malformed loader_separator")
     tools = _object(result.get("tools"), "receipt tools")
-    tool = integrations.get(setup.plugin).tool
-    if set(tools) - {"interpreter"} != {"python", "rex", tool} or any(
+    integration = integrations.get(setup.plugin)
+    required = {"python", "rex", integration.tool}
+    # Receipts from before owned-view prerequisites were bound lack them and read
+    # as outdated through _current_bundle rather than malformed.
+    optional = {"interpreter", *_owned_prerequisites(integration)}
+    if not required <= set(tools) <= required | optional or any(
         not isinstance(value, str) or not Path(value).is_absolute() or "\x00" in value
         for value in tools.values()
     ):

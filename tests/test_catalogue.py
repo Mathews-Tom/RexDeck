@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -82,3 +83,10 @@ def test_discovery_fails_loudly_on_a_broken_catalogue(
     result = _plugins(catalogue)
     assert result.returncode != 0
     assert message in result.stderr
+
+
+@pytest.mark.parametrize("name", ["python", "prerequisites", "rexdeck-inbox", "Gh"])
+def test_owned_view_prerequisites_cannot_shadow_module_options(name: str) -> None:
+    inbox = integrations.get("inbox")
+    with pytest.raises(ValueError, match="invalid prerequisite executable name"):
+        replace(inbox, prerequisites=((name, "https://example.invalid"),))

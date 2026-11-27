@@ -201,6 +201,17 @@ class DependencyTests(unittest.TestCase):
         self.assertEqual(dependencies.ensure("files").path, str(executable))
         self.assertFalse(self.manager_marker.exists())
 
+    def test_owned_view_refuses_a_missing_prerequisite_at_enable(self) -> None:
+        """An owned view's prerequisite is checked before the view is registered."""
+        with self.assertRaisesRegex(
+            RuntimeError, r"Gh is a preinstalled prerequisite.*rexdeck enable inbox"
+        ):
+            dependencies.ensure("inbox")
+        self.tool("gh", "gh version 2.80.0")
+        self.assertEqual(
+            dependencies.ensure("inbox").path, str(Path(sys.executable).absolute())
+        )
+
     def test_relative_path_cannot_execute_checkout_tools_or_bind_lifecycle(
         self,
     ) -> None:

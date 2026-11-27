@@ -36,6 +36,29 @@ return function(opts)
     if not directory then error(title .. ' requires an absolute interpreter path', 0) end
     path_prepend = {directory}
   end
+  -- Owned views run their enable-qualified prerequisites themselves; the same minimal
+  -- PATH would hide them, so their directories follow, in name order, without repeats.
+  if opts.prerequisites ~= nil then
+    if type(opts.prerequisites) ~= 'table' then error(title .. ' has invalid prerequisites', 0) end
+    local names = {}
+    for name in pairs(opts.prerequisites) do
+      if not nonempty(name) then error(title .. ' has an invalid prerequisite name', 0) end
+      names[#names + 1] = name
+    end
+    table.sort(names)
+    path_prepend = path_prepend or {}
+    local seen = {}
+    for _, directory in ipairs(path_prepend) do seen[directory] = true end
+    for _, name in ipairs(names) do
+      local value = opts.prerequisites[name]
+      local directory = nonempty(value) and value:match('^(/.*)/[^/]+$')
+      if not directory then error(title .. ' requires an absolute ' .. name .. ' path', 0) end
+      if not seen[directory] then
+        seen[directory] = true
+        path_prepend[#path_prepend + 1] = directory
+      end
+    end
+  end
   local args = opts.args
   if type(args) ~= 'table' then error(title .. ' requires an argument list', 0) end
   for index = 1, #args do

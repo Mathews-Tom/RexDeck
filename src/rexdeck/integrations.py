@@ -65,6 +65,7 @@ _RESERVED = frozenset(
         "args",
         "layout",
         "selected_file",
+        "prerequisites",
     )
 )
 
@@ -180,6 +181,11 @@ class Integration:
             raise ValueError(
                 "Owned frontends must use isolated in-package module launch"
             )
+        if self.owned_module is not None and any(
+            name in _RESERVED or name == self.tool or not _TOOL.match(name)
+            for name, _ in self.prerequisites
+        ):
+            raise ValueError(f"{self.id} has an invalid prerequisite executable name")
         if self.context == "github-account" and self.owned_module is None:
             raise ValueError("GitHub account context requires an owned frontend")
         if self.context == "selected-file":
