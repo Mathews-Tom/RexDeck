@@ -17,7 +17,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import cast
 
-from rexdeck import lifecycle, settings
+from rexdeck import binding, lifecycle, settings
+
+# Hook receipts look these up through this module at call time.
+_block = binding.block
+_call = binding.call
 
 _MAX_BYTES = 2 * 1024 * 1024
 _MAX_ROWS = 256
@@ -370,38 +374,7 @@ def _save(
 
 
 def _status(setup: lifecycle.Setup) -> str:
-    current = lifecycle._server_status(setup, selected=True)
-    if (
-        current is None
-        or lifecycle._canonical_server(_text(current.get("endpoint"))) != setup.server
-    ):
-        raise RuntimeError("Selected attention endpoint is not available")
-    return _text(current.get("instance_id"))
-
-
-def _call(
-    setup: lifecycle.Setup, session: str, method: str, args: dict[str, object]
-) -> dict[str, object]:
-    return lifecycle._rex(setup, "api", "call", "-s", session, method, json.dumps(args))
-
-
-def _block(
-    setup: lifecycle.Setup, session: str, block: str
-) -> dict[str, object] | None:
-    sessions = lifecycle._rex(setup, "ls", "--json").get("sessions")
-    if not isinstance(sessions, list):
-        raise RuntimeError("Invalid Rex session list")
-    if not any(_object(item).get("session_id") == session for item in sessions):
-        return None
-    value = _call(setup, session, "session.list_blocks", {})
-    blocks = value.get("blocks") or []
-    if not isinstance(blocks, list):
-        raise RuntimeError("Invalid Rex block list")
-    for item in blocks:
-        candidate = _object(item)
-        if candidate.get("block_id") == block:
-            return candidate
-    return None
+    return binding.instance(setup, "attention")
 
 
 def observe(
@@ -608,15 +581,15 @@ def jump(target: settings.SavedTarget, identity: str) -> dict[str, object]:
             raise RuntimeError("Provider target is unbound; no focus attempted")
     # The retained row is a private in-memory snapshot. Never hold providers.lock
     # across Rex IPC: independent hook receipts must be able to update immediately.
-    if _status(setup) != row.get("instance_id"):
-        raise RuntimeError("Captured Rex server was replaced; no focus attempted")
+    binding.focus(
+        setup,
+        purpose="attention",
+        instance_id=row.get("instance_id"),
+        session=row.get("session_id"),
+        block_id=row.get("block_id"),
+        host_id=row.get("host_id"),
+    )
     session, block = _text(row.get("session_id")), _text(row.get("block_id"))
-    found = _block(setup, session, block)
-    if found is None or found.get("placement") != "placed":
-        raise RuntimeError("Exact target is closed or unbound; no focus attempted")
-    if found.get("host_id") != row.get("host_id"):
-        raise RuntimeError("Captured block host changed; no focus attempted")
-    _call(setup, session, "session.focus_block", {"block_id": block})
     return {"state": "focused", "session_id": session, "block_id": block}
 
 
