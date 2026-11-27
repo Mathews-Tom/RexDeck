@@ -22,12 +22,20 @@ INTEGRATION = Integration(
         "claim, close, reopen, move, delete) as your kata actor",
         "the Jobs and Workflows tabs create and edit cron jobs, agent-prompt jobs, "
         "workflows and notifications that kata's daemon or worker later runs",
-        "workflow definitions open in $VISUAL or $EDITOR from the Rex server's "
-        "environment",
+        "Ctrl+e on issue, comment, job and workflow text fields runs $VISUAL, else "
+        "$EDITOR, else vi, from the Rex server's environment on a temporary "
+        "kata-*.md file in $TMPDIR",
         "kata stores issues in its own database under KATA_HOME (default ~/.kata) "
         "or on a configured remote daemon; RexDeck adds no storage",
-        "kata commands auto-start kata's local daemon unless its config sets "
-        "autostart = false; that daemon also serves kata's local web UI",
+        "kata tui and other kata commands auto-start a local daemon under "
+        "KATA_HOME on first use (kata 0.23.0 has no setting to turn this off; "
+        "KATA_SERVER or a .kata.local.toml remote skips it); that daemon also "
+        "serves kata's local web UI on a loopback port",
+        "network: kata's daemon sends anonymous PostHog telemetry by default (opt "
+        "out with KATA_TELEMETRY_ENABLED=0 or DO_NOT_TRACK=1 in the Rex server's "
+        "environment before the daemon starts); the D daemon switcher and F "
+        "federation views can contact remote daemons and enroll projects with "
+        "catalog credentials",
         "RexDeck passes only the tui subcommand and the invoking directory; quit "
         "asks for confirmation unless kata's [tui] confirm_quit = false",
     ),
@@ -35,6 +43,6 @@ INTEGRATION = Integration(
     args=("tui",),
     enable_notice=(
         "Kata shows the project bound to the invoking directory; run kata init "
-        "there first, and kata daemon start if its daemon does not auto-start."
+        "there first. kata starts its local daemon on first use."
     ),
 )

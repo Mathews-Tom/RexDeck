@@ -26,7 +26,8 @@ REPORT = (
         ("kata v0.23.0", "0.23.0"),
         ("kata 0.23.0\n", None),
         ("kata v0.23\n", None),
-        ("  kata v0.23.0\n", None),
+        ("kata v0.23.0-rc1\n", None),
+        ("kata v0.23.0.1\n", None),
         ("kata-cli v0.23.0\n", None),
     ],
 )

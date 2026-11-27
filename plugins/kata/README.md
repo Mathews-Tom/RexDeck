@@ -8,7 +8,7 @@ Browse and triage the issues of the [kata](https://github.com/kenn-io/kata) proj
 
 - macOS arm64, a running Rex server and [RexDeck setup](../../README.md#getting-started).
 - Owner-installed **kata 0.23.0** on a trusted absolute `PATH` entry, from the [qualified upstream release](https://github.com/kenn-io/kata/releases/tag/v0.23.0) or Homebrew (`brew install kata`, qualified build `distribution: homebrew`). Check `kata --version`; the first line is `kata v0.23.0`. RexDeck never installs, upgrades or removes kata; missing and other versions are refused with manual installation guidance before registration.
-- A kata project bound to the directory you open it from: run `kata init` there once. kata starts its own local daemon on demand unless its configuration sets `autostart = false`; then run `kata daemon start` first. The pane runs with the **Rex server's environment**, so `KATA_HOME`, `KATA_SERVER` and similar variables come from there, not from your shell.
+- A kata project bound to the directory you open it from: run `kata init` there once. `kata tui` starts kata's local daemon under `KATA_HOME` on first use; kata 0.23.0 has no setting to turn that off, and `KATA_SERVER` or a `.kata.local.toml` remote selection skips it. The pane runs with the **Rex server's environment**, so `KATA_HOME`, `KATA_SERVER`, telemetry opt-outs and editor variables come from there, not from your shell.
 
 ## Enable and open
 
@@ -58,9 +58,11 @@ RexDeck passes only the `tui` subcommand. It adds no project, daemon, actor or c
 
 ## Capabilities and limits
 
-**This is not a read-only viewer.** `kata tui` creates, edits, comments on, labels, links, claims, closes, reopens, moves and deletes issues through kata's daemon as your kata actor. The Jobs and Workflows tabs create and edit cron jobs, agent-prompt jobs, workflows and notifications that kata's daemon or worker runs later. Workflow definitions open in `$VISUAL` or `$EDITOR` from the Rex server's environment.
+**This is not a read-only viewer.** `kata tui` creates, edits, comments on, labels, links, claims, closes, reopens, moves and deletes issues through kata's daemon as your kata actor. The Jobs and Workflows tabs create and edit cron jobs, agent-prompt jobs, workflows and notifications that kata's daemon or worker runs later. `Ctrl+e` on issue, comment, job and workflow text fields runs `$VISUAL`, else `$EDITOR`, else `vi`, from the Rex server's environment, on a temporary `kata-*.md` file in `$TMPDIR`.
 
-kata keeps issues in its own database under `KATA_HOME`, or on a configured remote daemon. Running kata commands can auto-start kata's local daemon, which also serves kata's local web UI on a loopback port. RexDeck adds no storage of its own.
+kata keeps issues in its own database under `KATA_HOME`, or on a configured remote daemon. `kata tui` auto-starts kata's local daemon on first use, and that daemon also serves kata's local web UI on a loopback port. RexDeck adds no storage of its own.
+
+**Network:** kata's daemon sends anonymous PostHog telemetry by default, including when `kata tui` starts it. Opt out with `KATA_TELEMETRY_ENABLED=0` or `DO_NOT_TRACK=1` in the Rex server's environment before the daemon starts; see kata's [telemetry reference](https://github.com/kenn-io/kata/blob/v0.23.0/docs/reference/configuration.md#reporting-rules). The `D` daemon switcher can connect to remote `[[daemon]]` catalog entries with their configured tokens and start stopped local profiles, and the `F` federation view can enroll a project in a hub. RexDeck passes none of these choices; they are kata's own controls.
 
 Qualification used an isolated lab HOME with its own `KATA_HOME` and kata daemon, and a private Rex endpoint. No issue writes were made from the pane; the lab daemon was stopped and its data removed afterwards.
 
