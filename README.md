@@ -53,6 +53,8 @@ Enable any of these by id with `rexdeck enable <id>`. Each name links to its gui
 | [Dashboard](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/dashboard/README.md) | `dashboard` | Open a Dashbrew board with script and API panels |
 | [ClickUp](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/clickup/README.md) | `clickup` | Browse a ClickUp list or space and apply reviewed task changes |
 | [Inbox](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/inbox/README.md) | `inbox` | Read unread GitHub notifications |
+| [Kata](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/kata/README.md) | `kata` | Browse, triage and edit kata issues with kata tui |
+| [Kata Desk](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/katadesk/README.md) | `katadesk` | Read kata issues and attention requests live, and run omp agents on an issue |
 | [Usage](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/usage/README.md) | `usage` | Explore omp token usage by model, session and project with tokscale |
 | [Focus](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/focus/README.md) | `focus` | Run a pomo work timer |
 | [Music](https://github.com/Mathews-Tom/RexDeck/blob/main/plugins/music/README.md) | `music` | Browse Spotify playlists and control playback with spotify_player |

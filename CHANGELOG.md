@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0 — 2026-11-28
+
+Upgrading: the shared host changed, so run `rexdeck enable <id>` for every enabled integration after installing 0.7.0. `rexdeck plugins` reports each of them as `outdated` and prints one `rexdeck enable …` command that refreshes them all. Inbox and Actions now also record the absolute paths of their prerequisites (`gh`, and `git` for Actions) at enable.
+
+### New plugins
+
+- Kata: browse, triage and edit the invoking directory's [kata](https://github.com/kenn-io/kata) issues in `kata tui`, pinned to kata 0.23.0.
+- Kata Desk: a RexDeck-owned view of the bound kata project's issues, nested under their parents, plus the attention requests addressed to you across every project. It updates live from one `kata events` stream while open and never starts kata's daemon.
+
+### Features
+
+- Kata Desk agents: start an [omp](https://omp.sh) agent on an open issue in a split, a new window or a shared `Kata agents` background window, in the desk's directory with `KATA_REF` set and a prompt describing kata's agent loop. A live badge read from Rex program status shows working, waiting for you, done, exited or state unknown. `g` focuses an agent, `n` jumps to the one that most recently began waiting, and `x` stops only its block after confirmation. Agents are identified only by Rex's server, session, block and host IDs, keep running after the desk quits, and are listed again when it reopens. Agents are write-capable: they write to kata as your actor.
+- Owned views now get their declared prerequisites checked at enable, like hosted tools. Their absolute paths are recorded, and the pane starts with their directories first on `PATH`, so the app-started Rex server's minimal `PATH` no longer hides them. Enable refuses bindings that this order would shadow.
+
 ## 0.6.2 — 2026-11-11
 
 Upgrading: the shared host changed, so run `rexdeck enable <id>` for every enabled integration after installing 0.6.2. `rexdeck plugins` reports each of them as `outdated` and prints one `rexdeck enable …` command that refreshes them all.
