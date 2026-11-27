@@ -14,6 +14,19 @@ Upgrading: the shared host changed, so run `rexdeck enable <id>` for every enabl
 - Kata Desk agents: start an [omp](https://omp.sh) agent on an open issue in a split, a new window or a shared `Kata agents` background window, in the desk's directory with `KATA_REF` set and a prompt describing kata's agent loop. A live badge read from Rex program status shows working, waiting for you, done, exited or state unknown. `g` focuses an agent, `n` jumps to the one that most recently began waiting, and `x` stops only its block after confirmation. Agents are identified only by Rex's server, session, block and host IDs, keep running after the desk quits, and are listed again when it reopens. Agents are write-capable: they write to kata as your actor.
 - Owned views now get their declared prerequisites checked at enable, like hosted tools. Their absolute paths are recorded, and the pane starts with their directories first on `PATH`, so the app-started Rex server's minimal `PATH` no longer hides them. Enable refuses bindings that this order would shadow.
 
+### Publication
+
+- Published the owner-approved main-CI wheel and sdist to GitHub and PyPI:
+  - commit `3befc25`, artifact `15229174611`
+  - annotated tag `v0.7.0`
+  - [protected publish run 46064795084](https://github.com/Mathews-Tom/RexDeck/actions/runs/46064795084)
+
+  The public hashes match the approved pair. A no-cache public-index install lists all 27 plugins.
+
+  Both wheels passed native smoke tests in a private Rex lab: enable, render, quit back to the exact origin, and disable. The candidate covered json, system, logs, deps, kata and katadesk, each also resized to 40 columns; the public PyPI wheel covered json, kata and katadesk.
+
+  An in-place upgrade from 0.6.2 reported the enabled integrations as `outdated` with one combined fix command. Running it returned them to `ready`.
+
 ## 0.6.2 — 2026-11-11
 
 Upgrading: the shared host changed, so run `rexdeck enable <id>` for every enabled integration after installing 0.6.2. `rexdeck plugins` reports each of them as `outdated` and prints one `rexdeck enable …` command that refreshes them all.
