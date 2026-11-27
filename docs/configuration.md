@@ -60,6 +60,7 @@ Each guide's **Configuration** section names the exact files, the environment va
 | [Dashboard](../plugins/dashboard/README.md#configuration) | The selected board JSON; Dashbrew themes in `DASHBREW_THEMES_DIR` or `dashbrew/themes` |
 | [ClickUp](../plugins/clickup/README.md#configuration) | RexDeck: `$XDG_CONFIG_HOME/rexdeck/clickup.json` (default `~/.config/rexdeck/clickup.json`), written by `rexdeck clickup select`; token from a named environment variable (default `CLICKUP_API_TOKEN`) |
 | [Inbox](../plugins/inbox/README.md#configuration) | GitHub CLI: `GH_CONFIG_DIR`, `$XDG_CONFIG_HOME/gh` or `~/.config/gh`; filters are pane-local |
+| [Kata](../plugins/kata/README.md#configuration) | kata: `<KATA_HOME>/config.toml` (default `~/.kata/config.toml`) plus the workspace's `.kata.toml` and `.kata.local.toml` |
 | [Usage](../plugins/usage/README.md#configuration) | tokscale: `~/.config/tokscale/settings.json` (or `TOKSCALE_CONFIG_DIR`) |
 | [Focus](../plugins/focus/README.md#configuration) | pomo: a trusted local `pomo.yaml` overrides `~/.config/pomo/pomo.yaml` |
 | [Music](../plugins/music/README.md#configuration) | spotify_player: `~/.config/spotify-player/` (`app.toml`, `keymap.toml`, `theme.toml`) |
