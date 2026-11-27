@@ -314,10 +314,30 @@ def _selected_tools(setup: Setup) -> dict[str, str]:
     if integration.owned_module is not None:
         tools = _tools(integration.tool, owned=True)
         # The app-started Rex server's PATH is minimal, so the pane gets these first.
-        for name in _owned_prerequisites(integration):
+        names = _owned_prerequisites(integration)
+        for name in names:
             tools[name] = _executable(name)
+        _require_unshadowed({name: tools[name] for name in names})
         return tools
     return _tools(integration.tool)
+
+
+def _require_unshadowed(bound: dict[str, str]) -> None:
+    """Refuse bindings the pane PATH would not reach.
+
+    The host prepends each prerequisite's directory in name order, so one
+    directory can hold a same-named executable that hides a later binding.
+    """
+    order = list(dict.fromkeys(os.path.dirname(bound[name]) for name in sorted(bound)))
+    search_path = os.pathsep.join(order)
+    for name, path in bound.items():
+        found = shutil.which(name, path=search_path)
+        if found is None or str(Path(found).absolute()) != path:
+            raise RuntimeError(
+                f"{name} is bound to {path}, but the pane would run {found} first; "
+                f"remove or rename that {name}, or put {os.path.dirname(path)} earlier "
+                "on PATH, then rerun enable"
+            )
 
 
 def _require_qualified_tool(

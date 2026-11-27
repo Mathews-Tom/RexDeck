@@ -27,12 +27,16 @@ return function(opts)
     end
     paths[key] = value
   end
+  -- `/NAME` lives in `/`; anything else must be an absolute `/DIRECTORY/NAME`.
+  local function parent(value)
+    if not nonempty(value) then return nil end
+    return value:match('^(/.*)/[^/]+$') or (value:match('^/[^/]+$') and '/')
+  end
   -- An `#!/usr/bin/env NAME` tool keeps the interpreter qualified with it: the app-started
   -- server's PATH is minimal, so the pane gets that interpreter's directory first.
   local path_prepend = nil
   if opts.interpreter ~= nil then
-    local value = opts.interpreter
-    local directory = nonempty(value) and value:match('^(/.*)/[^/]+$')
+    local directory = parent(opts.interpreter)
     if not directory then error(title .. ' requires an absolute interpreter path', 0) end
     path_prepend = {directory}
   end
@@ -50,8 +54,7 @@ return function(opts)
     local seen = {}
     for _, directory in ipairs(path_prepend) do seen[directory] = true end
     for _, name in ipairs(names) do
-      local value = opts.prerequisites[name]
-      local directory = nonempty(value) and value:match('^(/.*)/[^/]+$')
+      local directory = parent(opts.prerequisites[name])
       if not directory then error(title .. ' requires an absolute ' .. name .. ' path', 0) end
       if not seen[directory] then
         seen[directory] = true

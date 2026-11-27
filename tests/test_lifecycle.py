@@ -375,6 +375,12 @@ action.run({session_id = "session", block_id = "origin"}, {account = "octo"})
         self.assertEqual(prepended(), "/opt/gh/bin")
         receipt = json.loads((inbox.workspace / "inbox/setup.json").read_text())
         self.assertEqual(receipt["tools"], bound)
+        # An executable directly under / binds the root directory.
+        rooted = {**before, "gh": "/gh"}
+        with patch.object(life, "_selected_tools", return_value=rooted):
+            life.apply_setup(inbox)
+            life.start(inbox)
+        self.assertEqual(prepended(), "/")
 
     def test_oversized_planned_config_is_rejected_before_owned_writes(self) -> None:
         self.target.write_bytes(b"--" + b"x" * (life._MAX_READ - 2))
@@ -1183,6 +1189,37 @@ class ProcessBoundaryTests(unittest.TestCase):
             self.assertIs(signal.getsignal(signal.SIGALRM), expired)
         finally:
             signal.signal(signal.SIGALRM, previous)
+
+    def test_enable_refuses_prerequisites_the_pane_path_would_shadow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            actions = life.Setup(
+                root,
+                root,
+                root / "rex.lua",
+                root / "data",
+                "unix:///x",
+                plugin="actions",
+            )
+            shared, late = root / "shared", root / "late"
+            for directory, names in ((shared, ("rex", "gh", "git")), (late, ("git",))):
+                directory.mkdir()
+                for name in names:
+                    (directory / name).write_text("#!/bin/sh\n")
+                    (directory / name).chmod(0o755)
+            # One directory for both: a single prepended entry reaches both bindings.
+            with patch.dict(os.environ, {"PATH": str(shared)}):
+                tools = life._selected_tools(actions)
+            self.assertEqual(
+                (tools["gh"], tools["git"]), (str(shared / "gh"), str(shared / "git"))
+            )
+            # git is bound from `late`, but gh sorts first and its directory has a git.
+            search = os.pathsep.join((str(late), str(shared)))
+            with patch.dict(os.environ, {"PATH": search}):
+                with self.assertRaisesRegex(
+                    RuntimeError, "git is bound to .*/late/git"
+                ):
+                    life._selected_tools(actions)
 
     def test_rex_environment_removes_ambient_targets(self) -> None:
         setup = life.Setup(

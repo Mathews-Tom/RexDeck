@@ -69,7 +69,7 @@ To host another installed interactive terminal tool, add two files, and do not c
   - the executable name, resolved from absolute `PATH` entries
   - qualified versions, with the version-report pattern
   - the release URL and upstream license
-  - any extra preinstalled prerequisites, with their install source. Enable refuses a missing prerequisite. For an owned view, which runs its prerequisites itself, enable also records their absolute paths and the pane starts with their directories first on `PATH`, because the app-started Rex server's `PATH` is minimal
+  - any extra preinstalled prerequisites, with their install source. Enable refuses a missing prerequisite. For an owned view, which runs its prerequisites itself, enable also records their absolute paths and the pane starts with their directories first on `PATH`, in prerequisite-name order, because the app-started Rex server's `PATH` is minimal. Enable refuses bindings that order would not reach, such as a `git` in `gh`'s directory hiding the recorded `git`
 - **Context:**
   - `directory`: the invoking terminal's validated cwd.
   - `git-worktree`: that cwd plus Git's own discovery; inherited repository redirection is refused.
