@@ -89,8 +89,6 @@ def _manual(integration: integrations.Integration) -> str:
 def ensure(plugin: str) -> lifecycle.QualifiedTool:
     """Validate only the selected preinstalled tool; never prompt or run an installer."""
     integration = integrations.get(plugin)
-    if integration.owned_module is not None:
-        return lifecycle.QualifiedTool.capture(str(Path(sys.executable).absolute()))
     for prerequisite, source in integration.prerequisites:
         name = prerequisite.capitalize()
         if _resolve(prerequisite) is None:
@@ -100,6 +98,8 @@ def ensure(plugin: str) -> lifecycle.QualifiedTool:
                 f"{name} using {source}, make {prerequisite} available on PATH, then "
                 f"rerun: rexdeck enable {plugin}. RexDeck never installs {name}"
             )
+    if integration.owned_module is not None:
+        return lifecycle.QualifiedTool.capture(str(Path(sys.executable).absolute()))
     tool = integration.tool
     executable = _resolve(tool)
     if executable is None:

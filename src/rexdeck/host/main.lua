@@ -27,14 +27,40 @@ return function(opts)
     end
     paths[key] = value
   end
+  -- `/NAME` lives in `/`; anything else must be an absolute `/DIRECTORY/NAME`.
+  local function parent(value)
+    if not nonempty(value) then return nil end
+    return value:match('^(/.*)/[^/]+$') or (value:match('^/[^/]+$') and '/')
+  end
   -- An `#!/usr/bin/env NAME` tool keeps the interpreter qualified with it: the app-started
   -- server's PATH is minimal, so the pane gets that interpreter's directory first.
   local path_prepend = nil
   if opts.interpreter ~= nil then
-    local value = opts.interpreter
-    local directory = nonempty(value) and value:match('^(/.*)/[^/]+$')
+    local directory = parent(opts.interpreter)
     if not directory then error(title .. ' requires an absolute interpreter path', 0) end
     path_prepend = {directory}
+  end
+  -- Owned views run their enable-qualified prerequisites themselves; the same minimal
+  -- PATH would hide them, so their directories follow, in name order, without repeats.
+  if opts.prerequisites ~= nil then
+    if type(opts.prerequisites) ~= 'table' then error(title .. ' has invalid prerequisites', 0) end
+    local names = {}
+    for name in pairs(opts.prerequisites) do
+      if not nonempty(name) then error(title .. ' has an invalid prerequisite name', 0) end
+      names[#names + 1] = name
+    end
+    table.sort(names)
+    path_prepend = path_prepend or {}
+    local seen = {}
+    for _, directory in ipairs(path_prepend) do seen[directory] = true end
+    for _, name in ipairs(names) do
+      local directory = parent(opts.prerequisites[name])
+      if not directory then error(title .. ' requires an absolute ' .. name .. ' path', 0) end
+      if not seen[directory] then
+        seen[directory] = true
+        path_prepend[#path_prepend + 1] = directory
+      end
+    end
   end
   local args = opts.args
   if type(args) ~= 'table' then error(title .. ' requires an argument list', 0) end

@@ -315,6 +315,73 @@ action.run({session_id = "session", block_id = "origin"})
         tools["interpreter"] = "/home/u/.nvm/versions/node/v23/bin/node"
         self.assertEqual(prepended(tools), "/home/u/.nvm/versions/node/v23/bin")
 
+    def test_owned_view_reaches_enable_bound_prerequisites_and_old_receipts_upgrade(
+        self,
+    ) -> None:
+        # Inbox is an owned view that runs gh itself under the server's minimal PATH.
+        inbox = replace(self.setup, plugin="inbox")
+        module = inbox.data_root / "plugins/inbox/rexdeck_inbox.lua"
+        harness = self.root / "owned-split-request.lua"
+        harness.write_text(
+            r"""
+local action
+rex = {
+  action = function(value) action = value end,
+  call = function(name)
+    if name == "session.attach" then return {} end
+    return {pwd = arg[2]}
+  end,
+  exec = function() return {ok = true, stdout = "{}"} end,
+  json = {
+    encode = function() return "{}" end,
+    decode = function() return {cwd = arg[2], target = arg[2], selection = "{}"} end,
+  },
+  session = {new_split = function(request)
+    local prepend = request.layout.block.options.path_prepend
+    print(prepend == nil and "<none>" or table.concat(prepend, ":"))
+    return {block_ids = {"launched"}}
+  end},
+}
+dofile(arg[1])
+action.run({session_id = "session", block_id = "origin"}, {account = "octo"})
+"""
+        )
+
+        def prepended() -> str:
+            result = subprocess.run(
+                [self.lua, str(harness), str(module), str(self.root)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip()
+
+        before = {"python": sys.executable, "rex": "/rex", "rexdeck-inbox": "/py"}
+        with patch.object(life, "_selected_tools", return_value=before):
+            life.apply_setup(inbox)
+            life.start(inbox)
+        self.assertEqual(prepended(), "<none>")
+        bound = {**before, "gh": "/opt/gh/bin/gh"}
+        with patch.object(life, "_selected_tools", return_value=bound):
+            # A receipt written before prerequisites were bound reads as outdated.
+            row = life.status(inbox)
+            self.assertEqual(row["state"], "outdated")
+            self.assertEqual(row["fix"], "rexdeck enable inbox")
+            life.apply_setup(inbox)
+            life.start(inbox)
+            self.assertEqual(life.status(inbox)["state"], "ready")
+        self.assertEqual(prepended(), "/opt/gh/bin")
+        receipt = json.loads((inbox.workspace / "inbox/setup.json").read_text())
+        self.assertEqual(receipt["tools"], bound)
+        # An executable directly under / binds the root directory.
+        rooted = {**before, "gh": "/gh"}
+        with patch.object(life, "_selected_tools", return_value=rooted):
+            life.apply_setup(inbox)
+            life.start(inbox)
+        self.assertEqual(prepended(), "/")
+
     def test_oversized_planned_config_is_rejected_before_owned_writes(self) -> None:
         self.target.write_bytes(b"--" + b"x" * (life._MAX_READ - 2))
         before = self.snapshot()
@@ -1122,6 +1189,37 @@ class ProcessBoundaryTests(unittest.TestCase):
             self.assertIs(signal.getsignal(signal.SIGALRM), expired)
         finally:
             signal.signal(signal.SIGALRM, previous)
+
+    def test_enable_refuses_prerequisites_the_pane_path_would_shadow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            actions = life.Setup(
+                root,
+                root,
+                root / "rex.lua",
+                root / "data",
+                "unix:///x",
+                plugin="actions",
+            )
+            shared, late = root / "shared", root / "late"
+            for directory, names in ((shared, ("rex", "gh", "git")), (late, ("git",))):
+                directory.mkdir()
+                for name in names:
+                    (directory / name).write_text("#!/bin/sh\n")
+                    (directory / name).chmod(0o755)
+            # One directory for both: a single prepended entry reaches both bindings.
+            with patch.dict(os.environ, {"PATH": str(shared)}):
+                tools = life._selected_tools(actions)
+            self.assertEqual(
+                (tools["gh"], tools["git"]), (str(shared / "gh"), str(shared / "git"))
+            )
+            # git is bound from `late`, but gh sorts first and its directory has a git.
+            search = os.pathsep.join((str(late), str(shared)))
+            with patch.dict(os.environ, {"PATH": search}):
+                with self.assertRaisesRegex(
+                    RuntimeError, "git is bound to .*/late/git"
+                ):
+                    life._selected_tools(actions)
 
     def test_rex_environment_removes_ambient_targets(self) -> None:
         setup = life.Setup(
